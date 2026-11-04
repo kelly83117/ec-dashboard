@@ -2857,6 +2857,23 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-guide-more > summary::after { content: ' ▸'; }
 .hl-guide-more[open] > summary::after { content: ' ▾'; }
 .hl-guide-full { margin-top: 8px; }
+/* 「看完整規則」表格（塊 2）：固定欄寬＋可換行，彈窗再窄也不出現橫向捲軸。css/profit.css 的全域 th / td（靠右、不換行、大寫、hover 色）這裡全部設回。 */
+.hl-gt-from { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.hl-gt { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.hl-gt th, .hl-gt td { padding: 8px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; line-height: 1.6; }
+.hl-gt th { font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
+.hl-gt th:hover { color: var(--text-muted); }
+.hl-gt-c1 { width: 25%; }
+.hl-gt-c2 { width: 25%; }
+.hl-gt-c3 { width: 50%; }
+.hl-gt-lines { margin: 0; padding: 0; list-style: none; }
+.hl-gt-lines li + li { margin-top: 4px; }
+.hl-gt-i { padding: 0 2px; border: 0; background: none; color: var(--info); font: inherit; cursor: pointer; }
+.hl-gt-i:hover, .hl-gt-i:focus-visible, .hl-gt-i[aria-expanded="true"] { color: var(--primary); }
+.hl-gt .hl-gt-detail td { background: var(--primary-soft); font-size: 12px; }
+.hl-gt-detail-list { margin: 0; padding-left: 18px; }
+.hl-gt-detail-list li + li { margin-top: 4px; }
+.hl-gt-note { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--text); }
 .hl-tile-detail .hl-card { margin: 0; }
 /* 頁面最下方「另有 N 個通路沒有分數」：展開後通路名可點（展開細項） */
 .hl-unrated { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
@@ -2924,6 +2941,11 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-info-inline[open] .hl-info-body { display: block; white-space: normal; }
 /* ⓘ 兩層（2026-11-03）：第一行一句白話；「看算法」點了才展開公式、來源、提醒 */
 .hl-info-short { font-size: 12px; }
+/* 塊 2 補充：名稱旁的 ⓘ（商品燈號、比上月與趨勢、狀態的意思）。標題是粗體／彩色，展開內容設回一般字。 */
+.hl-help .hl-info-body { max-width: min(420px, 100%); font-size: 12px; font-weight: 400; }
+.hl-help-list { margin: 0; padding-left: 16px; }
+.hl-help-list li + li { margin-top: 4px; }
+.hl-unrated-why { margin-bottom: 2px; }
 .hl-more { margin-top: 4px; }
 .hl-info .hl-more > summary { display: block; font-size: 11px; color: var(--info); }
 .hl-more > summary::after { content: ' ▸'; }
