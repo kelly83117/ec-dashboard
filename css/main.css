@@ -2750,7 +2750,40 @@
 .hl-page .page-header p { max-width: 820px; }
 /* 標題列：左邊標題＋說明、右邊「📖 怎麼看這頁」；窄螢幕按鈕掉到下一行（同庫存頁 .inv-hd） */
 .hl-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.hl-guide-btn { white-space: nowrap; }
+.hl-guide-btn { margin-left: auto; white-space: nowrap; }
+.hl-std-btn { white-space: nowrap; }
+/* 評分標準設定視窗（塊 4）：表格可在視窗內橫捲，視窗本身不出現橫向捲軸。css/profit.css 的全域 th / td（靠右、不換行、大寫）這裡設回。 */
+.hl-std { font-size: 13px; color: var(--text); }
+.hl-std-field { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.hl-std-field select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; }
+.hl-std-note { margin-top: 6px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 12px; }
+.hl-std-wrap { margin-top: 10px; max-width: 100%; overflow-x: auto; }
+.hl-std-tbl { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 13px; }
+.hl-std-tbl th, .hl-std-tbl td { padding: 6px; text-align: left; vertical-align: top; white-space: normal; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.hl-std-tbl th { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
+.hl-std-tbl th:hover { color: var(--text-muted); }
+.hl-std-c1 { width: 130px; }
+.hl-std-tname { font-weight: 600; }
+.hl-std-chname { padding-left: 18px; color: var(--text-muted); }
+.hl-std-toggle { display: block; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--info); font: inherit; font-size: 11px; font-weight: 400; cursor: pointer; }
+.hl-std-3 { display: flex; gap: 4px; }
+.hl-std-in { box-sizing: border-box; width: 56px; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.hl-std-in:disabled, .hl-std-notein:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+.hl-std-lock { color: var(--text-muted); font-size: 12px; }
+.hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
+.hl-std-err:empty { display: none; }
+.hl-std-tip { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
+.hl-std-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; }
+.hl-std-w { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.hl-std-notein { box-sizing: border-box; flex: 1 1 200px; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.hl-std-msg { margin-top: 10px; font-size: 13px; }
+.hl-std-msg:empty { display: none; }
+.hl-std-msg-err { color: var(--danger); font-weight: 600; }
+.hl-std-readonly { margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+.hl-std-ftr { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.hl-std-save { width: auto; padding: 8px 18px; }
+.hl-std-cline { margin: 0 0 8px; }
+.hl-std-lost { margin: 8px 0; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--text); font-size: 13px; }
 .hl-mock-banner, .hl-warn { margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; }
 .hl-mock-banner { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
 .hl-warn { background: var(--info-soft); color: var(--info); }

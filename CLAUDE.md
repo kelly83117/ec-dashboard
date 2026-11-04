@@ -239,7 +239,7 @@ ESM 有個致命陷阱必須牢記：
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
 - `app/health_rules` — 通路健檢的評分標準版本（「從某個月開始適用」，過去月份照舊標準），**不放 app/main**。透過 `window.__cloudHealthRules`：
-  讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。**目前全 repo 沒有呼叫寫入的地方**，之後只有評分標準設定頁會寫、只限管理員。
+  讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。**寫入只有 health.js `_hlStdSave`**（評分標準設定視窗，只限管理員）。
   形狀 `{ schema:1, versions:{ 'YYYY-MM':{ from:'YYYY-MM', items:{ pureRate:{ w, lines, linesByChannel?, provisional? }, sellThrough:{…} }, note, by, byName, at } } }`；
   note／by／byName／at 不參與驗證。文件不存在＝沒有版本，全部用 BASE。任何一版不合法（含 key 跟 from 不同、schema 不是 1）⇒ 整份不用、退回 BASE、warn 一次。
   `subscribe` 跟 `__cloudInventory` 差兩點：開 `includeMetadataChanges`、cb 多傳 `{ fromCache }`（健檢頁要分辨伺服器快照；沒開 IndexedDB persistence，離線可能先送 fromCache 的空快照）。
@@ -255,7 +255,10 @@ ESM 有個致命陷阱必須牢記：
   ⚠ 不能用 `momoLoadProducts().length` 判斷 MOMO 到齊（它會退回讀 localStorage 舊資料），要看 `Store._profitMem`。之後的資料更新事件會自動重算。
   MOMO 逐商品利潤＝MOMO 總表「淨利貢獻」欄：`momoAggregatePeriods` 之後一定要再跑 `momoStage4Redistribute`（同總表 render），只用前者逐列會對不上。
   拖累清單跳淨利表走 `__profitOpenAt`：不寫持久狀態（蝦皮的 ec_lastMonth 先存後還原、搜尋不走 setSearch），只寫跟使用者點通路一樣的 ec_profitView／ec_curShop。
-  評分標準依月份查版本：`healthRulesForMonth(month, versions)`；BASE＝寫死的 `HEALTH_RULES`（從 `firstMonth` 起適用）；通路可各自覆蓋（`linesByChannel`），查線順序＝通路自己的 → 類型的 → 標準未設定。每版要寫完整（兩項都要有 `w`、`lines`），不沿用前一版：沒寫到的類型／通路就是標準未設定（`provisional` 選填，沒寫沿用 BASE）。版本清單從 `app/health_rules` 來（掛在 `snap.healthRuleVersions`），目前還沒有設定頁，文件不存在時所有月份都用 BASE。
+  評分標準設定視窗（頁首「⚙ 評分標準」，`_hlStdOpen`）：所有人看得到完整表格；非管理員、唯讀帳號輸入框全停用、沒有存檔鈕。只有管理員能存，存檔函式 `_hlStdSave` 自己再檢查一次管理員與 `App.isReadOnly()`（Firestore 規則全開，這只是前端防呆）。
+  存檔流程：確認內容（同一個視窗內切換，不另開 modal，表單才留得住）→ `__cloudHealthRules.getDoc()` 讀伺服器現值跟開窗時比對（不同就不寫；讀到 fromCache 當讀取失敗）→ 🔴 **一次 `writePaths` 整份寫入** `schema` 與 `versions.<from>`（分多次訂閱端會收到半份版本、判不合法、全公司閃回預設；`at` 用 `Date.now()`）→ 讀回比對。任何一步失敗都留在視窗、內容保留、Console 印 payload。檢查規則不另寫：共用 `_hlLinesBad`／`_hlWeightBad`／`_hlWeightsSumBad`，存前再跑 `_hlBuildRuleChain`。
+  有改過還沒存時，點背景、✕、取消、切月份都先在同一個視窗問「要放棄這些修改嗎？」。背景和 ✕ 是全站共用的 handler，靠 health.js `_hlStdCloseGuard`（document 捕獲階段）只攔這個視窗，沒有動 modal.js。
+  評分標準依月份查版本：`healthRulesForMonth(month, versions)`；BASE＝寫死的 `HEALTH_RULES`（從 `firstMonth` 起適用）；通路可各自覆蓋（`linesByChannel`），查線順序＝通路自己的 → 類型的 → 標準未設定。每版要寫完整（兩項都要有 `w`、`lines`），不沿用前一版：沒寫到的類型／通路就是標準未設定（`provisional` 選填，沒寫沿用 BASE）。版本清單從 `app/health_rules` 來（掛在 `snap.healthRuleVersions`），文件不存在時所有月份都用 BASE。
   分數一律依規則當場重算；改 BASE 任何門檻要升 `version`（目前 `v5-2026-11`：總分只看 `score` 的純利率、動銷率兩項；舊面向的門檻：獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
   廣告效率、商品結構是 v4 校準值（方案 §2-5、§2-7-2）；毛利率、低利商品營收占比只顯示、不計分；
   動銷率依類型，樣本少於 6 筆的類型標「樣本少」（`stFlag:'few'`），蝦皮等塊 C 資料標「待校準」（`stFlag:'uncal'`））。

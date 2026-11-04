@@ -4,7 +4,7 @@
  *
  * 方案：docs/plan-channel-health.md（§1-1／§1-2 範圍、§2 規則、§3 動銷率口徑、§4 畫面）。
  * 路由 'health'：【不是部門】（不走 office-），不碰 ec.departments / canAccessOffice / OFFICE_FEATURES；所有登入者都能看（app.js _isRouteAllowed）。
- * 這一頁只讀：不寫雲端、不寫 Store。評分標準版本讀 app/health_rules（window.__cloudHealthRules，firebase.js；進這頁才訂閱，寫入只有設定頁）。分數一律當場依「那個月適用的評分標準」（healthRulesForMonth）重算，不存檔；同樣的資料一定得到同樣的分數。
+ * 看的部分只讀：不寫 Store。評分標準版本讀 app/health_rules（window.__cloudHealthRules，firebase.js；進這頁才訂閱）；這一頁唯一的寫入是評分標準設定視窗 _hlStdSave（只限管理員）。分數一律當場依「那個月適用的評分標準」（healthRulesForMonth）重算，不存檔；同樣的資料一定得到同樣的分數。
  * 資料：KPI 月結經 profit.js 的唯讀轉接 window.__healthKpiSnapshot(months)（口徑＝KPI 頁：_kpiShopCalc／_kpiRealRev／_kpiCommonColTotals）。
  *   商品層（塊 B）經 window.__healthLoadProducts(平台)（載訂閱組並等到齊）＋ window.__healthProductSnapshot(平台, 通路, 月)（同步、只讀）。
  *   profit.js 是動態載入：進頁先 await window.__ensureProfit()，載完再 render（同 daily.js / offices.js）。
@@ -237,6 +237,9 @@ function _hlLinesBad(a) {
   if (!(a[0] >= a[1] && a[1] >= a[2])) return '要由高到低';
   return '';
 }
+// 權重規則（版本驗證與設定視窗共用，不另寫一套）
+const _hlWeightBad = w => !(_hlFinite(w) && w > 0);
+const _hlWeightsSumBad = sum => Math.abs(sum - 1) > 1e-9;
 // 一版本身的問題（回字串陣列，空＝沒問題）。每版要寫完整：每個計分項目都要有 w 和 lines（linesByChannel 可省略＝沒有通路覆蓋）。
 function _hlVersionProblems(v) {
   if (!_hlIsObj(v)) return ['不是物件'];
@@ -252,7 +255,7 @@ function _hlVersionProblems(v) {
     if (!_hlIsObj(it)) { out.push(`${k} 不是物件`); return; }
     Object.keys(it).forEach(f => { if (['w', 'lines', 'linesByChannel', 'provisional'].indexOf(f) < 0) out.push(`${k} 有不認得的欄位（${f}）`); });
     if (!_hlHas(it, 'w')) out.push(`${k} 缺權重（每版要寫完整）`);
-    else if (!(_hlFinite(it.w) && it.w > 0)) out.push(`${k} 權重要 > 0（${it.w}）`);
+    else if (_hlWeightBad(it.w)) out.push(`${k} 權重要 > 0（${it.w}）`);
     if (!_hlHas(it, 'lines')) out.push(`${k} 缺 lines（每版要寫完整）`);
     if (_hlHas(it, 'provisional') && typeof it.provisional !== 'boolean') out.push(`${k} provisional 要是 true／false（${it.provisional}）`);
     [['lines', false], ['linesByChannel', true]].forEach(([f, byChannel]) => {
@@ -301,7 +304,7 @@ function _hlBuildRuleChain(versions) {
   versions.map((v, i) => ({ v, i })).sort((a, b) => (a.v.from < b.v.from ? -1 : 1)).forEach(({ v, i }) => {
     const R = _hlRulesFromVersion(v);
     const sum = R.score.items.reduce((a, it) => a + it.w, 0);
-    if (Math.abs(sum - 1) > 1e-9) problems.push(`${tag(v, i)}：權重加總要等於 1（現在是 ${sum}）`);
+    if (_hlWeightsSumBad(sum)) problems.push(`${tag(v, i)}：權重加總要等於 1（現在是 ${sum}）`);
     chain.push(R);
   });
   return problems.length ? { chain: [], problems } : { chain, problems };
@@ -320,6 +323,12 @@ function _hlRuleChain(versions) {
     _hlRuleChains.set(sig, hit);
   }
   return hit;
+}
+// key 排序過的 JSON：比對雲端內容用（Firestore 讀回來的欄位順序不保證；同 daily.js _adjStableJson）。
+function _hlStableJson(v) {
+  if (Array.isArray(v)) return '[' + v.map(_hlStableJson).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _hlStableJson(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
 }
 // app/health_rules 文件 → healthRulesForMonth 要的陣列（依 from 排序）。文件不存在、沒有 versions ⇒ 空清單。
 //   文件形狀：{ schema:1, versions:{ 'YYYY-MM':{ from, items, note, by, byName, at } } }。note／by／byName／at 不參與驗證，留在版本物件上給之後顯示用。
@@ -2457,6 +2466,7 @@ function _hlOnClick(e) {
     else if (act.dataset.hlAct === 'tagsmore' && act.dataset.hlList) { _hlState.tagsMore = Object.assign({}, _hlState.tagsMore, { [act.dataset.hlList]: !(_hlState.tagsMore || {})[act.dataset.hlList] }); App.render(); }
     else if (act.dataset.hlAct === 'todoall' && act.dataset.hlCh) { _hlState.todoAll = _hlState.todoAll === act.dataset.hlCh ? null : act.dataset.hlCh; App.render(); }
     else if (act.dataset.hlAct === 'guide' && typeof App.openModal === 'function') App.openModal({ title: '📖 通路健檢 · 怎麼看這頁', width: '640px', hideFooter: true, bodyHtml: _hlGuideModalHtml(_hlSelectedRules(), { openFull: act.dataset.hlGuideFull === '1' }), onMount: _hlGuideBindInfo });
+    else if (act.dataset.hlAct === 'std' && typeof App.openModal === 'function') _hlStdOpen();
     else if (act.dataset.hlAct === 'loadprod' && act.dataset.hlPlatform) {
       if (_hlProd.state[act.dataset.hlPlatform] === 'timeout') _hlProd.state[act.dataset.hlPlatform] = 'idle';
       _hlEnsurePlatform(act.dataset.hlPlatform); App.render();
@@ -2541,13 +2551,332 @@ function _hlOnChange(e) {
   App.render();
 }
 
+/* ---------- 評分標準設定視窗（塊 4）：大家可看、只有管理員能存 ----------
+ *   寫入只有 _hlStdSave：先讀伺服器比對 → 一次 writePaths 整份寫 → 讀回比對。檢查規則不另寫：表單用 _hlLinesBad／_hlWeightBad／_hlWeightsSumBad，
+ *   存之前再把整份版本丟進 _hlBuildRuleChain 驗（跟 healthRulesForMonth 同一套）。
+ *   🔴 確認內容放在同一個視窗裡切換（不另開 modal）：App.openModal 只有一個 #modal，另開會把表單整個換掉，失敗時填好的內容就回不來了。
+ *   事件全部走 data-hl-std-act ＋ 開窗時綁在視窗內容上（彈窗不在 #main-content 裡），不寫 inline handler。 */
+const _hlStd = { from: '', open: {}, baseline: '', versions: [], root: null, busy: false, pending: null, formSig: '', askThen: null, askPrev: '', guardBound: false };
+const _hlStdIsAdmin = () => !!(App.currentUser && App.currentUser.role === 'admin');
+const _hlStdIsRO = () => typeof App.isReadOnly === 'function' && !!App.isReadOnly();
+const _hlStdCanEdit = () => _hlStdIsAdmin() && !_hlStdIsRO();
+const _hlStdCloudReady = () => !_hlMock && _hlRules.state === 'ready' && !!window.__cloudHealthRules && Array.isArray(_hlRules.versions);
+const _hlStdList = () => (Array.isArray(_hlStd.versions) ? _hlStd.versions : []);
+// closeModal 只收起背景、不清內容，所以要連背景有沒有顯示一起看（內容被別的視窗換掉 ⇒ querySelector 對不上）
+const _hlStdIsOpen = () => {
+  if (!_hlStd.root || document.querySelector('.hl-std') !== _hlStd.root) return false;
+  const bd = document.getElementById('modal-backdrop');
+  return !bd || bd.classList.contains('show');
+};
+// 比例 ↔ 百分比字串：0.25 ↔ '25'；存之前四捨五入到 0.001
+const _hlStdToPct = v => (_hlFinite(v) ? String(Math.round(v * 1000) / 10) : '');
+const _hlStdFromPct = p => Math.round(p * 10) / 1000;
+// 這一格為什麼不能填（動銷率才有）：類型本來就不算、資料還沒接上、這家通路沒有商品層。回字串＝鎖住，內容沿用原值。
+function _hlStdLockType(itemKey, type) {
+  if (itemKey !== 'sellThrough') return '';
+  if (_hlNoSellThrough(type)) return '不算動銷率';
+  if (HEALTH_CHANNELS.some(ch => ch.type === type && ch.prod && _hlNoListing(ch.prod.platform))) return '資料還沒接上';
+  return '';
+}
+function _hlStdLockChannel(itemKey, ch) {
+  return _hlStdLockType(itemKey, ch.type) || (itemKey === 'sellThrough' && !ch.prod ? '沒有商品資料' : '');
+}
+function _hlStdMonths() {
+  const m0 = _hlTaipeiYm(Date.now());
+  return _hlMonthRange(m0, _hlAddMonth(m0, 12));
+}
+// 三格一組的輸入格（或鎖住的文字）
+function _hlStdGroupHtml(key, lines, lock, disabled, placeholder, label) {
+  if (lock) return `<td class="hl-std-lock">${escapeHtml(lock)}</td>`;
+  const inputs = [0, 1, 2].map(i => `<input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${escapeHtml(placeholder)}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}>`).join('');
+  return `<td><div class="hl-std-3">${inputs}</div><div class="hl-std-err" data-hl-std-err="${escapeHtml(key)}"></div></td>`;
+}
+function _hlStdBodyHtml() {
+  const from = _hlStd.from, list = _hlStdList(), R = healthRulesForMonth(from, _hlStd.versions);
+  const can = _hlStdCanEdit() && _hlStdCloudReady(), off = !can;
+  const same = list.find(v => v && v.from === from);
+  const later = list.filter(v => v && typeof v.from === 'string' && v.from > from).map(v => v.from);
+  const notes = [];
+  if (same) notes.push(`會取代 ${_hlYmLabel(from)} 起那一版`);
+  if (later.length) notes.push(`${later.map(_hlYmLabel).join('、')} 起另有一版，不受這次修改影響`);
+  const items = R.score.items, pure = items.find(it => it.key === 'pureRate'), st = items.find(it => it.key === 'sellThrough');
+  const rows = Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order).map(t => {
+    const chs = HEALTH_CHANNELS.filter(ch => ch.type === t), label = R.types[t].label;
+    const override = chs.some(ch => items.some(it => it.linesByChannel && it.linesByChannel[ch.id]));
+    const open = _hlStd.open[t] != null ? _hlStd.open[t] : override;
+    const chRows = chs.map(ch => `<tr class="hl-std-chrow" data-hl-std-chrow="${escapeHtml(t)}"${open ? '' : ' hidden'}><td class="hl-std-chname">${escapeHtml(ch.label)}</td>${
+      items.map(it => _hlStdGroupHtml(`${it.key}|c|${ch.id}`, it.linesByChannel && it.linesByChannel[ch.id], _hlStdLockChannel(it.key, ch), off, '同類型', `${ch.label} ${it.label}`)).join('')}</tr>`).join('');
+    return `<tr class="hl-std-trow"><td class="hl-std-tname">${escapeHtml(label)}<button type="button" class="hl-std-toggle" data-hl-std-act="chs" data-hl-std-type="${escapeHtml(t)}" aria-expanded="${open ? 'true' : 'false'}">${open ? '▾' : '▸'} 個別通路</button></td>${
+      items.map(it => _hlStdGroupHtml(`${it.key}|t|${t}`, it.lines && it.lines[t], _hlStdLockType(it.key, t), off, '', `${label} ${it.label}`)).join('')}</tr>${chRows}`;
+  }).join('');
+  const lockMsg = !_hlStdCanEdit() ? '只有管理員可以修改評分標準'
+    : !_hlStdCloudReady() ? '評分標準還沒讀到，暫時不能修改（請重新整理後再試）' : '';
+  const dis = off ? ' disabled' : '';
+  return `<div data-hl-std-form>
+      <label class="hl-std-field">從哪個月開始適用
+        <select data-hl-std-from>${_hlStdMonths().map(m => `<option value="${m}"${m === from ? ' selected' : ''}>${escapeHtml(_hlYmLabel(m))}</option>`).join('')}</select></label>
+      <div data-hl-std-notes>${notes.map(n => `<div class="hl-std-note">${escapeHtml(n)}</div>`).join('')}</div>
+      <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1">通路類型</th>${items.map(it => `<th>${escapeHtml(it.label)} 100／80／60 線（%）</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="hl-std-tip">整組留空＝標準未設定；三格要全填或全空。個別通路留空＝跟著類型那一列。</div>
+      <div class="hl-std-row">權重
+        ${items.map(it => `<label class="hl-std-w">${escapeHtml(it.label)} <input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-w="${escapeHtml(it.key)}" value="${_hlStdToPct(it.w)}" aria-label="${escapeHtml(it.label)}權重（%）"${dis}> %<span class="hl-std-err" data-hl-std-err="w|${escapeHtml(it.key)}"></span></label>`).join('')}
+        <span class="hl-std-err" data-hl-std-err="w"></span></div>
+      <label class="hl-std-row hl-std-check"><input type="checkbox" data-hl-std-prov${st && st.provisional ? ' checked' : ''}${dis}> ${escapeHtml(st ? st.label : '動銷率')}標準仍是暫定</label>
+      <label class="hl-std-row">備註 <input type="text" class="hl-std-notein" data-hl-std-noteinput maxlength="200" value="${escapeHtml(same && same.note ? same.note : '')}" placeholder="選填"${dis}></label>
+      <div class="hl-std-msg" data-hl-std-msg role="status"></div>
+      ${lockMsg ? `<div class="hl-std-readonly">${escapeHtml(lockMsg)}</div>` : ''}
+      <div class="hl-std-ftr"><button type="button" class="btn-ghost" data-hl-std-act="close">${can ? '取消' : '關閉'}</button>${can ? '<button type="button" class="btn-primary hl-std-save" data-hl-std-act="submit">儲存</button>' : ''}</div>
+    </div>
+    <div class="hl-std-confirm" data-hl-std-confirm hidden></div>
+    <div class="hl-std-ask" data-hl-std-ask hidden><p class="hl-std-cline">還沒儲存，要放棄這些修改嗎？</p>
+      <div class="hl-std-ftr"><button type="button" class="btn-ghost" data-hl-std-act="discard">放棄修改</button><button type="button" class="btn-primary hl-std-save" data-hl-std-act="keep">回去繼續改</button></div></div>`;
+}
+const _hlStdQ = sel => (_hlStd.root ? _hlStd.root.querySelector(sel) : null);
+function _hlStdSetMsg(text, kind) {
+  const el = _hlStdQ('[data-hl-std-msg]');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'hl-std-msg' + (kind ? ' hl-std-msg-' + kind : '');
+}
+function _hlStdShowForm() {
+  const f = _hlStdQ('[data-hl-std-form]'), c = _hlStdQ('[data-hl-std-confirm]'), a = _hlStdQ('[data-hl-std-ask]');
+  if (f) f.hidden = false;
+  if (c) c.hidden = true;
+  if (a) a.hidden = true;
+}
+// ── 防止填好的內容不見：改過但還沒存時，點背景／✕／取消／切月份都先問（只有能改的人才會問）──
+//   表單目前內容的指紋；開窗、切月份預填時記下來，之後不同就算「改過」。
+function _hlStdFormSig() {
+  const root = _hlStd.root;
+  if (!root) return '';
+  const vals = sel => Array.from(root.querySelectorAll(sel), el => el.value);
+  const prov = _hlStdQ('[data-hl-std-prov]');
+  return JSON.stringify([vals('[data-hl-std-cell]'), vals('[data-hl-std-w]'), !!(prov && prov.checked), vals('[data-hl-std-noteinput]')]);
+}
+const _hlStdDirty = () => _hlStdCanEdit() && _hlStdCloudReady() && !!_hlStd.root && _hlStdFormSig() !== _hlStd.formSig;
+// 在同一個視窗內問；then＝選「放棄修改」要做的事。預設焦點在「回去繼續改」。
+function _hlStdAsk(then) {
+  const a = _hlStdQ('[data-hl-std-ask]'), f = _hlStdQ('[data-hl-std-form]'), c = _hlStdQ('[data-hl-std-confirm]');
+  if (!a) return;
+  if (a.hidden) _hlStd.askPrev = c && !c.hidden ? 'confirm' : 'form';
+  _hlStd.askThen = then;
+  if (f) f.hidden = true;
+  if (c) c.hidden = true;
+  a.hidden = false;
+  const keep = _hlStdQ('[data-hl-std-act="keep"]');
+  if (keep && typeof keep.focus === 'function') keep.focus();
+}
+function _hlStdAskKeep() {
+  const a = _hlStdQ('[data-hl-std-ask]'), f = _hlStdQ('[data-hl-std-form]'), c = _hlStdQ('[data-hl-std-confirm]'), sel = _hlStdQ('[data-hl-std-from]');
+  _hlStd.askThen = null;
+  if (a) a.hidden = true;
+  if (_hlStd.askPrev === 'confirm') { if (c) c.hidden = false; } else if (f) f.hidden = false;
+  if (sel) sel.value = _hlStd.from;   // 切月份時選單已經變了：改回目前這個月
+}
+// 🔴 closeModalOnBackdrop（index.html 的 onclick）與 ✕（modal.js 設的 onclick）是全站共用、onCancel 也擋不住關閉。
+//   document 捕獲階段比它們早：只有設定視窗開著、而且有未存內容（或正在存）時才攔下來；其他視窗一律不碰。只綁一次。
+function _hlStdCloseGuard(e) {
+  if (!_hlStdIsOpen()) return;
+  const t = e.target;
+  const hit = t && (t.id === 'modal-backdrop' || (t.closest && t.closest('#modal-close-x')));
+  if (!hit) return;
+  if (_hlStd.busy) { e.stopPropagation(); e.preventDefault(); return; }   // 正在存：先別關，結果要顯示在視窗裡
+  if (!_hlStdDirty()) return;   // 沒改過、不能改的人：照原本的流程直接關
+  e.stopPropagation(); e.preventDefault();
+  _hlStdAsk(() => App.closeModal());
+}
+function _hlStdOpen() {
+  _hlStd.versions = _hlRuleVersionsNow();
+  _hlStd.baseline = _hlStableJson(_hlStd.versions);
+  _hlStd.from = _hlTaipeiYm(Date.now());
+  _hlStd.open = {}; _hlStd.busy = false; _hlStd.pending = null; _hlStd.root = null; _hlStd.askThen = null; _hlStd.askPrev = '';
+  App.openModal({ title: '⚙ 評分標準', width: '860px', hideFooter: true, bodyHtml: `<div class="hl-std">${_hlStdBodyHtml()}</div>`, onMount: _hlStdBind });
+}
+function _hlStdBind() {
+  const root = document.querySelector('.hl-std');
+  if (!root) return;
+  _hlStd.root = root;
+  root.addEventListener('click', _hlStdOnClick);
+  root.addEventListener('change', _hlStdOnChange);
+  _hlStd.formSig = _hlStdFormSig();
+  if (!_hlStd.guardBound) { _hlStd.guardBound = true; document.addEventListener('click', _hlStdCloseGuard, true); }
+}
+function _hlStdOnChange(e) {
+  const sel = e.target && e.target.closest && e.target.closest('[data-hl-std-from]');
+  if (!sel || _hlStd.busy || !_hlIsYm(sel.value)) return;
+  const next = sel.value;
+  if (next === _hlStd.from) return;
+  const go = () => {
+    _hlStd.from = next; _hlStd.open = {}; _hlStd.pending = null; _hlStd.askThen = null;
+    _hlStd.root.innerHTML = _hlStdBodyHtml();   // 下方表格預填那個月目前適用的標準
+    _hlStd.formSig = _hlStdFormSig();
+  };
+  if (_hlStdDirty()) _hlStdAsk(go); else go();
+}
+function _hlStdOnClick(e) {
+  const b = e.target && e.target.closest && e.target.closest('[data-hl-std-act]');
+  if (!b) return;
+  const act = b.getAttribute('data-hl-std-act');
+  if (act === 'close') {
+    if (_hlStd.busy) return;
+    if (_hlStdDirty()) _hlStdAsk(() => App.closeModal()); else App.closeModal();
+    return;
+  }
+  if (act === 'keep') { _hlStdAskKeep(); return; }
+  if (act === 'discard') { const then = _hlStd.askThen; _hlStd.askThen = null; if (then) then(); return; }
+  if (act === 'chs') {
+    const t = b.getAttribute('data-hl-std-type'), open = b.getAttribute('aria-expanded') !== 'true';
+    _hlStd.open[t] = open;
+    _hlStd.root.querySelectorAll(`[data-hl-std-chrow="${t}"]`).forEach(tr => { tr.hidden = !open; });
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    b.textContent = (open ? '▾' : '▸') + ' 個別通路';
+    return;
+  }
+  if (act === 'submit') { _hlStdSubmit(); return; }
+  if (act === 'back') { if (!_hlStd.busy) _hlStdShowForm(); return; }
+  if (act === 'confirm') _hlStdSave();
+}
+// 表單 → 版本內容（純邏輯）。values＝{ 格子 key:[三個字串] }、weights＝{ 項目:字串 }。回 { items, errors:{ 格子 key:訊息 } }。
+//   鎖住的格子沒有輸入框：沿用 R 的原值（版本是完整標準，不能因為畫面鎖住就把線丟掉）。
+function _hlStdCollect(values, weights, provisional, R) {
+  const errors = {};
+  const parse = key => {
+    const strs = (values[key] || ['', '', '']).map(s => String(s == null ? '' : s).trim());
+    if (strs.every(s => s === '')) return null;
+    if (strs.some(s => s === '')) { errors[key] = '三格要全填或全空'; return null; }
+    const nums = strs.map(Number);
+    if (!nums.every(_hlFinite)) { errors[key] = '要填數字'; return null; }
+    const a = nums.map(_hlStdFromPct), bad = _hlLinesBad(a);
+    if (bad) { errors[key] = bad.replace('0～1', '0～100'); return null; }
+    return a;
+  };
+  const items = {};
+  let sum = 0, wOk = true;
+  R.score.items.forEach(it => {
+    const lines = {}, byCh = {};
+    Object.keys(R.types).forEach(t => {
+      if (_hlStdLockType(it.key, t)) { if (it.lines && it.lines[t]) lines[t] = it.lines[t].slice(); return; }
+      const a = parse(`${it.key}|t|${t}`);
+      if (a) lines[t] = a;
+    });
+    HEALTH_CHANNELS.forEach(ch => {
+      if (_hlStdLockChannel(it.key, ch)) { const o = it.linesByChannel && it.linesByChannel[ch.id]; if (o) byCh[ch.id] = o.slice(); return; }
+      const a = parse(`${it.key}|c|${ch.id}`);
+      if (a && JSON.stringify(a) !== JSON.stringify(lines[ch.type] || null)) byCh[ch.id] = a;   // 只有跟類型不同才存
+    });
+    const ws = String(weights[it.key] == null ? '' : weights[it.key]).trim();
+    const wn = ws === '' ? NaN : Number(ws), w = _hlFinite(wn) ? _hlStdFromPct(wn) : NaN;
+    if (!_hlFinite(w) || _hlWeightBad(w)) { errors['w|' + it.key] = '要大於 0'; wOk = false; } else sum += w;
+    items[it.key] = { w, lines, linesByChannel: byCh };
+    if (it.key === 'sellThrough') items[it.key].provisional = !!provisional;
+  });
+  if (wOk && _hlWeightsSumBad(sum)) errors.w = `兩項加總要是 100（現在是 ${Math.round(sum * 1000) / 10}）`;
+  return { items, errors };
+}
+// 哪些類型／通路會從「有標準」變成「沒標準」：回 ['MO+ 純利率', …]。整類型都沒了寫類型名，只有部分通路沒了寫通路名。
+function _hlStdLost(R, items) {
+  const out = [];
+  R.score.items.forEach(it => {
+    const next = items[it.key];
+    Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order).forEach(t => {
+      const chs = HEALTH_CHANNELS.filter(ch => ch.type === t);
+      const had = chs.filter(ch => _hlLinesFor(it, ch)), lost = had.filter(ch => !_hlLinesFor(next, ch));
+      if (!lost.length) return;
+      if (lost.length === chs.length) out.push(`${R.types[t].label} ${it.label}`);
+      else lost.forEach(ch => out.push(`${ch.label} ${it.label}`));
+    });
+  });
+  return out;
+}
+function _hlStdNewList(version) {
+  return _hlStdList().filter(v => !(v && v.from === version.from)).concat([version]);
+}
+// 按「儲存」：檢查 → 切到確認內容。還沒寫任何東西。
+function _hlStdSubmit() {
+  if (_hlStd.busy) return;
+  if (!_hlStdCanEdit()) { _hlStdSetMsg('只有管理員可以修改評分標準', 'err'); return; }
+  const root = _hlStd.root, from = _hlStd.from, R = healthRulesForMonth(from, _hlStd.versions);
+  const values = {}, weights = {};
+  root.querySelectorAll('[data-hl-std-cell]').forEach(el => {
+    const k = el.getAttribute('data-hl-std-cell');
+    (values[k] = values[k] || ['', '', ''])[+el.getAttribute('data-hl-std-i')] = el.value;
+  });
+  root.querySelectorAll('[data-hl-std-w]').forEach(el => { weights[el.getAttribute('data-hl-std-w')] = el.value; });
+  const prov = _hlStdQ('[data-hl-std-prov]'), noteEl = _hlStdQ('[data-hl-std-noteinput]');
+  const { items, errors } = _hlStdCollect(values, weights, !!(prov && prov.checked), R);
+  root.querySelectorAll('[data-hl-std-err]').forEach(el => { el.textContent = errors[el.getAttribute('data-hl-std-err')] || ''; });
+  if (Object.keys(errors).length) { _hlStdSetMsg('有紅字的地方要先改好，還沒有存檔', 'err'); return; }
+  const version = { from, items, note: noteEl ? String(noteEl.value || '').trim() : '' };
+  // 🔴 跟 healthRulesForMonth 同一套驗證，連同文件裡其他版本一起驗：驗不過就算寫進去也不會生效
+  const chk = _hlBuildRuleChain(_hlStdNewList(version));
+  if (chk.problems.length) { _hlStdSetMsg('這版標準不合法，沒有存檔：' + chk.problems.join('；'), 'err'); return; }
+  _hlStd.pending = version;
+  const lost = _hlStdLost(R, items);
+  const lines = [`這版標準從 ${_hlYmLabel(from)} 起套用；之前的月份照舊標準計算。`];
+  if (_hlStdList().some(v => v && v.from === from)) lines.push(`會取代 ${_hlYmLabel(from)} 起那一版。`);
+  const warn = lost.length ? `<div class="hl-std-lost">⚠ 這些會變成「標準未設定」（不給分）：${escapeHtml(lost.join('、'))}</div>` : '';
+  const c = _hlStdQ('[data-hl-std-confirm]'), f = _hlStdQ('[data-hl-std-form]');
+  c.innerHTML = `${lines.map(x => `<p class="hl-std-cline">${escapeHtml(x)}</p>`).join('')}${warn}
+    <div class="hl-std-ftr"><button type="button" class="btn-ghost" data-hl-std-act="back">回去修改</button><button type="button" class="btn-primary hl-std-save" data-hl-std-act="confirm">確定儲存</button></div>`;
+  f.hidden = true; c.hidden = false;
+}
+// 讀伺服器現值。__cloudHealthRules.getDoc 不是 getDocFromServer：離線時可能回快取，所以看到 fromCache 一律當讀取失敗（不能拿快取當「伺服器現值」比對）。
+async function _hlStdReadServer(be) {
+  const s = await be.getDoc();
+  if (!s || typeof s.exists !== 'function') throw new Error('讀不到文件');
+  if (s.metadata && s.metadata.fromCache) throw new Error('連不到伺服器（讀到的是本機快取）');
+  return s.exists() ? (s.data() || {}) : null;
+}
+// 🔴 存檔：讀伺服器比對 → 一次 writePaths 整份寫入 → 讀回比對。失敗一律留在視窗、內容保留。
+async function _hlStdSave() {
+  if (!_hlStdCanEdit()) { _hlStdSetMsg('只有管理員可以修改評分標準', 'err'); if (typeof window.showToast === 'function') window.showToast('只有管理員可以修改評分標準', 'error'); return; }
+  if (_hlStd.busy || !_hlStd.pending) return;
+  const be = window.__cloudHealthRules;
+  const u = App.currentUser;
+  const version = Object.assign({}, _hlStd.pending, { by: u.username || '', byName: u.name || '', at: Date.now() });
+  const from = version.from;
+  // 🔴 整份一次寫入：schema 與整個版本在同一次呼叫。分多次的話訂閱端會收到半份版本、判不合法、全公司畫面閃回預設。
+  const payload = [[['schema'], 1], [['versions', from], version]];
+  const fail = (msg, err) => {
+    console.error('[health] 評分標準存檔失敗：' + msg, { payload, error: err });
+    if (_hlStdIsOpen()) { _hlStdShowForm(); _hlStdSetMsg(msg, 'err'); }
+    else if (typeof window.showToast === 'function') window.showToast('評分標準沒有存檔：' + msg, 'error', 6000);
+  };
+  const btn = _hlStdQ('[data-hl-std-act="confirm"]');
+  _hlStd.busy = true;
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
+  try {
+    if (!be || typeof be.writePaths !== 'function') return fail('雲端尚未連線，沒有存檔，請重新整理後再試。');
+    let server;
+    try { server = await _hlStdReadServer(be); }
+    catch (e) { return fail('讀取雲端現值失敗，沒有存檔：' + ((e && e.message) || e), e); }
+    if (_hlStableJson(_hlRuleVersionsFromDoc(server)) !== _hlStd.baseline) return fail('有人剛改過評分標準，請關掉重開再改');
+    let r;
+    try { r = await be.writePaths(payload); }
+    catch (e) { return fail('寫入雲端失敗，沒有存檔：' + ((e && e.message) || e), e); }
+    if (!(r && r.ok)) return fail('這次沒有寫進雲端（目前是防寫或唯讀狀態），畫面上的標準不會改變。');
+    let back;
+    try { back = await _hlStdReadServer(be); }
+    catch (e) { return fail('已送出，但讀回確認失敗，請重新整理後確認內容：' + ((e && e.message) || e), e); }
+    const saved = back && back.versions && back.versions[from];
+    if (!back || back.schema !== 1 || _hlStableJson(saved) !== _hlStableJson(version)) return fail('讀回來的內容跟送出的不一致，請重新整理後確認內容。');
+    const m = _hlState.month;
+    const tail = _hlIsYm(m) && m < from ? `你現在看的 ${+m.slice(5, 7)} 月仍用舊標準` : '';
+    if (_hlStdIsOpen()) App.closeModal();   // 已被關掉就不再 closeModal（避免關到之後才開的別的彈窗，同 daily.js）
+    if (typeof window.showToast === 'function') window.showToast(`已儲存。${_hlYmLabel(from)} 起套用新標準；之前的月份照舊標準計算。${tail}`, 'success', 6000);
+  } finally {
+    _hlStd.busy = false;
+    if (btn) { btn.disabled = false; btn.textContent = '確定儲存'; }
+  }
+}
+
 Object.assign(App, {
   viewHealth() {
     // 「📖 怎麼看這頁」在載入中、錯誤畫面也要按得到（說明內容只讀規則，不需要資料；還沒選月份時讀 BASE）
     const header = `<div class="page-header hl-hd">
         <div><h2>通路健檢</h2>
         <p>每個通路每月的體檢分數，點通路可看細項。</p></div>
-        <button type="button" class="btn-ghost hl-guide-btn" data-hl-act="guide">📖 怎麼看這頁</button></div>`;
+        <button type="button" class="btn-ghost hl-guide-btn" data-hl-act="guide">📖 怎麼看這頁</button><button type="button" class="btn-ghost hl-std-btn" data-hl-act="std">⚙ 評分標準</button></div>`;
     // profit.js 動態載入：沒載完先載，載完再 render（本頁不叫任何 __load*Subs，只用開站就訂閱的 app/kpi）
     if (!_hlMock && !window.__profitReady) {
       try {
