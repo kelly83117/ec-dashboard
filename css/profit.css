@@ -2028,23 +2028,20 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-bk-errbox{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:600;}
 .km-bk-chk{margin:10px 0;padding:8px 10px;border:1px solid #eef0f4;border-radius:8px;font-size:12px;}
 .km-au-check.warn{color:#b45309;}
-/* 淨利表頂端「動銷率」格（蝦皮四家）。尺寸照 #header-kpi-row 三格的 inline style（11px 標題、20px 主數字、12px 第三行）；
+/* 淨利表頂端「動銷率」格（蝦皮四家）。結構跟旁邊三格相同：標題／主數字＋小字／較上月。
+   三格全是 inline style、沒有 class 可沿用，所以這裡照抄同樣的數值：標題 11px/600/.05em、主數字 20px/700、小字 13px/500、第三行 12px/600（min-height 18、margin-top 2、vs 那段 margin-left 10 + weight 500）。
    顏色用 :root 變數，透明度是為了接近三格的 #9ca3af（標題）與 #374151（主數字），:root 沒有這兩個值。
-   寬度鎖住：沒有資料時那行字比數字長很多，換行就好，不要把整排撐開。 */
-.kv-st{flex:none;max-width:136px;}
-.kv-st-hd{display:flex;align-items:flex-start;gap:4px;margin-bottom:2px;}
-.kv-st-title{font-size:11px;font-weight:600;letter-spacing:.05em;color:var(--text-muted);opacity:.65;}
-.kv-st-info{font-size:11px;line-height:1.5;color:var(--text-muted);}
-.kv-st-info summary{list-style:none;cursor:pointer;}
-.kv-st-info summary::-webkit-details-marker{display:none;}
-.kv-st-info[open] summary,.kv-st-info summary:hover,.kv-st-info summary:focus-visible{color:var(--primary);}
-.kv-st-info-body{margin-top:2px;margin-left:-60px;width:136px;font-size:12px;line-height:1.5;font-weight:500;color:var(--text-muted);}
-.kv-st-value{font-size:20px;font-weight:700;color:var(--text);opacity:.85;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
-.kv-st-sub{font-size:12px;line-height:18px;font-weight:600;color:var(--text-muted);}
-.kv-st-sub:empty,.kv-st-cmp:empty{display:none;}
-.kv-st-cmp{font-size:12px;line-height:18px;font-weight:600;color:var(--text-muted);white-space:nowrap;}
-.kv-st-cmp.kv-st-up{color:var(--success);}
-.kv-st-cmp.kv-st-down{color:var(--danger);}
+   第三行空的時候也要佔位（min-height），四格才一樣高、標題才對齊。 */
+.kv-st{flex:none;}
+.kv-st-hd{display:flex;align-items:center;min-height:16.5px;margin-bottom:2px;}
+.kv-st-title{font-size:11px;font-weight:600;letter-spacing:.05em;color:var(--text-muted);opacity:.65;white-space:nowrap;}
+.kv-st-main{display:flex;align-items:baseline;gap:5px;}
+.kv-st-value{font-size:20px;font-weight:700;color:var(--text);opacity:.85;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap;}
+.kv-st-rate{font-size:13px;font-weight:500;color:var(--text-muted);white-space:nowrap;}
+.kv-st-cmp{min-height:18px;margin-top:2px;font-size:12px;font-weight:600;color:var(--text-muted);white-space:nowrap;}
+.kv-st-vs{margin-left:10px;font-weight:500;}
+.kv-st-d.kv-st-up{color:var(--success);}
+.kv-st-d.kv-st-down{color:var(--danger);}
 
 /* FriDay 報表上傳（2026-11-04）：站別選擇（i站尚未支援） */
 .km-fr-site{margin:0 0 10px;font-size:13px;font-weight:600;display:flex;gap:14px;align-items:center;}
