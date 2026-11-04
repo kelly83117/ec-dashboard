@@ -1558,6 +1558,9 @@ const LS_TIDY_ARCHIVE_MONTHS=['2026/05'];   // 雲端副本只在 app/profit_202
 const _LS_TIDY_INSIGHT_RE=/^ec\.insight_[^_|.]+_(master|weeks|perf)$/;
 const _LS_TIDY_DENY_PREFIX=['ec_notes','ec_edits','ec_split','ec_momo','momo_','ec_pchome','pchome_','ec_coupang','ec|filemeta|','ec.session',
   'ec.users','ec.employees','ec.departments','ec.platforms','ec.d2.pricing.','ec.dailyProgress','ec.insightLegacyBackup','ec_d3_'];
+// (d) 舊版訂價表（54cfe8f / v154 移除）的整表資料：現行訂價表讀 data/pricing.json，這 10 把沒有任何讀寫端。
+//   只認完整名稱；ec.d2.pricing.{sheet,q,cols.*,sort.*,numfilters.*,colpanel,filterpanel,custom.*} 是現行在用的（custom.* 是自訂列唯一一份），不准刪。
+const _LS_TIDY_PRICING_LEGACY=new Set(['訂價','導流品','Victor','inna','Vivian','官網','FB訂價表','運費試算表','loaded','ver'].map(s=>'ec.d2.pricing.'+s));
 function _lsTidyDenied(k){
   if(typeof k!=='string') return true;
   if(_LS_TIDY_DENY_PREFIX.some(p=>k.startsWith(p))) return true;
@@ -1582,7 +1585,7 @@ function _lsMonthMinus(ym,n){
 //   snap = { entries:[[key,raw]…], profitMem, mem, pending:Set, deferred:Set|Map, justSavedAt, now(ms),
 //            collectionsReady, archivesReady, insightReady, parse:fn(raw)→物件或 null }
 function _lsTidyPlan(snap){
-  const plan={reports:{del:[],kept:[],skippedAll:''},insight:{del:[],kept:[],skippedAll:''}};
+  const plan={reports:{del:[],kept:[],skippedAll:''},insight:{del:[],kept:[],skippedAll:''},pricing:{del:[]}};
   const entries=snap.entries||[];
   const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
   const kb=(k,raw)=>Math.round((k.length+raw.length)/102.4)/10;
@@ -1624,8 +1627,11 @@ function _lsTidyPlan(snap){
     if(!has) return I.kept.push({key:k,reason:'雲端記憶體沒有這份'});
     I.del.push({key:k,raw,kb:kb(k,raw)});
   });
+  // ── (d) 舊版訂價表殘留（不需要雲端就緒：沒有雲端副本、也沒有讀寫端）──
+  entries.forEach(([k,raw])=>{ if(typeof k==='string'&&_LS_TIDY_PRICING_LEGACY.has(k)) plan.pricing.del.push({key:k,raw,kb:kb(k,raw)}); });
   // 第二道防呆：白名單出錯也不准刪到黑名單 → 整份計畫作廢
   [...R.del,...I.del].forEach(d=>{ if(_lsTidyDenied(d.key)) throw new Error('計畫裡出現不准刪的 key：'+d.key); });
+  plan.pricing.del.forEach(d=>{ if(!_LS_TIDY_PRICING_LEGACY.has(d.key)) throw new Error('計畫裡出現不准刪的 key：'+d.key); });
   return plan;
 }
 // 執行。opts：{ dryRun, waitMs(預設 LS_TIDY_WAIT_MS), pollMs(預設 250), onPhase(phase) }。回傳結果物件（見方案 §4.5），任何情況都不丟錯。
@@ -1641,7 +1647,7 @@ async function __lsTidy(opts){
   finally{ phase('done'); }
 }
 async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
-  const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},planError:''};
+  const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},pricing:{deleted:[]},planError:''};
   try{
     // (a) 壓縮
     if(!dryRun){ try{ res.compressed=await _reportCacheMigrate({gapMs:0}); }catch(e){ res.compressed={error:String(e&&e.message||e)}; } }
@@ -1669,7 +1675,7 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
     }
     res.skippedAll=plan.reports.skippedAll; res.kept=plan.reports.kept.slice();
     res.insight.skippedAll=plan.insight.skippedAll; res.insight.kept=plan.insight.kept.slice();
-    if(dryRun){ res.deleted=plan.reports.del.map(d=>({key:d.key,kb:d.kb})); res.insight.deleted=plan.insight.del.map(d=>({key:d.key,kb:d.kb})); return res; }
+    if(dryRun){ res.deleted=plan.reports.del.map(d=>({key:d.key,kb:d.kb})); res.insight.deleted=plan.insight.del.map(d=>({key:d.key,kb:d.kb})); res.pricing.deleted=plan.pricing.del.map(d=>({key:d.key,kb:d.kb})); return res; }
     // 刪：每把再重讀比對、再過一次會變動的關卡
     plan.reports.del.forEach(d=>{
       const keep=reason=>res.kept.push({key:d.key,reason});
@@ -1692,6 +1698,14 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
         localStorage.removeItem(d.key);
         res.insight.deleted.push({key:d.key,kb:d.kb});
       }catch(e){ keep('刪除失敗：'+(e&&e.message||e)); }
+    });
+    plan.pricing.del.forEach(d=>{
+      try{
+        if(!_LS_TIDY_PRICING_LEGACY.has(d.key)) return;
+        if(localStorage.getItem(d.key)!==d.raw) return;   // 別的分頁剛寫過（理論上沒有寫入端）
+        localStorage.removeItem(d.key);
+        res.pricing.deleted.push({key:d.key,kb:d.kb});
+      }catch(e){}
     });
     console.info('[釋出空間] 壓縮 '+((res.compressed&&res.compressed.done)||0)+' 把（MOMO 商品主檔 '+((res.momoCompressed&&res.momoCompressed.done)||0)+' 把）；刪舊報表 '+res.deleted.length+' 把、保留 '+res.kept.length+' 把'
       +(res.skippedAll?'（'+res.skippedAll+'）':'')+'；刪洞察表副本 '+res.insight.deleted.length+' 把',res);
@@ -1968,10 +1982,15 @@ function _sweepAllLocalReportsIntoPending(){
         continue;
       }
       // MO+ 逐列成本：ec_momo_moplus_origins|<shop>|<src> → momo_moplus_origins collection（每賣場每來源月一 doc）
+      //   ⚠ 只有 dirty（真正經 momoSaveMoPlusOriginsDoc 存檔、還沒成功推）才撿（2026-11-02 F2，比照 ec_momo_products|）：
+      //     存檔必標 dirty、推成功才清，所以「沒 dirty 的本機副本」＝已推過或來自雲端，不需要再推；舊碼只看 localStorage 存在，
+      //     會把舊副本一再撿進待推（見 PR 說明路徑 2）。⚠ 計數端 _momoSyncPendingCount 的判準要逐字相同（_momoOIsDirty）。
       if(k&&k.startsWith('ec_momo_moplus_origins|')){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        if(_momoOIsDirty(k)){
+          _pendingSyncKeys.add(k);
+          if(!(Store._mem&&Store._mem[k])){
+            try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+          }
         }
         continue;
       }
@@ -2331,7 +2350,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         const parts=pk.split('|');   // ['ec_momo_moplus_origins', shop, src]
         const oShop=parts[1], oSrc=parts[2];
         const data=momoLoadMoPlusOriginsDoc(oShop, oSrc);   // 與預覽同源
-        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:()=>window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,momoSanitizeMoPlusDoc(data))}); }   // 寫前把 '' origin key 改哨兵 → 舊 doc 不必重傳
+        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:async()=>{ try{ await momoOriginsShadowPrePush(pk); }catch(e){} return window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,momoSanitizeMoPlusDoc(data)); }}); }   // 寫前把 '' origin key 改哨兵 → 舊 doc 不必重傳。（SHADOW：推送前先唯讀記錄比對，失敗全吞、寫入內容與順序不變）
         else{ skippedProblem.push({key:pk,reason:'MO+ 逐列成本讀不到，或雲端層未就緒'}); }
         return;
       }
@@ -2560,7 +2579,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} try{ _editsItemsDirtyClear(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} try{ _momoLsCompressSoon(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護。清掉 dirty 後才排延後壓縮（第 2 塊：dirty 的商品主檔不壓）
-    ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
+    ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} try{ momoOriginsShadowPushed(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
     ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
@@ -7431,7 +7450,14 @@ function patchRow(shop,code,ov){
   }
   // pureProfit
   const pureEl=document.getElementById(`td-${shop}-${code}-pureProfit`);
-  if(pureEl){pureEl.textContent=_fSigned(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
+  //   🔴 只寫內層 .pure-val，【不可】對 <td> 設 textContent —— 會把「上期 $X」副標一起抹掉（同下方 dayBudget 那段）。
+  //   ⚠ 副標不跟著更新：它是上一期的淨利，編輯本期廣告費不會改變它。正負色仍設在 <td> 上（副標 .sub-ads 自帶灰色）。
+  //   ⚠ .pure-val 找不到（結構被改回沒有 span）就靜默不更新，不 throw 打斷後面的更新。
+  if(pureEl){
+    const pureVal=pureEl.querySelector('.pure-val');
+    if(pureVal)pureVal.textContent=_fSigned(r.pureProfit);
+    pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');
+  }
   // pureRate
   const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
   if(rateEl)rateEl.innerHTML=pill(!(r.rev>0)?null:r.pureRate*100);
@@ -8756,7 +8782,7 @@ function _subAdsHtml(r){
 }
 // 日預算格下方的副標「上期 $X」。與 _subAdsHtml 是同一族，差別只在值的來源：
 //   廣告費走 r.prevAdsFee（產生報表時算好、落地在 built[]）；
-//   日預算【不落地】，值由 renderTable 現查的 prevBudRead(code) 傳進來。
+//   日預算【不落地】，值由 renderTable 現查的 prevRead.dayBudget(code) 傳進來。
 //   → 所以參數是【值】不是【整列 r】，這個差異是刻意的：簽名長得不一樣，
 //     日後不會有人誤以為可以直接 r.prevDayBudget 而去找一個不存在的欄位。
 //
@@ -8803,22 +8829,35 @@ function _subDayBudgetHtml(v){
 //       新增的「上月同期」基準，與本函式要的滾動基準不同。表格逐列的「上期」一律走這一套。
 //   ⚠ 回傳的 reader 綁著預讀當下的那份上期報表快照 → 只在同一次同步 render 內使用，
 //     不要跨 render 快取（理由同 _prodTagsReaderFor）。
+//
+//   ▸ 淨利（2026-11 加）：同一份上期報表順便讀出 pureProfit，回傳 { dayBudget(code), pureProfit(code) }。
+//     ⚠ 刻意【併在這裡】而不是另寫一支 _prevPureReaderFor：兩欄要的是同一份上期報表、
+//       同一套 getPrevPeriodKey 基準，分兩支等於 lsLoad 兩次，日後也可能有人只改到其中一支的基準。
+//     ⚠ 淨利同樣只看 r.code 建表、不塌成 0：上期淨利 0 與負數都是有意義的值。
+//       三態呈現交給 _subPureHtml（數字含 0 / 負數 →「上期 ±$X」；null / undefined →「—」）。
+//     ⚠ pureProfit 同樣【不寫進 built[]】，理由同上方 dayBudget 那段（_stripDerived 不需要動）。
 function _prevDayBudgetReaderFor(shop){
   const s=state[shop];
   // Object.create(null) 而不是 {}：商品編號是外部資料，萬一有人取名 constructor /
   //   __proto__ / toString，普通物件會從 Object.prototype 拿到東西、渲染成「上期 $NaN」。
   //   （getPrevPeriodMap 用的是 {}，有同一個理論缺陷；那邊不在本次範圍，這裡先做對。）
-  const map=Object.create(null);
+  const budMap=Object.create(null), pureMap=Object.create(null);
   try{
     const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
     if(parts.length>=4){
       const rep=lsLoad(shop,parts[2],parts[3]);
       if(rep&&Array.isArray(rep.built)){
-        rep.built.forEach(r=>{ if(r.code)map[r.code]=r.dayBudget; });
+        rep.built.forEach(r=>{ if(r.code){ budMap[r.code]=r.dayBudget; pureMap[r.code]=r.pureProfit; } });
       }
     }
   }catch{}
-  return function(code){ return map[code]; };
+  return { dayBudget:(code)=>budMap[code], pureProfit:(code)=>pureMap[code] };
+}
+// 淨利格下方的副標「上期 $X」／「上期 -$X」。同 _subDayBudgetHtml 一族（參數是【值】）。
+//   🔴 金額一律走 _fSigned、不可用 fmtN（會吃掉負號）；但 null / undefined 要先擋成「—」，
+//     _fSigned 會把 undefined 變成 $0 ——「上期沒這商品」不能謊報成「上期淨利 $0」。
+function _subPureHtml(v){
+  return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 '+_fSigned(v):'—'}</div>`;
 }
 
 // ── 調整欄那行小字要用的兩個計數（一次算全表，逐列 O(1) 取用）──
@@ -8946,7 +8985,7 @@ function renderTable(shop,list,opts){
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||(col==='name'&&!!_nameExclLetters(s.filters?.nameExcl?.val))||ss.col===col;   // 名稱欄：排除 C/W/H 任一顆開著也算有篩選
   // help：欄名與 ▾ 之間的一顆 ?，點開「比較基準說明」彈窗。預設空字串 → 其餘欄位輸出逐字不變。
-  //   🔴 只有帶「/ 上期」副標的三欄會傳（adsFee / rev / dayBudget，見 buildColHeader）。
+  //   🔴 只有帶「/ 上期」副標的四欄會傳（adsFee / rev / pureProfit / dayBudget，見 buildColHeader）。
   //   🔴 【不用】MOMO 的 .mm-info：那套是原生 title tooltip —— hover 才出現、手機完全看不到、
   //     不能分段。這裡要講的是兩套基準的差別，一句話塞不下。改成真的 <button> 開既有彈窗。
   //   ⚠ event.stopPropagation()：<th> 帶 draggable + 拖曳 handler（見 dragAttrs），
@@ -8961,23 +9000,24 @@ function renderTable(shop,list,opts){
   // 拖曳表頭調整欄位順序：拖曳來源/目標都用 data-colkey 標記的欄位鍵
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
-    adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
+    adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利 / 上期',
     pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算 / 上期',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
     prodTags:'測試標籤',
   };
-  // 「/ 上期」三欄的說明入口。開的是【短版】彈窗（只講那一欄自己的事），不是頂端 ⓘ 的完整五段 ——
+  // 「/ 上期」四欄（營收、廣告費、淨利、日預算）的說明入口。開的是【短版】彈窗（只講那一欄自己的事），不是頂端 ⓘ 的完整五段 ——
   //   點表頭問號的人在問「這一欄的上期是什麼」，範圍就是那一欄。入口的位置決定問題的範圍，
   //   完整判準見 openKpiCmpHelp 上方那段。
   //   🔴 日預算走【專屬的 'col-budget'】，多一段講「副標是上一期的日預算、不是廣告費總額」與
-  //     $340 / $0 / — 三種顯示的差別。這欄最容易誤解，也是三欄裡唯一需要額外解釋的。
+  //     $340 / $0 / — 三種顯示的差別。這欄最容易誤解，也是四欄裡唯一需要額外解釋的。
   //     （老闆的示意圖只畫了營收與廣告費兩欄，日預算是補上的 —— 同一種副標不該有的有、有的沒有。）
-  const _CMP_HELP_MODE={adsFee:'col', rev:'col', dayBudget:'col-budget'};
+  const _CMP_HELP_MODE={adsFee:'col', rev:'col', pureProfit:'col', dayBudget:'col-budget'};
   const _CMP_HELP_TIP={
     adsFee:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
     rev:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
+    pureProfit:'這一欄的「上期」是上一期的淨利，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
     dayBudget:'副標是【上一期的日預算】、不是上一期的廣告費總額 —— 點開看說明',
   };
   const _hdrQ=(key)=>_CMP_HELP_MODE[key]
@@ -9012,7 +9052,8 @@ function renderTable(shop,list,opts){
   // 🔴 建在 forEach 【外面】。建在裡面等於每列重讀一次上期報表（見 _prevDayBudgetReaderFor
   //   上方註解），800 列就是 800 次。同一個坑本檔已經踩過兩次，兩處都留了同樣的警告：
   //   updateTagFilterBar 與 applyFilters 裡的 prodRead。
-  const prevBudRead=_prevDayBudgetReaderFor(shop);
+  //   ⚠ 一次讀出日預算與淨利兩份（同一份上期報表），見 _prevDayBudgetReaderFor 的「淨利」段。
+  const prevRead=_prevDayBudgetReaderFor(shop);
   // 🔴 同上一條，理由完全相同：商品調整（ec_notes|{通路}_growth）整個通路共用一把 key，
   //   而 getNotes 命中記憶體時做的是 JSON.parse(JSON.stringify(…))【整份深拷貝】（見該函式）。
   //   原本這一行寫在 forEach 裡的兩個分支各一次（mobic / 非 mobic），好麻吉 822 列
@@ -9054,7 +9095,7 @@ function renderTable(shop,list,opts){
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}"><span class="pure-val">${_fSigned(r.pureProfit)}</span>${_subPureHtml(prevRead.pureProfit(r.code))}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
@@ -9074,7 +9115,7 @@ function renderTable(shop,list,opts){
         adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber',_subAdsHtml(r)),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">${_fSigned(r.gross)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}"><span class="pure-val">${_fSigned(r.pureProfit)}</span>${_subPureHtml(prevRead.pureProfit(r.code))}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
         profitPct:`<td id="td-${shop}-${r.code}-profitPct" class="td-num">${!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%'}</td>`,
@@ -9091,7 +9132,7 @@ function renderTable(shop,list,opts){
         //     日後有人拿 .cell-val 當「這格可編輯」的判準時寫出靜默錯誤的程式碼。
         //   ⚠ .bud-val 刻意【沒有任何 CSS】：span 預設 display:inline、完全繼承父層 td 的
         //     字級/字重/顏色 → 數字外觀與加 span 之前一模一樣。它純粹是 patchRow 的定位錨點。
-        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num"><span class="bud-val">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</span>${_subDayBudgetHtml(prevBudRead(r.code))}</td>`,
+        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num"><span class="bud-val">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</span>${_subDayBudgetHtml(prevRead.dayBudget(r.code))}</td>`,
         analysisLabel:_anaCellHtml(shop,r.code,r.analysisAll),
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
@@ -14385,7 +14426,15 @@ function momoPendingProducts(pk){
 // bounce-back 守衛（給 firebase.js 的 momo_products 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
 //   本機有未同步變更（pending）或剛存過 → 雲端 echo 不覆蓋 _profitMem，保住本機版本。
 window.__momoShouldSkipCloudOverwrite=function(k){
-  try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  //   F3（2026-11-02）：origins（ec_momo_moplus_origins|）只認「dirty」（持久化註冊表，或本 session 存過還沒推的記憶體標記），不再因為「在 _pendingSyncKeys」就略過：
+  //     pending 可能只是被同步預覽／舊版 sweep 撿進來、或 dirty 已自癒清掉但 pending 還留著 → 之後雲端更新被整個 session 擋掉、本機記憶體落後雲端。
+  //     真有未推的本機編輯一定是 dirty（momoSaveMoPlusOriginsDoc 存檔必標），照樣受保護；其他 key 類型行為不變。
+  if(typeof k==='string' && k.indexOf('ec_momo_moplus_origins|')===0){
+    try{ if(_momoOIsDirty(k) || _momoODirtyMem.has(k)) return true; }catch{}
+    if(_momoODirtyRegistryCorrupt()) return true;   // 註冊表壞掉＝不知道哪些 key 有未推編輯 → fail-safe：一律當 dirty、略過雲端更新（同 momoOriginsCloudDecision 讀 localStorage 失敗就 skip）
+  } else {
+    try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  }
   try{ if(_momoRfIsKey(k) && _momoRfDirtyHas(k)) return true; }catch{}   // 對帳：本機存了還沒推 → 不讓雲端快照蓋掉（跨重整也擋；推成功才清）
   if(window._momoJustSaved && (Date.now()-window._momoJustSaved < 5000)) return true;
   return false;
@@ -14611,8 +14660,18 @@ window.__momoMergeEnforce=function(shop){ return momoSyncProductsMerge(shop); };
 //  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
 const _MOMO_ODIRTY_LS='ec_momo_origins_dirty';   // JSON array：真正重傳過還沒成功推的 origins full key
 const _MOMO_OBASE_LS ='ec_momo_origins_base';     // JSON map：full key → 雲端 updatedAt(ms)
-function _momoODirtyAdd(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
-function _momoODirtyDel(k){ try{ let a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+// F3：本 session 內存過還沒推成功的 origins key（記憶體）。localStorage 寫入失敗（配額）時 dirty 註冊表會寫不進去，這份讓 __momoShouldSkipCloudOverwrite 仍能保護本機編輯。
+const _momoODirtyMem=new Set();
+function _momoODirtyAdd(k){ try{ _momoODirtyMem.add(k); }catch{} try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoODirtyDel(k){ try{ _momoODirtyMem.delete(k); }catch{} try{ let a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+let _momoODirtyCorruptWarned=false;
+// 註冊表存在但不是合法 JSON 陣列（損毀）→ true。不存在（從沒存過）不算損毀。讀 localStorage 本身丟例外也當損毀（不確定 → 保守）。
+function _momoODirtyRegistryCorrupt(){
+  let bad=false;
+  try{ const raw=localStorage.getItem(_MOMO_ODIRTY_LS); if(raw!==null){ const a=JSON.parse(raw); if(!Array.isArray(a)) bad=true; } }catch{ bad=true; }
+  if(bad && !_momoODirtyCorruptWarned){ _momoODirtyCorruptWarned=true; try{ console.warn('[origins] '+_MOMO_ODIRTY_LS+' 內容損毀（不是合法 JSON 陣列）→ 無法判斷哪些 origins 有未推編輯，為保護本機：origins 一律當作 dirty、暫時略過雲端更新。請把這行與該 key 的內容回報；下次存檔 origins 時註冊表會重建。'); }catch{} }
+  return bad;
+}
 function _momoOIsDirty(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
 function _momoOBaseGet(k){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
 function _momoOBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_OBASE_LS,JSON.stringify(m)); }catch{} }
@@ -14626,7 +14685,7 @@ window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };            
 //     → 推已落地（前一 session／他台裝置）或本機 doc 已被逐出(orphan) 的 dirty key 永遠留著 → 每次快照都跳「本機較新未推」提示，永不消失。
 //   ⚠ 不放寬防護：只有「雲端已等於本機(推已落地) 或 本機根本不存在(orphan)」才判定 dirty 過期並清掉；
 //     「dirty 且雲端≠本機且本機存在」＝本機確實較新未推 → 仍照舊跳過覆蓋、保護本機（與 #169 原行為完全相同）。
-function momoOriginsCloudDecision(k, cloudData){
+function _momoOriginsDecideLegacy(k, cloudData){
   let local = (typeof Store!=='undefined' && Store._profitMem) ? Store._profitMem[k] : undefined;
   // ⚠ reload gap 修：_profitMem 於 reload 後可能尚未補水 → 改由 localStorage 取本機權威值（persisted、跨重整），
   //   避免 dirty 未推的逐列成本被下方「localMissing 自癒」誤判為孤兒而清 dirty＋接受雲端（＝未推值被覆蓋）。
@@ -14641,7 +14700,207 @@ function momoOriginsCloudDecision(k, cloudData){
   }
   return equal ? {action:'noop'} : {action:'accept'};                                          // 非 dirty：等值 noop / 不等接受
 }
+// 對外入口：結果【一律】是 legacy 決策（行為與改版前逐字相同）；shadow 只旁路記錄「若用 last-pushed 模型會怎麼決定」，不影響回傳值。
+function momoOriginsCloudDecision(k, cloudData){
+  const res=_momoOriginsDecideLegacy(k, cloudData);
+  try{ _momoOShadowOnSnapshot(k, cloudData, res); }catch(e){ try{ console.warn('[origins shadow] 例外（不影響行為）：',e); }catch{} }
+  return res;
+}
 window.__momoOriginsCloudDecision=momoOriginsCloudDecision;
+// ═══════════ origins last-pushed merge 模型 — SHADOW 版（2026-11-02）═══════════
+//  目標（之後才可能切換、本版【不切換】）：把 origins 從「updatedAt 較新就接受／dirty 旗標」改成 products 同款的 last-pushed 模型——
+//    只有「本機 == 我上次成功推的版本（lastPushed）」才可以安全接受雲端；本機有自己的改動就保留本機、不被雲端覆蓋。
+//  🔴 絕不使用「雲端 updatedAt 較新就自動接受」。
+//  本版 SHADOW：只讀、只記錄。不改任何寫入、不改任何接受／略過決策（回傳值永遠是 legacy 的結果）。
+//    記錄方式：記憶體 + localStorage（ec_momo_origins_shadow_log，最近 40 筆摘要）；唯一新增的持久化狀態是 baseline（ec_momo_origins_lastpushed|<key>，只存每筆的短雜湊）。
+//    baseline 只跟著「實際發生的事」走：推成功 → 設為剛推的本機版；legacy 接受雲端 → 設為該雲端版；本機==雲端 → 設為雲端版。
+//  record 粒度：doc 第一層的每個子項（skus/<sku>、freight/<期別>、products/<sku>(master)…）一筆；shop/src/updatedAt/masterAt 不算。
+//  Console：__momoOriginsShadowReport() 看紀錄與統計；await __momoOriginsShadowCompare([篩選字]) 逐 doc 唯讀比對本機 vs 雲端（不寫）。
+window.__MOMO_ORIGINS_MERGE_ENFORCE=false;   // 刻意固定 false：本版沒有任何 enforce 分支，這個旗標只是給日後切換用的標記
+const _MOMO_OLP_LS='ec_momo_origins_lastpushed';
+const _MOMO_OSHADOW_LOG_LS='ec_momo_origins_shadow_log';
+const _MOMO_O_META=new Set(['shop','src','updatedAt','masterAt']);
+let _momoOShadowLog=[];
+function _momoOHash(v){   // cyrb53（53-bit）→ base36；只用來比對相等、不是安全用途
+  const str=_momoStableStr(v); let h1=0xdeadbeef, h2=0x41c6ce57;
+  for(let i=0;i<str.length;i++){ const ch=str.charCodeAt(i); h1=Math.imul(h1^ch,2654435761); h2=Math.imul(h2^ch,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909); h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);
+}
+function momoOriginsRecords(doc){   // doc → { 'skus/ABC':hash, 'freight/2610':hash, … }
+  const out={}; if(!doc||typeof doc!=='object') return out;
+  Object.keys(doc).forEach(top=>{
+    if(_MOMO_O_META.has(top)) return;
+    const v=doc[top];
+    if(v&&typeof v==='object'&&!Array.isArray(v)) Object.keys(v).forEach(c=>{ out[top+'/'+c]=_momoOHash(v[c]); });
+    else out[top]=_momoOHash(v);
+  });
+  return out;
+}
+function momoOriginsRecordValue(doc, rk){ try{ const i=rk.indexOf('/'); return i<0?doc[rk]:(doc[rk.slice(0,i)]||{})[rk.slice(i+1)]; }catch{ return undefined; } }
+function _momoOLpGet(k){ try{ const raw=localStorage.getItem(_MOMO_OLP_LS+'|'+k); if(raw==null) return null; const m=JSON.parse(raw); return (m&&typeof m==='object'&&!Array.isArray(m))?m:null; }catch{ return null; } }
+let _momoOLpFailed=false;
+function _momoOLpSet(k, rec){ if(_momoOLpFailed) return; try{ localStorage.setItem(_MOMO_OLP_LS+'|'+k, JSON.stringify(rec)); }catch(e){ _momoOLpFailed=true; try{ console.warn('[origins shadow] baseline 存不進 localStorage（配額？）→ 本 session 不再寫 baseline（shadow 記錄會標 bootstrap），不影響任何功能：',k); }catch{} } }   // 失敗就整個 session 停手，不去擠其他功能要用的 localStorage 空間
+// 純函式：三方比對。baseRec=null ⇒ bootstrap（沒有 lastPushed，無法證明本機沒動過）。
+function momoOriginsPlanMerge(cloudRec, localRec, baseRec){
+  const bootstrap=(baseRec===null||baseRec===undefined);
+  const keys=new Set([...Object.keys(cloudRec||{}),...Object.keys(localRec||{}),...(bootstrap?[]:Object.keys(baseRec))]);
+  const onlyLocal=[], onlyCloud=[], differ=[], localChanged=[], cloudChanged=[], conflicts=[];
+  keys.forEach(k=>{
+    const l=(localRec||{})[k], c=(cloudRec||{})[k];
+    if(l===undefined&&c!==undefined) onlyCloud.push(k); else if(c===undefined&&l!==undefined) onlyLocal.push(k); else if(l!==c) differ.push(k);
+    if(!bootstrap){ const b=baseRec[k]; const lc=(l!==b), cc=(c!==b); if(lc) localChanged.push(k); if(cc) cloudChanged.push(k); if(lc&&cc&&l!==c) conflicts.push(k); }
+  });
+  const identical=!onlyLocal.length&&!onlyCloud.length&&!differ.length;
+  const cloudOnlyChange=cloudChanged.filter(k=>!localChanged.includes(k));   // 純雲端改動（可安全併入）
+  // 現行整 doc 覆蓋推送會蓋掉／刪掉的雲端內容：非 bootstrap ＝ 雲端有改、本機沒改的記錄；bootstrap ＝ 無法分辨，只能列出所有差異
+  const clobber=bootstrap?onlyCloud.concat(differ):cloudOnlyChange;
+  return { mode:bootstrap?'bootstrap':'lastpushed', identical, onlyLocal, onlyCloud, differ, localChanged, cloudChanged, conflicts, cloudOnlyChange, clobber };
+}
+// 若採 last-pushed 模型，收到雲端快照時會怎麼決定（純函式）：noop｜accept｜keep-local
+function momoOriginsNewDecision(plan, localMissing){
+  if(plan.identical) return {action:'noop'};
+  if(localMissing) return {action:'accept', why:'本機沒有這份'};
+  if(plan.mode==='lastpushed' && plan.localChanged.length===0) return {action:'accept', why:'本機==lastPushed'};
+  return {action:'keep-local', why: plan.mode==='bootstrap'?'沒有 lastPushed，無法證明本機沒動過':'本機有自己的改動（'+plan.localChanged.length+' 筆）'+(plan.conflicts.length?'，其中 '+plan.conflicts.length+' 筆雲端也改了不同值':'')};
+}
+function _momoOLocalDoc(k){
+  let local=(typeof Store!=='undefined'&&Store._profitMem)?Store._profitMem[k]:undefined;
+  if(local==null){ try{ const t=localStorage.getItem(k); if(t!=null) local=JSON.parse(t); }catch{} }
+  return local;
+}
+const _MOMO_OEQ={ noop:'noop', accept:'accept', skip:'keep-local' };   // legacy 動作 ↔ 新模型動作（對得上＝一致）
+function _momoOShadowPush(e){   // 記錄（記憶體 + localStorage 摘要）；不一致或有風險的才印 console
+  _momoOShadowLog.push(e); if(_momoOShadowLog.length>200) _momoOShadowLog.shift();
+  try{ const keep=_momoOShadowLog.slice(-40).map(x=>({t:x.t,k:x.k,event:x.event,old:x.old,nu:x.nu,diverge:x.diverge,why:x.why,n:x.n})); localStorage.setItem(_MOMO_OSHADOW_LOG_LS, JSON.stringify(keep)); }catch{}
+  _momoOShadowStat(e);
+  if(e.diverge||(e.n&&(e.n.clobber||e.n.conflicts))){ try{ console.log('%c[origins SHADOW] '+e.k+'｜'+e.event+'｜現行='+e.old+' → last-pushed 模型='+e.nu+(e.why?'（'+e.why+'）':'')+(e.diverge?'　⚠ 不一致':''),'color:#2563eb;font-weight:700',e.n); }catch{} }
+}
+// 長期累計（給「跑兩週再看」＋各人匯出用）：每台電腦自己存在 localStorage，不上雲。
+//   stats＝快照事件的 現行→新模型 次數（含一致的，當分母）；diverges＝不一致事件（精簡、最近 100 筆）。體積固定很小（< 50KB）。
+const _MOMO_OSHADOW_STAT_LS='ec_momo_origins_shadow_stats', _MOMO_OSHADOW_DIV_LS='ec_momo_origins_shadow_diverge';
+function _momoOShadowStat(e){
+  if(e.event!=='snapshot') return;
+  try{
+    const st=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_STAT_LS)||'null')||{ since:Date.now(), counts:{} };
+    const key=String(e.old).replace('(healed)','')+'→'+e.nu; st.counts[key]=(st.counts[key]||0)+1;
+    localStorage.setItem(_MOMO_OSHADOW_STAT_LS, JSON.stringify(st));
+    if(e.diverge){
+      const a=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_DIV_LS)||'[]'); const n=e.n||{}, sm=n.sample||{};
+      a.push({ t:e.t, k:e.k, old:e.old, nu:e.nu, why:e.why, mode:n.mode, localChanged:n.localChanged, cloudChanged:n.cloudChanged, conflicts:n.conflicts, onlyLocal:n.onlyLocal, onlyCloud:n.onlyCloud, differ:n.differ, sample:{ onlyLocal:(sm.onlyLocal||[]).slice(0,3), onlyCloud:(sm.onlyCloud||[]).slice(0,3), differ:(sm.differ||[]).slice(0,3), conflicts:(sm.conflicts||[]).slice(0,3) } });
+      while(a.length>100) a.shift();
+      localStorage.setItem(_MOMO_OSHADOW_DIV_LS, JSON.stringify(a));
+    }
+  }catch{}
+}
+function _momoOSummary(plan){ const cut=a=>a.slice(0,10); return { mode:plan.mode, onlyLocal:plan.onlyLocal.length, onlyCloud:plan.onlyCloud.length, differ:plan.differ.length, localChanged:plan.localChanged.length, cloudChanged:plan.cloudChanged.length, conflicts:plan.conflicts.length, clobber:plan.clobber.length, sample:{ onlyLocal:cut(plan.onlyLocal), onlyCloud:cut(plan.onlyCloud), differ:cut(plan.differ), conflicts:cut(plan.conflicts) } }; }
+const _momoOQueue=[]; let _momoOQueueBusy=false;
+function _momoOQueueRun(fn){ _momoOQueue.push(fn); if(_momoOQueueBusy) return; _momoOQueueBusy=true; const step=()=>{ const f=_momoOQueue.shift(); if(!f){ _momoOQueueBusy=false; return; } try{ f(); }catch(e){} setTimeout(step,40); }; setTimeout(step,300); }   // 開站十幾份 doc 一起來：錯開算、別卡主執行緒
+// 雲端快照到：legacy 已決定 res；這裡算「新模型會怎麼決定」並記下，baseline 跟著實際發生的事走。
+function _momoOShadowOnSnapshot(k, cloudData, res){
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  if(res && res.action==='skip'){   // 現行判定「本機較新未推」→ 本機不動；順便記錄新模型的看法（需要同步算本機）
+    const local=_momoOLocalDoc(k); const cloudRec=momoOriginsRecords(cloudData), localRec=momoOriginsRecords(local);
+    const plan=momoOriginsPlanMerge(cloudRec, localRec, _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    _momoOShadowPush({ t:Date.now(), k, event:'snapshot', old:'skip', nu:nd.action, why:nd.why, diverge:nd.action!==_MOMO_OEQ.skip, n:_momoOSummary(plan) });
+    return;
+  }
+  if(res && res.action==='accept'){   // 現行會用雲端覆蓋本機：必須在覆蓋前（同步）取本機版本來比
+    const local=_momoOLocalDoc(k); const cloudRec=momoOriginsRecords(cloudData), localRec=momoOriginsRecords(local);
+    const plan=momoOriginsPlanMerge(cloudRec, localRec, _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    _momoOShadowPush({ t:Date.now(), k, event:'snapshot', old:'accept'+(res.healed?'(healed)':''), nu:nd.action, why:nd.why, diverge:nd.action==='keep-local', n:_momoOSummary(plan) });
+    _momoOLpSet(k, cloudRec);   // 現實：本機即將等於雲端 → baseline 同步（即使新模型會保留本機，baseline 仍反映實際發生的事）
+    return;
+  }
+  // noop（本機==雲端）：只需讓 baseline 對上雲端（沒有就建、過期就更新）；錯開執行
+  _momoOQueueRun(()=>{ const cr=momoOriginsRecords(cloudData); const lp=_momoOLpGet(k); if(!lp||JSON.stringify(lp)!==JSON.stringify(cr)) _momoOLpSet(k, cr); });
+}
+// 推送前（syncToCloud 的 origins 任務會先呼叫；最多等 2 秒、錯誤全吞）：讀雲端現值，記錄「現行整 doc 覆蓋」會蓋掉什麼。只讀。
+async function momoOriginsShadowPrePush(k){
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  const pp=k.split('|'); const shop=pp[1], src=pp[2]; if(!window.__cloudMoPlusOrigins) return;
+  const snap=await Promise.race([window.__cloudMoPlusOrigins.getDoc(shop,src), new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),2000))]);   // 同步是逐份序列推：卡網路時每份最多多 2 秒
+  const cloud=snap&&snap.exists&&snap.exists()?(snap.data()||{}):null; const local=_momoOLocalDoc(k);
+  const plan=momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(local), _momoOLpGet(k));
+  _momoOShadowPush({ t:Date.now(), k, event:'push-pre', old:'整doc覆蓋', nu:plan.clobber.length?'merge會保留 '+plan.clobber.length+' 筆雲端內容':'無差異', why:plan.mode, diverge:false, n:_momoOSummary(plan) });
+}
+function momoOriginsShadowPushed(k){   // 推成功：baseline＝剛推上去的本機版
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  const local=_momoOLocalDoc(k); if(local) _momoOLpSet(k, momoOriginsRecords(local));
+}
+window.__momoOriginsShadowPrePush=momoOriginsShadowPrePush; window.__momoOriginsShadowPushed=momoOriginsShadowPushed;   // 診斷／驗證用（推送路徑內部也直接呼叫這兩支）
+window.__momoOriginsShadowReport=function(){
+  const rows=_momoOShadowLog.map(x=>({時間:new Date(x.t).toLocaleTimeString(),key:x.k,事件:x.event,現行:x.old,新模型:x.nu,不一致:x.diverge?'⚠':'',說明:x.why||'',差異:x.n?('只本機'+x.n.onlyLocal+'／只雲端'+x.n.onlyCloud+'／值不同'+x.n.differ+'／衝突'+x.n.conflicts):''}));
+  try{ console.table(rows); }catch{}
+  return { total:_momoOShadowLog.length, diverge:_momoOShadowLog.filter(x=>x.diverge).length, persisted:(()=>{ try{ return JSON.parse(localStorage.getItem(_MOMO_OSHADOW_LOG_LS)||'[]').length; }catch{ return 0; } })(), log:_momoOShadowLog };
+};
+// 匯出本機累計紀錄成檔案（每位會上傳 MO+ 對帳明細的同事各自在自己的電腦跑一次）：重點數字＝「現行 accept、新模型 keep-local」筆數。
+//   檔案只含統計與不一致事件摘要（key／筆數／最多 3 筆 record 名稱），不含任何成本或銷售數值；不上傳雲端，只存成下載檔。
+window.__momoOriginsShadowExport=function(){
+  let st=null, div=[]; try{ st=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_STAT_LS)||'null'); }catch{} try{ div=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_DIV_LS)||'[]'); }catch{}
+  const counts=(st&&st.counts)||{}; const u=(window.App&&window.App.currentUser)||{};
+  const out={ user:u.username||'', name:u.name||'', exportedAt:new Date().toISOString(), appVersion:(document.querySelector('meta[name=app-version]')||{}).content||'',
+    since:st&&st.since?new Date(st.since).toISOString():'', 現行accept_新模型keepLocal:(counts['accept→keep-local']||0), 現行skip_新模型keepLocal:(counts['skip→keep-local']||0),
+    counts, 不一致事件_最近100筆:div, 本session紀錄:_momoOShadowLog.length };
+  try{ const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='origins-shadow_'+(u.username||'unknown')+'_'+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); }catch(e){ try{ console.warn('[origins shadow] 下載檔案失敗，請手動複製下方物件',e); }catch{} }
+  try{ console.log('%c[origins SHADOW] 現行 accept、新模型 keep-local：'+(counts['accept→keep-local']||0)+' 次（自 '+(out.since||'尚無紀錄')+' 起）','color:#2563eb;font-weight:700'); }catch{}
+  return out;
+};
+// 唯讀稽核（master key 診斷用，也適用任何 origins doc）：逐份列出 localStorage 副本／記憶體版本／dirty／待推凍結 vs 雲端，並給出「為什麼本機≠雲端」的分類。不寫任何東西。
+//   用法：await __momoOriginsDirtyAudit()　或帶篩選字　await __momoOriginsDirtyAudit('master')
+//   分類（對應程式路徑，見 PR 說明）：
+//     A 卡住的 dirty　＝ dirty 且 記憶體≠雲端：雲端的更新被擋在外面；下次同步會用本機版整份覆蓋雲端（可能蓋掉同事的更新）
+//     B dirty 但已一致 ＝ dirty 但 記憶體==雲端：無害，下次雲端快照或同步後自動清除
+//     C 待推凍結　　　 ＝ 沒進 dirty 註冊表、但仍被略過雲端更新（F3 之後 origins 只剩「剛存 5 秒內」或「本 session 存過、註冊表寫不進去」兩種）：記憶體落後雲端
+//     D localStorage 舊副本 ＝ 沒 dirty、localStorage 那份≠雲端：sweep 仍會把這個 key 列進待推（重整後記憶體會被雲端覆蓋，但 localStorage 不會自己更新）
+window.__momoOriginsDirtyAudit=async function(filter){
+  const pref='ec_momo_moplus_origins|'; const keys=new Set();
+  try{ if(Store._profitMem) Object.keys(Store._profitMem).forEach(x=>{ if(x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.indexOf(pref)===0) keys.add(x); } }catch{}
+  try{ (_momoReadJson(_MOMO_ODIRTY_LS,[])||[]).forEach(x=>{ if(typeof x==='string'&&x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  const out=[];
+  for(const k of [...keys].sort()){
+    if(filter && k.indexOf(filter)<0) continue;
+    const pp=k.split('|'); let cloud=null, err='';
+    try{ const snap=await window.__cloudMoPlusOrigins.getDoc(pp[1],pp[2]); cloud=snap.exists()?(snap.data()||{}):null; }catch(e){ err=String((e&&e.message)||e); }
+    if(err){ out.push({key:k,分類:'?',說明:'讀雲端失敗：'+err}); continue; }
+    const mem=(Store._profitMem&&Store._profitMem[k])||null; let ls=null, lsRaw=null; try{ lsRaw=localStorage.getItem(k); if(lsRaw!=null) ls=JSON.parse(lsRaw); }catch{}
+    const dirty=_momoOIsDirty(k); const guard=!!(window.__momoShouldSkipCloudOverwrite&&window.__momoShouldSkipCloudOverwrite(k));
+    const cr=momoOriginsRecords(cloud);
+    const pm=mem?momoOriginsPlanMerge(cr, momoOriginsRecords(mem), null):null, pl=ls?momoOriginsPlanMerge(cr, momoOriginsRecords(ls), null):null;
+    const memSame=!mem||pm.identical, lsSame=!ls||pl.identical;
+    let cls='OK', why='';
+    if(dirty && !memSame){ cls='A'; why='dirty 且本機≠雲端：雲端更新被擋；下次同步會整份覆蓋雲端'; }
+    else if(dirty){ cls='B'; why='dirty 但本機==雲端：無害（下次快照／同步後自動清除）'; }
+    else if(guard && !memSame){ cls='C'; why='沒進 dirty 註冊表、但仍被略過雲端更新（剛存 5 秒內，或註冊表寫入失敗）：記憶體落後雲端'; }
+    else if(!lsSame){ cls='D'; why='localStorage 舊副本≠雲端：sweep 仍會把它列進待推（重整後記憶體會跟上雲端，localStorage 不會）'; }
+    const cut=(p)=>p?{ 只本機:p.onlyLocal.length, 只雲端:p.onlyCloud.length, 值不同:p.differ.length }:null;
+    const diffs=(pm&&!pm.identical?pm:(pl&&!pl.identical?pl:null)); const src=(pm&&!pm.identical)?mem:ls;
+    out.push({ key:k, 分類:cls, 說明:why, dirty, 待推凍結:(guard&&!dirty), 有localStorage副本:ls!=null, 記憶體vs雲端:cut(pm), localStorage_vs雲端:cut(pl),
+      差異前5筆: diffs?diffs.differ.concat(diffs.onlyLocal,diffs.onlyCloud).slice(0,5).map(rk=>({record:rk, 本機:momoOriginsRecordValue(src,rk), 雲端:momoOriginsRecordValue(cloud,rk)})):[] });
+  }
+  try{ console.table(out.map(r=>({key:r.key,分類:r.分類,dirty:r.dirty,待推凍結:r.待推凍結,localStorage副本:r.有localStorage副本,說明:r.說明}))); }catch{}
+  return out;
+};
+// 唯讀逐 doc 比對：本機（_profitMem→localStorage）vs 雲端（getDoc）vs baseline。回每份 doc 一列 + 差異記錄的實際值（前 5 筆）。不寫任何東西。
+window.__momoOriginsShadowCompare=async function(filter){
+  const keys=new Set(); const pref='ec_momo_moplus_origins|';
+  try{ if(Store._profitMem) Object.keys(Store._profitMem).forEach(x=>{ if(x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.indexOf(pref)===0) keys.add(x); } }catch{}
+  const out=[];
+  for(const k of [...keys].sort()){
+    if(filter && k.indexOf(filter)<0) continue;
+    const pp=k.split('|'); let cloud=null, err='';
+    try{ const snap=await window.__cloudMoPlusOrigins.getDoc(pp[1],pp[2]); cloud=snap.exists()?(snap.data()||{}):null; }catch(e){ err=String((e&&e.message)||e); }
+    const local=_momoOLocalDoc(k);
+    if(err){ out.push({key:k,error:err}); continue; }
+    const plan=momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(local), _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    const diffs=plan.differ.concat(plan.onlyLocal,plan.onlyCloud).slice(0,5).map(rk=>({record:rk, local:momoOriginsRecordValue(local,rk), cloud:momoOriginsRecordValue(cloud,rk)}));
+    out.push({ key:k, 模式:plan.mode, 新模型:nd.action, 說明:nd.why||'', 只本機:plan.onlyLocal.length, 只雲端:plan.onlyCloud.length, 值不同:plan.differ.length, 本機改動:plan.localChanged.length, 雲端改動:plan.cloudChanged.length, 衝突:plan.conflicts.length, 差異前5筆:diffs });
+  }
+  try{ console.table(out.map(r=>Object.assign({},r,{差異前5筆:undefined}))); }catch{}
+  return out;
+};
 const _momoOSkipShown={};   // 本機較新提示：同一 key 一個 session 只跳一次（key -> 1）
 function _momoLoggedIn(){ try{ return !!(window.App && window.App.currentUser); }catch{ return false; } }
 window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 → 不靜默、通知使用者
@@ -17032,7 +17291,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
@@ -17164,6 +17423,7 @@ function _momoCollectPending(shop){
   }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
+    if(pk.startsWith('ec_pchome_')) return;              // PChome 有自己的同步鈕與預覽（走專屬分支與正確的雲端 doc）；這裡列出會讀錯雲端位置顯示「雲端 0、新增」。判準與 _momoSyncPendingCount 的 session 迴圈排除一致
     // 第 3 塊：封存期別的 ec_notes 殘留不列入預覽（syncToCloud 的 pending 迴圈對同一把 key 用同一支判準丟棄／延後）。非 ec_notes、_growth 恆 'push'、不受影響。
     //   ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件。
     if(_notesSyncDisposition(pk)!=='push'){ console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：',pk); return; }
@@ -21614,6 +21874,23 @@ async function momoMoPlusMasterGenerate(shop){
     ${_applyBtn}
   </div>`;
 }
+// F1（2026-11-02）：主檔匯入直推成功後，讀回雲端確認「跟剛送出的一致」才清 dirty、並從 _pendingSyncKeys 移除。
+//   背景：momoSaveMoPlusOriginsDoc 存檔必標 dirty；直推原本成功後沒人清 → dirty 一直留著 → 之後同事匯入較新主檔時，雲端快照被當「本機較新」略過（見 PR 說明路徑 1）。
+//   🔴 直推失敗（rejected）不會走到這裡 → dirty 維持（照舊）；讀回不一致／讀不到 → 也維持 dirty，等同步鈕處理。
+//   讀回比對用 momoOriginsRecords（逐筆雜湊，不含 shop/src/updatedAt/masterAt）＋ masterAt 另比；比的是「剛送出的內容」，不是本機原版（sanitize 可能改 key）。
+async function momoMoPlusMasterClearDirtyIfSynced(shop, pushed){
+  const k=momoMoPlusOriginsKey(shop,'master'); const be=window.__cloudMoPlusOrigins;
+  if(!be||typeof be.getDoc!=='function') return false;
+  const snap=await be.getDoc(shop,'master'); const cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):null;
+  const same=!!cloud && cloud.masterAt===pushed.masterAt && momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(pushed), null).identical;
+  if(!same){ try{ console.warn('[MO+ master] 直推後讀回與送出內容不一致 → 保留 dirty，請按 ☁ 同步雲端確認：',k); }catch{} return false; }
+  try{ _momoODirtyDel(k); }catch{}
+  try{ _pendingSyncKeys.delete(k); }catch{}
+  try{ momoOriginsShadowPushed(k); }catch{}
+  try{ momoRefreshSyncBtn(shop); }catch{}
+  try{ console.log('%c[MO+ master] 直推已讀回確認一致 → 已清 dirty／待推：'+k,'color:#16a34a;font-weight:700'); }catch{}
+  return true;
+}
 function momoMoPlusMasterApply(shop){
   const parsed=_moPlusMasterParsed; if(!parsed){ return; }
   const res=momoMoPlusApplyMaster(shop, parsed);
@@ -21633,8 +21910,9 @@ function momoMoPlusMasterApply(shop){
   try{
     if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function'){
       cloudNote='（同時直推雲端保存中…）';
-      Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',momoSanitizeMoPlusDoc(check)))
-        .then(()=>{ try{ if(typeof showToast==='function') showToast('商品主檔已存雲端（'+persistedN+' 個商品）','success'); }catch{} },
+      const _pushedMaster=momoSanitizeMoPlusDoc(check);   // 實際送出的內容（讀回比對用）
+      Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',_pushedMaster))
+        .then(()=>{ try{ if(typeof showToast==='function') showToast('商品主檔已存雲端（'+persistedN+' 個商品）','success'); }catch{} try{ momoMoPlusMasterClearDirtyIfSynced(shop,_pushedMaster); }catch(e){ try{ console.warn('[MO+ master] 讀回確認例外（dirty 保留）：',e); }catch{} } },
               e=>{ const em=(e&&e.message)||String(e); try{ console.error('[MO+ master] 雲端寫入失敗：',em); }catch{} try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'⚠ 商品主檔雲端寫入失敗',message:'主檔推雲端被拒：\n'+em+'\n\n（本機 lsOk='+res.masterOk+'、讀回 '+persistedN+' 個）。請截圖此訊息回報 —— 這就是先前靜默失敗的真因。',kind:'error'}); }catch{} });
     } else { cloudNote='（雲端層未就緒，請稍後按 ☁ 同步雲端）'; }
   }catch(e){ cloudNote='（雲端直推發生例外：'+((e&&e.message)||e)+'）'; }
@@ -26594,7 +26872,7 @@ const KPI_CMP_HELP=[
   {q:'① 上面三個大數字：跟上個月的同一段期間比',
    a:'7 月下半 → 比 6 月下半\n7 月上半 → 比 6 月上半\n整月 → 比上個月整月'},
   {q:'② 下面表格每一列的「上期」：跟上一期比',
-   a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、日預算三欄的副標都是這一套。'},
+   a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、淨利、日預算四欄的副標都是這一套。'},
   {q:'③ 兩者不同是刻意的',
    a:'上面看的是月對月的整體趨勢，下面看的是單一商品上一次的表現。\n整月的時候兩套剛好是同一段期間，數字會一樣；只有上半月／下半月才會分岔。'},
   {q:'④ 有篩選的時候，上面三格的比較會整個消失',
@@ -26602,10 +26880,10 @@ const KPI_CMP_HELP=[
   {q:'⑤ 基期沒有報表的時候也不顯示',
    a:'例如通路剛開始經營的第一個月，或那一期沒有產生過報表。'},
 ];
-// 表頭 ? 的短版（'col'）。營收 / 廣告費那兩顆用這個。
+// 表頭 ? 的短版（'col'）。營收 / 廣告費 / 淨利那三顆用這個。
 const KPI_CMP_HELP_COL=[
   {q:'這一欄的「上期」',
-   a:'跟上一期比：7 月下半比 7 月上半、7 月上半比 6 月下半、整月比上個月整月。\n營收、廣告費、日預算三欄都是這一套。'},
+   a:'跟上一期比：7 月下半比 7 月上半、7 月上半比 6 月下半、整月比上個月整月。\n營收、廣告費、淨利、日預算四欄都是這一套。'},
   {q:'⚠ 跟上面三個大數字的「上月同期」不是同一套',
    a:'完整說明請點上方的「ⓘ 比較基準」。'},
 ];
@@ -27236,6 +27514,247 @@ Object.assign(window, {
   // 純函式與資料層，掛上去給 Console 對數字 / 查這一期存了什麼用（不是 inline handler）
   _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,SPLIT_SHOPS,
 });
+
+// ══════ 通路健檢（js/pages/health.js）唯讀轉接：KPI 月結 → 純資料（docs/plan-channel-health.md §1-1）══════
+//  health.js 碰不到本檔模組內的 _kpi* 私有函式，由這支把指定月份算好交出去。口徑＝KPI 頁：
+//    每店數字＝_kpiShopCalc（已套 _kpiRawForCalc：合併欄、不適用欄、autoFill、關站歸 0）；營收＝_kpiRealRev（MOMO＝實際營收）；
+//    PChome 這種 commonAsColumn 單店組，純利用 _kpiCommonColTotals（已扣物流運費，同 KPI 頁單店列）；
+//    蝦皮各店純利【不含】整組共同運費 shopeeCommon（同 KPI 頁，ⓘ 由 health.js 說明）。
+//  填寫進度＝_kpiFillSlots 裡含這家店的格子（單店 commonAsColumn 組另含 _common 那一格）。
+//  資料時間只回 _kpiLastEdit 的時間，不回 by（健檢不顯示人名）。
+//  只讀：不寫入、不訂閱、不碰 DOM。名稱刻意不以 __cloud 開頭（本機防寫不掃它、不影響 27 / 45）。失敗回 {ready:false, error}。
+window.__healthKpiSnapshot=function(months){
+  const out={ready:false,months:{},groups:[],error:null};
+  try{
+    out.ready=_kpiReady();
+    out.groups=KPI_GROUPS.map(g=>({key:g.key,title:g.title,shops:g.shops.slice(),since:g.since||null,
+      shopSince:Object.assign({},g.shopSince||{}),closedFrom:g.closedFrom||null}));
+    const byMonth={};
+    (getKpiRows()||[]).forEach(r=>{if(r&&r.month)byMonth[r.month]=r;});
+    (Array.isArray(months)?months:[]).forEach(m=>{
+      const row=byMonth[m]||_kpiEmptyRow(m);
+      const mo={exists:!!byMonth[m],asOf:null,groups:{}};
+      KPI_GROUPS.forEach(g=>{
+        const slots=_kpiFillSlots(row,g);
+        const colT=_kpiCommonColTotals(row,g);
+        const pureKey=(g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))||{}).k;
+        const last=_kpiLastEdit(m,g.key);
+        if(last&&(mo.asOf==null||last.t>mo.asOf))mo.asOf=last.t;
+        const box={};
+        g.shops.forEach(shop=>{
+          const raw=((row[g.key]||{})[shop])||{};
+          const d=_kpiShopCalc(row,g,shop);
+          const mine=slots.filter(s=>s.shops.includes(shop)||(colT&&s.field==='_common'));
+          box[shop]={
+            rev:_kpiRealRev(d),cost:Number(d.cost)||0,ads:d.ads!=null?(Number(d.ads)||0):null,
+            pure:colT?colT.totalPure:(Number(d[pureKey])||0),qty:Number(d.qty)||0,
+            revFilled:raw.rev!=null&&raw.rev!=='',
+            fill:{filled:mine.filter(s=>s.filled).length,total:mine.length},
+            closed:_kpiGroupClosed(g,m),
+            beforeSince:!!((g.since&&m<g.since)||(g.shopSince&&g.shopSince[shop]&&m<g.shopSince[shop])),
+          };
+        });
+        mo.groups[g.key]=box;
+      });
+      out.months[m]=mo;
+    });
+  }catch(e){
+    console.warn('[health] __healthKpiSnapshot 失敗',e);
+    out.ready=false;out.error=String((e&&e.message)||e);
+  }
+  return out;
+};
+
+// ══════ 通路健檢塊 B：商品層唯讀轉接（docs/plan-channel-health.md §1-2）══════
+//  全部只讀：不寫雲端、不寫 Store；名稱不以 __cloud 開頭（不影響本機防寫的 27 / 45）。
+//  口徑一律沿用各頁現有函式：蝦皮＝淨利表報表（lsLoad：雲端記憶體 → 本機快取，LZ1 也解得開）；
+//    MOMO＝momoAggregatePeriods（lean，同 momoPeriodTotals 的動銷判定：grossQty>0 或 |營收|>0.5；分母＝上架 ∪ 有銷售）；
+//    PChome＝pchomeCalendarCalc（日曆月，轉單＋寄倉；hasBiz＝淨值為正）。
+//  「已調整」只回日期（不回人名、不回內文）：蝦皮＝淨利表備註 ec_notes＋洞察表調整紀錄；MOMO／PChome＝優化紀錄。
+
+// 各平台「資料有更新」的事件（firebase.js / profit.js 收到雲端快照、內容有變才發）。通路健檢用來判斷「到齊而且安靜了」與之後自動重算。
+window.__healthProductEvents={
+  shopee:['profitDataReady','affRptReady'],
+  momo:['momoDataReady','momoReconcileReady','momoMoPlusOriginsReady','momoE001Ready','momoCostByOriginReady'],
+  pchome:['pchomeOrdersReady'],
+};
+// 載入該平台的雲端訂閱組並等資料到齊。回 { ready, timeout?, archivesReady? }。
+//   等待上限：預設 5 分鐘（Console 直接呼叫用）；通路健檢頁自己傳 30 分鐘，60 秒以上顯示「仍在載入（已等 N 秒）」、5 分鐘以上提示先進淨利表，
+//   但不放棄——資料一到就自動重算（2026-11-02 實測：蝦皮在辦公室電腦 39 秒～2 分鐘才到齊，60 秒上限會誤判逾時）。
+//   「到齊」＝ ①雲端第一個快照真的到了（不是本機 localStorage 的舊資料）＋ ②最後一次資料更新事件之後安靜 QUIET 毫秒：
+//     ・蝦皮：profits collection 與舊月份分片都收過「伺服器」快照（__profitsCollectionReady／__profitArchivesReady，離線不算）。
+//     ・MOMO：momoLoadProducts 會退回讀 localStorage，所以不能拿它判斷；改看雲端快照一定會寫的 Store._profitMem：
+//       甲配、乙配商品主檔＋至少一份月對帳（firebase.js 的訂閱第一次收到一定寫 _profitMem 並發 momoDataReady／momoReconcileReady）。
+//       2026-11-02 實測：只看商品數 > 0 時，甲配 2026-09 先算出 264/563，幾秒後雲端到齊才變 273/563 → 所以要等。
+//     ・PChome：訂單、商品清單、對帳三份雲端快照都到了（firebase.js 開站就訂，快照緩存在 window.__pchome*CloudLatest）。
+//   🔴 呼叫端必須在 __ensureProfit resolve 之後才叫（本函式在 profit.js 裡，叫得到就代表已載入、守衛已掛）。
+window.__healthLoadProducts=async function(platform,opts){
+  const o=opts||{},LIMIT=o.limitMs||300000,QUIET=o.quietMs==null?3000:o.quietMs;
+  const t0=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
+  let last=t0;
+  const evs=(window.__healthProductEvents||{})[platform]||[];
+  const bump=()=>{ last=Date.now(); };
+  evs.forEach(e=>window.addEventListener(e,bump));
+  const until=async ok=>{
+    while(Date.now()-t0<LIMIT){ let v=false; try{ v=!!ok(); }catch{} if(v&&Date.now()-last>=QUIET)return true; await wait(300); }
+    try{ return !!ok(); }catch{ return false; }
+  };
+  const mem=k=>{ try{ return typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!=null; }catch{ return false; } };
+  const memPrefix=p=>{ try{ return Object.keys(Store._profitMem||{}).some(k=>k.indexOf(p)===0); }catch{ return false; } };
+  try{
+    if(platform==='shopee'){
+      if(typeof window.__loadShopeeSubs==='function')window.__loadShopeeSubs();
+      if(typeof window.__loadArchiveSubs==='function')window.__loadArchiveSubs();
+      const col=()=>typeof window.__profitsCollectionReady==='function'&&window.__profitsCollectionReady();
+      const arch=()=>typeof window.__profitArchivesReady==='function'&&window.__profitArchivesReady();
+      const ok=await until(()=>col()&&arch());
+      return {ready:ok,timeout:!ok,archivesReady:!!arch()};
+    }
+    if(platform==='momo'){
+      if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();
+      const ok=await until(()=>mem('ec_momo_products|甲配')&&mem('ec_momo_products|乙配')&&memPrefix('ec_momo_reconcile|'));
+      return {ready:ok,timeout:!ok};
+    }
+    if(platform==='pchome'){
+      const ok=await until(()=>typeof window.__pchomeReconCloudLatest!=='undefined'&&typeof window.__pchomeProductsCloudLatest!=='undefined'
+        &&typeof window.__pchomeOrdersCloudLatest!=='undefined');
+      return {ready:ok,timeout:!ok};
+    }
+  }catch(e){ console.warn('[health] __healthLoadProducts 失敗',platform,e); }
+  finally{ evs.forEach(e=>window.removeEventListener(e,bump)); }
+  return {ready:false,timeout:false};
+};
+
+// 某平台某通路某整月的商品層資料（month＝'YYYY-MM'）。shop：蝦皮＝好麻吉…；MOMO＝甲配／乙配／MO+麻吉…；PChome＝'PChome'（轉單＋寄倉一起回）。
+//   回 { platform, shop, month, ... } ；讀不到回 { …, error }。各平台形狀見 js/pages/health.js 的 _hlProdNormalize。
+//   「已調整」日期每個通路快取 20 秒（蝦皮要讀淨利表備註＋洞察表調整紀錄，資料大；同一輪 3～13 個月不用重讀）。
+const _healthAdjCache={};
+window.__healthProductSnapshot=function(platform,shop,month){
+  const out={platform,shop,month,error:null};
+  const ck=platform+'|'+shop, hit=_healthAdjCache[ck];
+  const cached=hit&&(Date.now()-hit.t<20000)?hit.map:null;
+  const lastAdj=cached?Object.assign({},cached):{};
+  const bump=(k,d)=>{ if(cached)return; k=String(k||'').trim(); d=String(d||'').trim().slice(0,10).replace(/-/g,'/'); if(!k||!/^\d{4}\/\d{2}\/\d{2}$/.test(d))return; if(!lastAdj[k]||d>lastAdj[k])lastAdj[k]=d; };
+  try{
+    if(!/^\d{4}-\d{2}$/.test(month||''))throw new Error('bad month');
+    if(platform==='shopee'){
+      const ym=month.replace('-','/');
+      out.halves=[];
+      ['full','first','second'].forEach(h=>{
+        const d=lsLoad(shop,ym,h);
+        const rows=d&&typeof d==='object'?(d.built||d.rows||[]):[];
+        if(!Array.isArray(rows)||!rows.length)return;
+        out.halves.push({half:h,ts:(d&&d.ts)||null,rows:rows.map(r=>({code:String(r.code||''),name:String(r.name||''),qty:+r.qty||0,rev:+r.rev||0,
+          gross:+r.gross||0,adsFee:+r.adsFee||0,platFee:+r.platFee||0,pureProfit:+r.pureProfit||0,roi:+r.roi||0,directROI:+r.directROI||0,clicks:+r.clicks||0}))});
+      });
+      const addNotes=n=>Object.keys(n||{}).forEach(c=>{ const v=n[c]; ((v&&typeof v==='object'&&v.adjustments)||[]).forEach(a=>bump(c,a&&a.date)); });
+      if(!cached){
+        try{ addNotes(getNotes(shop)); }catch{}
+        try{ addNotes(Store.get('ec.insight_'+shop+'_notes',{})); }catch{}
+      }
+    }else if(platform==='momo'){
+      // 🔴 逐商品利潤＝MOMO 總表「淨利貢獻」同一套（2026-11-02 驗收：只用 momoAggregatePeriods 時，甲配 2026-09 有 254／262 個商品金額跟畫面不同，整家合計相同）：
+      //   跟 momoRenderProfitBody 一樣先 momoClearFeeRateCache（吃最新對帳單），逐商品 momoAggregatePeriods，
+      //   再 momoStage4Redistribute（甲配／乙配：物流按逐 SKU 出貨形狀重分配、乙配倉租用 C1212 逐 SKU 實際值；整家合計不變）。
+      //   lean：只跳過畫面用的 latestSale／listPrice（逐 SKU 掃描熱點），profit、skuFreightPeriod、skuRentPeriod 照算（同 momoRentEatsMarginList）。
+      const period=month+'-FULL',keys=momoExpandPeriod(period),isMoPlus=momoIsMoPlus(shop);
+      try{ momoClearFeeRateCache(); }catch{}
+      const prods=momoLoadProducts(shop);
+      const rows=prods.map(p=>{
+        const a=momoAggregatePeriods(p,keys,shop,{lean:true});
+        return { sku:p.sku||'', revenue:a.revenue||0, qty:a.qty||0, cost:a.cost||0, skuFreightPeriod:a.skuFreightPeriod, skuRentPeriod:a.skuRentPeriod,
+          profit:a.profit, margin:a.margin, _g:(a.grossQty!=null?a.grossQty:a.qty), _covered:!!a.covered };
+      });
+      try{ out.freightMode=momoStage4Redistribute(shop,period,rows); }catch(e){ out.freightMode='error'; }
+      out.rows=prods.map((p,i)=>{
+        const r=rows[i];
+        const sold=r._g>0||Math.abs(r.revenue)>0.5;
+        return {key:String(p.sku||''),origin:String(p.origin||'').trim(),name:String(p.name||''),rev:+r.revenue||0,profit:+r.profit||0,qty:+r.qty||0,
+          sold,active:p.discontinued!==true,costKnown:isMoPlus?r._covered:Number(p.cost)>0,cost:+r.cost||0};   // cost：健檢商品標籤算毛利率用（momoAggregatePeriods 的成本）
+      });
+      try{ out.recon=!!momoLoadReconcile(shop,month); }catch{ out.recon=null; }
+      if(!cached){ try{ const ol=momoLoadOptlog(shop)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(x=>bump(s,x&&x.date))); }catch{} }
+    }else if(platform==='pchome'){
+      const products=pchomeLoadProducts()||[];
+      out.latestExport=pchomeLatestExport(products)||'';
+      out.months=pchomeCalendarMonths();
+      out.rows=[];out.subTotals={};
+      if(out.months.indexOf(month)>=0){
+        const pages={};
+        products.forEach(p=>{ const c=String(p.料號||'').trim(); if(!c)return;
+          (Array.isArray(p.商品編號)?p.商品編號:(p.商品編號==null?[]:[p.商品編號])).forEach(v=>{ v=String(v||'').trim(); if(!v)return;
+            const seg=v.split('-'),b=seg.length>1?seg.slice(0,-1).join('-'):v; (pages[c]=pages[c]||[]); if(pages[c].indexOf(b)<0)pages[c].push(b); }); });
+        ['轉單','寄倉'].forEach(sub=>{
+          const calc=pchomeCalendarCalc(month,sub),skus=(calc&&calc.skus)||[];
+          out.subTotals[sub]={sold:calc.bizCount||0,total:skus.filter(x=>!x.discontinued||x.hasBiz).length};
+          skus.forEach(x=>{ const c=String(x.料號||'').trim();
+            out.rows.push({key:c,sub,pages:pages[c]||[],name:String(x.商品名||''),rev:+x.營收||0,profit:x.淨利==null?null:+x.淨利,qty:+x.銷量||0,
+              sold:!!x.hasBiz,active:!x.discontinued,costKnown:!!x.costKnown,cost:x.成本==null?null:+x.成本}); });   // cost：健檢商品標籤算毛利率用
+          try{ const ol=pchomeLoadOptlog(sub)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(e=>bump(s,e&&e.date))); }catch{}
+        });
+      }
+    }else throw new Error('bad platform');
+  }catch(e){ out.error=String((e&&e.message)||e); }
+  out.lastAdjust=lastAdj;
+  // 存「已調整」快取（PChome 只有那個月在日曆月清單裡才真的讀過優化紀錄，沒讀過不存）
+  if(!cached&&!out.error&&(platform!=='pchome'||(out.rows&&out.rows.length)))_healthAdjCache[ck]={t:Date.now(),map:Object.assign({},lastAdj)};
+  return out;
+};
+
+// 從通路健檢跳到淨利表某通路某月、並用搜尋框定位到那個商品。
+//   o＝{ platform:'shopee'|'momo'|'pchome', shop（淨利表的通路名：好麻吉／甲配／轉單…）, month:'YYYY-MM', code }
+//   🔴 不寫持久狀態（照 tagFxJump「只切不記」）：
+//     ・蝦皮切月份用 onMonthChange(…, byUser=false)：不設 _userPickedPeriod 鎖；它會寫 ec_lastMonth_{通路} → 先存後還原。
+//       搜尋只改 state[shop].search＋applyFilters，不走 setSearch（那支會 _saveFilterState 寫 ec_filterstate）。
+//     ・MOMO／PChome 的期間、子分頁、搜尋都是模組記憶體變數（_momoPeriodSel / _momoSub / _momoSearch、_pchome*），本來就不持久化。
+//     ・切到哪個通路＝寫 ec_profitView（＋蝦皮 ec_curShop），跟使用者自己點通路一樣（本機、不上雲）。
+//   流程：寫 ec_profitView → App.navigate('office-d1-profit') → 淨利表重建時 restoreProfitView 切到該通路
+//     → 這裡每 250ms 檢查那個通路的分頁亮了沒，亮了才切期間＋搜尋；8 秒沒亮就提示「請在表中搜尋」。
+window.__profitOpenAt=function(o){
+  o=o||{};
+  const plat=o.platform,shop=o.shop,month=o.month,code=String(o.code||'').trim();
+  if(['shopee','momo','pchome'].indexOf(plat)<0||!shop||!/^\d{4}-\d{2}$/.test(month||''))return false;
+  try{ _saveProfitView(plat,shop); }catch{}
+  if(plat==='shopee'){ try{ localStorage.setItem('ec_curShop',shop); }catch{} }
+  const apply=()=>{
+    if(plat==='shopee'){
+      const el=document.getElementById('content-'+shop);
+      if(!el||!el.classList.contains('active')||!state[shop]||!document.getElementById('month-sel-'+shop))return false;
+      const ym=month.replace('-','/');
+      const half=lsLoad(shop,ym,'full')?'full':'first';
+      const k='ec_lastMonth_'+shop;let saved=null;try{saved=localStorage.getItem(k);}catch{}
+      onMonthChange(shop,false,ym,half);
+      try{ if(saved===null)localStorage.removeItem(k);else localStorage.setItem(k,saved); }catch{}
+      state[shop].search=code;
+      const se=document.getElementById('search-'+shop);if(se)se.value=code;
+      applyFilters(shop);
+      return true;
+    }
+    if(plat==='momo'){
+      const el=document.getElementById('momo-content-'+shop);
+      if(!el||!el.classList.contains('active'))return false;
+      _momoSub[shop]='profit';_momoSearch[shop]=code;_momoPeriodSel[shop]=month+'-FULL';
+      momoRenderShop(shop);
+      return true;
+    }
+    const el=document.getElementById('pchome-content-'+shop);
+    if(!el||!el.classList.contains('active'))return false;
+    _pchomeSub[shop]='profit';_pchomeViewMode[shop]='calendar';_pchomeCalMonth[shop]=month;_pchomeSearch[shop]=code;
+    pchomeRenderShop(shop);
+    return true;
+  };
+  try{ if(window.App&&typeof App.navigate==='function')App.navigate('office-d1-profit'); }catch(e){ console.error('[health] 跳淨利表失敗',e); }
+  const t0=Date.now();
+  const tick=()=>{
+    let done=false;
+    try{ done=apply(); }catch(e){ console.warn('[health] 淨利表定位失敗',e); done=true; }
+    if(done)return;
+    if(Date.now()-t0>8000){ try{ if(typeof showToast==='function')showToast('已切到淨利表，請在表中搜尋 '+code,'info',6000); }catch{} return; }
+    setTimeout(tick,250);
+  };
+  setTimeout(tick,300);
+  return true;
+};
 
 /* ═══════════ PChome 淨利表（供貨模式，框架照甲配）· 商品同步分頁 ═══════════ */
 // 對帳明細檔：UTF-16LE+BOM / Tab / 16 段 / Excel 公式跳脫。解析器與 scratchpad 驗證版同源。

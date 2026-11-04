@@ -2578,12 +2578,28 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-/* 固定欄寬（<colgroup> 的 .inv-col-*）：六個數字欄等寬；比 1100px 窄時不再壓縮，交給 .inv-table-wrap 左右捲動 */
-.inv-table { width: 100%; min-width: 1100px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-.inv-col-ym { width: 68px; }
-.inv-col-num { width: 10%; }
-.inv-col-cnt { width: 11.5%; }
-/* .inv-col-note 不設寬度：拿剩下的 */
+/* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1052px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
+   月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 40（蝦皮）＋52（MOMO）＋40（酷澎）＋54（PChome）＋42（博客來）+ 叫貨 76 + 備註 76 ≈ 1052px。
+   表格滿版：寬螢幕多出來的寬度由瀏覽器按各欄比例分給所有欄，不留白。
+   盤點欄內容只有「11/2」，所以很窄；省下的寬度給備註。備註還是窄：滑鼠移上去（title）看全文、點進去輸入框往左展開成寬框（.inv-in-note:focus）。
+   公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
+   整張表最窄 1052px；更窄才由 .inv-table-wrap 左右捲動。
+   ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；酷澎／PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
+.inv-table { width: 100%; min-width: 1052px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-col-ym { width: 64px; }
+.inv-col-num { width: 76px; }
+.inv-col-num.inv-col-num-co { width: 82px; }
+.inv-col-num.inv-col-num-momo { width: 76px; }
+.inv-col-num.inv-col-num-sm { width: 66px; }
+.inv-col-num.inv-col-num-total { width: 84px; }
+.inv-col-num.inv-col-num-diff { width: 92px; }
+.inv-col-cnt { width: 40px; }
+.inv-col-cnt.inv-col-cnt-auto { width: 52px; }
+.inv-col-cnt.inv-col-cnt-pc { width: 54px; }
+.inv-col-cnt.inv-col-cnt-bk { width: 42px; }
+/* 備註也指定寬度（76px）：每一欄都有寬度時，比最窄還寬的螢幕多出來的寬度由瀏覽器【按各欄寬度比例】分給所有欄，表格滿版。
+   ⚠ 不要把備註改回「不設寬度」（多出來的寬度會全部給備註）也不要加 max-width（會右側留白）。 */
+.inv-col-note { width: 76px; }
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {
   position: sticky; top: 0; z-index: 1;
@@ -2593,13 +2609,21 @@
   font-size: 12px;
   font-weight: 600;
   text-align: right;
+  text-transform: none;   /* 全站 th 預設全大寫；庫存表頭要照原樣顯示（PChome倉，不是 PCHOME倉） */
+  vertical-align: bottom;   /* 有「自動」標籤的欄表頭多一行：標題一律對齊底部 */
+  line-height: 1.3;
 }
 .inv-table thead th.inv-ym { text-align: left; }
 /* 表頭跟著該欄內容的對齊方向：
      數字欄靠右、右內縮 16px＝數字輸入框文字的位置（1px 邊框＋15px padding-right，見 .inv-in-num）、＝總計／較上月 td 的 16px；
      兩個盤點欄置中（th 與輸入框左右 padding 都對稱，中心點自然重合）；備註靠左、左內縮 11px＝輸入框文字（1px 邊框＋10px padding）。 */
-.inv-table thead th.inv-th-num { padding-right: 16px; }
-.inv-table thead th.inv-th-cnt { text-align: center; }
+.inv-table thead th.inv-th-num { padding-left: 2px; padding-right: 11px; }
+.inv-table thead th.inv-th-cnt { text-align: center; padding-left: 2px; padding-right: 2px; }
+.inv-table thead th .inv-th-l { display: block; }
+/* 自動填入（F1102）的格子：右上角一顆小圓點，來源說明在輸入框 title */
+.inv-cell-autofill { position: relative; }
+.inv-cell-autofill::after { content: ''; position: absolute; top: 5px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--primary); pointer-events: none; }
+
 .inv-table thead th.inv-th-txt { padding-left: 11px; text-align: left; }
 .inv-th-auto { color: var(--text-muted); }
 /* 表頭「!」：說明資料來源（滑鼠移上去看 title） */
@@ -2614,7 +2638,7 @@
   font-size: 10px;
   font-weight: 600;
 }
-.inv-table th.inv-ym { padding: 6px 10px; text-align: left; font-weight: 600; }
+.inv-table th.inv-ym { padding: 6px 8px; text-align: left; font-weight: 600; }
 .inv-year-row th { padding: 0; background: var(--primary-soft); text-align: left; }
 .inv-year-btn {
   width: 100%;
@@ -2633,7 +2657,7 @@
 /* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
 /*   選擇器要寫成 .inv-table td.inv-auto：只寫 .inv-auto 權重比 .inv-table td { padding:0 } 低，padding 會被蓋成 0（v805 實測）；
      右內縮 16px 跟數字輸入框文字、表頭對齊。紅綠色的規則也跟著提高權重，不然會被這條的 color 蓋掉。 */
-.inv-table td.inv-auto { padding: 6px 16px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
+.inv-table td.inv-auto { padding: 6px 11px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
 .inv-table td.inv-auto.inv-neg { color: var(--danger); }
 .inv-table td.inv-auto.inv-pos { color: var(--success); }
 .inv-in {
@@ -2649,9 +2673,12 @@
   font-variant-numeric: tabular-nums;
 }
 /* 數字輸入框：文字右邊界＝1px 邊框＋15px＝16px，跟表頭、總計／較上月對齊，也跟右邊下一欄的文字拉開距離 */
-.inv-in-num { text-align: right; padding-right: 15px; }
+.inv-in-num { text-align: right; padding-left: 2px; padding-right: 10px; }
 /* 兩個盤點欄：內容置中（表頭 .inv-th-cnt 也置中） */
-.inv-in-cnt { text-align: center; }
+.inv-in-cnt { text-align: center; padding-left: 1px; padding-right: 1px; }
+/* 備註：平常窄、只看得到開頭（title 有全文）；點進去時輸入框往左展開成 360px 寬框蓋在別欄上面，打字看得到全文 */
+.inv-cell-note { position: relative; }
+.inv-in-note:focus { position: absolute; top: 0; right: 0; bottom: 0; width: 360px; z-index: 6; background: var(--surface); box-shadow: 0 4px 14px rgba(15,23,42,.18); }
 /* 輸入框不設 min-width：欄寬由 <colgroup> 決定（固定欄寬），min-width 只會讓輸入框超出格子 */
 .inv-in:hover:not([readonly]) { border-color: var(--border); }
 .inv-in:focus { outline: none; border-color: var(--primary); background: var(--surface); }
@@ -2659,7 +2686,12 @@
 .inv-in.inv-invalid { border-color: var(--danger); background: var(--danger-soft); }
 .inv-in.inv-saving { color: var(--text-muted); }
 /* 第 2 塊：4 張卡（沿用 .stat-card）＋最近盤點小字＋折線圖 */
-.inv-stat-grid { margin-bottom: 8px; }
+/* 卡片 7 張：上排 3 張（本月總庫存、公司倉、在途存貨）、下排 4 張（MOMO／酷澎／PChome／博客來倉）。12 欄格線：上排每張佔 4、下排每張佔 3。
+   手機寬度沿用全站 stat-grid 規則（2 欄／1 欄，那邊用 !important），這裡把跨欄取消。 */
+.inv-stat-grid { margin-bottom: 8px; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
+.inv-stat-grid .inv-stat:nth-child(-n+3) { grid-column: span 4; }
+.inv-stat-grid .inv-stat:nth-child(n+4) { grid-column: span 3; }
+@media (max-width: 768px) { .inv-stat-grid .inv-stat { grid-column: auto !important; } }
 .inv-stat .stat-value { font-variant-numeric: tabular-nums; }
 .inv-stat-ym {
   margin-left: 6px;
@@ -2696,6 +2728,9 @@
 .inv-series-companyWh::before { background: var(--info); }
 .inv-series-inTransit::before { background: var(--warn); }
 .inv-series-momoWh::before { background: var(--success); }
+.inv-series-coupangWh::before { background: var(--danger); }
+.inv-series-pchomeWh::before { background: var(--sidebar-2); }
+.inv-series-booksWh::before { background: var(--text-muted); }
 .inv-chart-box { position: relative; height: 260px; }
 .inv-chart-fail {
   display: flex; align-items: center; justify-content: center;
@@ -2709,3 +2744,314 @@
 .inv-imp-msg { padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; }
 .inv-imp-sum { background: var(--info-soft); color: var(--info); }
 .inv-imp-err { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+
+/* ===================== 通路健檢 hl-*（js/pages/health.js） =====================
+   顏色一律走 :root 變數，不寫死色碼、不碰 --bg 底色；燈號：綠 --success、黃 --warn、紅 --danger、沒分數灰 --text-muted。 */
+.hl-page .page-header p { max-width: 820px; }
+/* 標題列：左邊標題＋說明、右邊「📖 怎麼看這頁」；窄螢幕按鈕掉到下一行（同庫存頁 .inv-hd） */
+.hl-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hl-guide-btn { white-space: nowrap; }
+.hl-mock-banner, .hl-warn { margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; }
+.hl-mock-banner { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.hl-warn { background: var(--info-soft); color: var(--info); }
+/* 頁頂「⚠ KPI 尚未填完」：琥珀色提示列；可跳轉的項目是按鈕外觀的文字連結，沒權限時是純文字 */
+.hl-pending { display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 4px; margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--warn-soft); color: var(--text); font-size: 12px; line-height: 1.6; }
+.hl-pending-h { font-weight: 600; color: var(--warn); margin-right: 4px; }
+/* 收合成一行（2026-11-03）：標題本身是按鈕，點了展開下方清單 */
+.hl-pending-toggle { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--warn); cursor: pointer; text-align: left; }
+.hl-pending-toggle:hover, .hl-pending-toggle:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+.hl-pending-caret { display: inline-block; margin-left: 2px; }
+.hl-pending-list { flex-basis: 100%; margin-top: 4px; }
+.hl-pending-sep { color: var(--text-muted); }
+.hl-pending-item { padding: 0; border: 0; background: none; font: inherit; color: var(--text); white-space: nowrap; }
+button.hl-pending-item { cursor: pointer; color: var(--primary-dark); text-decoration: underline; text-underline-offset: 2px; }
+button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(--primary); }
+.hl-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.hl-month { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.hl-month select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.hl-chip-ver, .hl-asof { font-size: 12px; color: var(--text-muted); }
+.hl-chip-ver { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+/* 🔴 css/profit.css 有全域 th / td（靠右、不換行、大寫、th 可點的游標與 hover 色），全站都會載入。
+   這裡把健檢細項裡的表（.hl-sub：子指標表、拖累清單）的 th / td 全部明確設回：文字靠左、數字欄（.hl-num）靠右，表頭跟內容同一個對齊。 */
+.hl-sub th { text-align: left; text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
+.hl-sub th:hover { color: var(--text-muted); }
+.hl-sub td { text-align: left; white-space: normal; }
+/* 卡片牆（塊 3，2026-11-03）：依通路類型分組；點卡片在該組下方展開細項（全寬），同一時間只展開一個 */
+/* 塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊依視窗寬度自動並排；展開的細項佔滿一整排、排在那一排下面 */
+.hl-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; }
+.hl-group { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.hl-group-n1 { width: 215px; }
+.hl-group-n2 { width: 440px; }
+.hl-group-n3 { width: 665px; }
+.hl-group-n4 { width: 890px; }
+.hl-group-n5 { width: 1115px; }
+.hl-group-hd { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+/* 組內卡片：每張最小 205px（組寬 215 × 張數 + 間距，正好一張一欄）；卡寬要放得下三欄「↑ 上月 22.2%」不截斷；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。同一排卡片等高 */
+.hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 10px; align-items: stretch; }
+.hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
+.hl-tile:hover { border-color: var(--primary); }
+.hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
+/* 名稱列：一行（卡片改版塊 1 拿掉「類型第 N」後不再留兩行高） */
+.hl-tile-hd { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-height: 20px; line-height: 20px; }
+/* 「不排名」標章不能比名稱高（否則業外那張會高 1px，同一排就不等高） */
+.hl-tile-hd .hl-tag { padding: 0 6px; line-height: 18px; }
+.hl-tile-name { font-size: 13px; font-weight: 600; color: var(--text); }
+/* 大字總分＋旁邊比上月分數差 */
+.hl-tile-score { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-height: 32px; }
+/* 卡片上的參考分：「參考」放在數字右邊（不疊在下面），卡片才一樣高 */
+.hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 52px; padding: 2px 8px; font-size: 22px; }
+.hl-tile-score .hl-score-wait { font-size: 14px; }
+.hl-tile-score .hl-delta { font-size: 13px; color: var(--text-muted); }
+/* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「↑ 上月 x%」（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
+   卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「↓ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
+.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; margin-top: auto; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
+.hl-tile-met { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.hl-tile-met-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; cursor: help; }
+.hl-tile-met-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.hl-tile-met-off .hl-tile-met-v { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.hl-tile-met-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: normal; word-break: keep-all; }
+.hl-tile-met-p.hl-ov-up { color: var(--success); }
+.hl-tile-met-p.hl-ov-down { color: var(--danger); }
+.hl-tile-met-p.hl-ov-flat { color: var(--text-muted); }
+.hl-tile-detail { flex: 0 0 100%; min-width: 0; }
+/* 卡片上「⚠ 待處理商品 N 個」（紅、可點）／「✓ 沒有待處理商品」（灰綠）；沒有商品層的通路是空的佔位列，卡片才一樣高 */
+.hl-tile-todo { min-height: 18px; font-size: 12px; line-height: 1.5; }
+.hl-todo-warn { color: var(--danger); font-weight: 600; cursor: pointer; }
+.hl-todo-ok { color: var(--success); opacity: .75; cursor: pointer; }
+.hl-todo-warn:hover, .hl-todo-ok:hover { text-decoration: underline; text-underline-offset: 2px; }
+.hl-todo-warn:focus-visible, .hl-todo-ok:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hl-todo-wait { color: var(--text-muted); }
+/* v5：分數下面一行「純利 80 · 動銷 60」／「純利 80 · 只看純利率」（沒有總分的卡片也留這一行的高度，卡片才一樣高） */
+.hl-tile-parts { min-height: 16px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+/* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
+.hl-score-tbl { margin-top: 8px; }
+.hl-score-tbl .hl-tiers { white-space: normal; }
+.hl-tier { display: inline-block; margin: 0 4px 2px 0; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.hl-tier-hit { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
+.hl-tier-miss { border-style: dashed; color: var(--danger); }
+.hl-tier-none { font-size: 11px; color: var(--text-muted); }
+/* 總分旁「比上月 +8」 */
+.hl-tile-delta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+/* 細項：「看評分細節」預設收合 */
+.hl-score-more { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hl-score-more > summary { cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--info); }
+.hl-score-more > summary::-webkit-details-marker { display: none; }
+.hl-score-more > summary::after { content: ' ▸'; }
+.hl-score-more[open] > summary::after { content: ' ▾'; }
+/* 要處理的商品：已調整的淡化（順序不變） */
+.hl-drag-done td { opacity: .55; }
+/* 待處理超過 topN 個：「顯示全部待處理（N 個）」；已調整收成一行「已調整 N 個 ▸」 */
+.hl-drag-all { margin-top: 8px; font-size: 12px; }
+.hl-drag-donebox { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.hl-drag-donebox > summary { cursor: pointer; list-style: none; font-weight: 600; }
+.hl-drag-donebox > summary::-webkit-details-marker { display: none; }
+.hl-drag-donebox > summary::after { content: ' ▸'; }
+.hl-drag-donebox[open] > summary::after { content: ' ▾'; }
+/* 「📖 怎麼看這頁」：第一層 5 行白話；「看完整規則」預設收合 */
+.hl-guide-intro { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.9; color: var(--text); }
+.hl-guide-more > summary { cursor: pointer; list-style: none; font-weight: 600; color: var(--info); }
+.hl-guide-more > summary::-webkit-details-marker { display: none; }
+.hl-guide-more > summary::after { content: ' ▸'; }
+.hl-guide-more[open] > summary::after { content: ' ▾'; }
+.hl-guide-full { margin-top: 8px; }
+.hl-tile-detail .hl-card { margin: 0; }
+/* 頁面最下方「另有 N 個通路沒有分數」：展開後通路名可點（展開細項） */
+.hl-unrated { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
+/* 卡片改版塊 1：平常收成一行「另有 N 個通路沒有分數 ▸」，點了展開清單（清單收合時用 hidden） */
+.hl-unrated-toggle { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.hl-unrated-toggle:hover, .hl-unrated-toggle:focus-visible { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.hl-unrated-toggle::after { content: ' ▸'; }
+.hl-unrated-toggle[aria-expanded="true"]::after { content: ' ▾'; }
+.hl-unrated-list { margin-top: 4px; }
+.hl-unrated-item { color: var(--primary-dark); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.hl-unrated-item:hover, .hl-unrated-item:focus-visible { color: var(--primary); outline: none; }
+.hl-unrated-item.open { font-weight: 600; }
+.hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
+.hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.hl-score { display: inline-flex; flex-direction: column; align-items: center; min-width: 44px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; line-height: 1.15; }
+.hl-score small, .hl-ring small { font-size: 10px; font-weight: 400; }
+/* 燈號：底色 -soft、字色主色；沒分數灰 */
+.hl-l-green { background: var(--success-soft); color: var(--success); }
+.hl-l-yellow { background: var(--warn-soft); color: var(--warn); }
+.hl-l-red { background: var(--danger-soft); color: var(--danger); }
+.hl-l-none { background: var(--bg); color: var(--text-muted); }
+/* 參考分：灰色斜體＋虛線框，不排名 */
+.hl-ref { background: var(--bg); color: var(--text-muted); font-style: italic; border: 1px dashed var(--border); }
+.hl-delta-up { color: var(--success); font-weight: 600; }
+.hl-delta-down { color: var(--danger); font-weight: 600; }
+.hl-card { margin: 10px 12px 14px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.hl-card-closed { color: var(--text-muted); }
+.hl-card-hd { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.hl-ring { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; font-size: 26px; font-weight: 700; line-height: 1.1; }
+.hl-card-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.hl-card-nm { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
+.hl-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.hl-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.hl-badge-ok { background: var(--success-soft); color: var(--success); border-color: var(--success-soft); }
+.hl-badge-note { font-size: 11px; color: var(--text-muted); }
+.hl-dim { padding: 10px 0; border-top: 1px solid var(--border); }
+.hl-dim-hd { display: flex; align-items: center; gap: 10px; }
+.hl-dim-name { font-weight: 700; color: var(--text); min-width: 64px; }
+.hl-w { margin-left: 6px; font-size: 11px; color: var(--text-muted); }
+.hl-dim-hd .hl-w { margin-left: 0; min-width: 48px; }
+.hl-dim-score { font-weight: 700; min-width: 28px; text-align: right; }
+.hl-dim-off { font-size: 12px; color: var(--text-muted); padding: 2px 8px; background: var(--bg); border-radius: var(--radius-sm); }
+/* 分數條：<progress>，各瀏覽器的填色選擇器分開寫 */
+.hl-bar { flex: 1 1 0; min-width: 48px; max-width: 360px; height: 8px; border: 0; border-radius: 999px; background: var(--bg); overflow: hidden; appearance: none; -webkit-appearance: none; }
+.hl-bar::-webkit-progress-bar { background: var(--bg); border-radius: 999px; }
+.hl-bar-green::-webkit-progress-value { background: var(--success); border-radius: 999px; }
+.hl-bar-yellow::-webkit-progress-value { background: var(--warn); border-radius: 999px; }
+.hl-bar-red::-webkit-progress-value { background: var(--danger); border-radius: 999px; }
+.hl-bar-green::-moz-progress-bar { background: var(--success); }
+.hl-bar-yellow::-moz-progress-bar { background: var(--warn); }
+.hl-bar-red::-moz-progress-bar { background: var(--danger); }
+.hl-sub { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 12px; }
+.hl-sub th { padding: 4px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.hl-sub td { padding: 5px 8px; border-top: 0; border-bottom: 1px solid var(--border); color: var(--text); font-size: 12px; vertical-align: top; }
+.hl-sub .hl-num { width: 84px; text-align: right; white-space: nowrap; }
+.hl-sub .hl-c-info { width: 28px; text-align: center; }
+.hl-sub-off { color: var(--text-muted); background: var(--bg); }
+.hl-sscore { display: inline-block; min-width: 30px; padding: 1px 6px; border-radius: 4px; text-align: center; font-weight: 700; }
+.hl-info summary { cursor: pointer; list-style: none; color: var(--info); }
+.hl-info summary::-webkit-details-marker { display: none; }
+.hl-info-body { margin-top: 4px; padding: 6px 8px; max-width: 420px; white-space: pre-line; font-size: 11px; line-height: 1.6; color: var(--text); background: var(--info-soft); border-radius: var(--radius-sm); }
+/* 名稱旁的 ⓘ（毛利率「為什麼不計分」）：summary 跟名稱同一行，展開的說明掉到下一行、換行顯示 */
+.hl-info-inline { display: inline; margin-left: 4px; }
+.hl-info-inline summary { display: inline; }
+.hl-info-inline[open] .hl-info-body { display: block; white-space: normal; }
+/* ⓘ 兩層（2026-11-03）：第一行一句白話；「看算法」點了才展開公式、來源、提醒 */
+.hl-info-short { font-size: 12px; }
+.hl-more { margin-top: 4px; }
+.hl-info .hl-more > summary { display: block; font-size: 11px; color: var(--info); }
+.hl-more > summary::after { content: ' ▸'; }
+.hl-more[open] > summary::after { content: ' ▾'; }
+.hl-more-body { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--border); white-space: pre-line; color: var(--text-muted); }
+/* 子指標表最右邊 ⓘ 那欄很窄：說明浮在 ⓘ 下方、靠右對齊，不被欄寬擠成一字一行 */
+.hl-sub .hl-c-info .hl-info { position: relative; }
+.hl-sub .hl-c-info .hl-info[open] > .hl-info-body { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 300px; text-align: left; box-shadow: var(--shadow-sm); }
+/* 卡片面向最下面「未計分：…」一行小字 */
+.hl-dim-foot { margin-top: 6px; font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+.hl-dim-foot-item[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+.hl-trend-hd { margin-top: 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.hl-trend { position: relative; height: 220px; margin-top: 6px; }
+.hl-chart-fail { padding: 20px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.hl-next { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+
+/* ── 塊 B：商品層 ── */
+/* 總分欄：商品層還沒載好（載入中／未載入／逾時）不給分數，只顯示狀態字 */
+.hl-score-wait { font-size: 12px; font-weight: 600; color: var(--info); background: var(--info-soft); }
+.hl-score-timeout { color: var(--warn); background: var(--warn-soft); }
+/* 面向標題旁「起始值・待回測校準」 */
+.hl-uncal { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; white-space: nowrap; color: var(--warn); background: var(--warn-soft); }
+.hl-badge-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-soft); }
+/* 頁頂「商品層資料：蝦皮 ✓、MOMO 尚未載入…」 */
+.hl-prodnote { margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 1.6; }
+/* 卡片裡「載入商品資料」列 */
+.hl-prodbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--bg); border: 1px dashed var(--border); font-size: 12px; color: var(--text-muted); }
+.hl-load-btn { white-space: nowrap; }
+/* 拖累商品清單 */
+.hl-drag { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); scroll-margin-top: 12px; }
+.hl-drag-hd { font-weight: 700; color: var(--text); }
+.hl-drag-hd .hl-w { margin-left: 8px; }
+.hl-drag-off { margin-top: 6px; padding: 6px 10px; font-size: 12px; color: var(--text-muted); background: var(--bg); border-radius: var(--radius-sm); }
+.hl-drag-wrap { overflow-x: auto; }
+.hl-drag-table { min-width: 640px; }
+.hl-drag-table .hl-drag-name { max-width: 260px; }
+.hl-drag-jump { padding: 0; border: 0; background: none; font: inherit; font-variant-numeric: tabular-nums; color: var(--primary-dark); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.hl-drag-jump:hover, .hl-drag-jump:focus-visible { color: var(--primary); }
+.hl-reason-tag { display: inline-block; margin: 0 4px 2px 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--danger-soft); color: var(--danger); }
+.hl-adj { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--success-soft); color: var(--success); }
+.hl-drag-more { display: block; margin: 6px 0 0; }
+.hl-drag-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.hl-drag-info summary { cursor: pointer; }
+.hl-drag-info ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
+/* 卡片「★ 亮點 N　⚠ 警訊 N」（塊 4，取代待處理商品那行）：符號＋文字，不只靠顏色 */
+.hl-tag-line { display: flex; gap: 12px; cursor: pointer; font-weight: 600; }
+.hl-tag-line:hover { text-decoration: underline; text-underline-offset: 2px; }
+.hl-tag-line:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hl-tl-good { color: var(--success); }
+.hl-tl-bad { color: var(--danger); }
+/* 商品標籤小燈：綠▲ 灰● 黃▽ 紅▼ */
+.hl-ptag { display: inline-block; margin: 0 3px 2px 0; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 18px; white-space: nowrap; color: var(--text-muted); }
+.hl-pt-green { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.hl-pt-yellow { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+.hl-pt-red { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+/* 細項：亮點／警訊兩張清單，寬螢幕左右並排、窄螢幕上下 */
+.hl-tags { margin-top: 12px; }
+.hl-tags-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: 11px; color: var(--text-muted); }
+.hl-tags-legend .hl-w { margin-left: 4px; }
+.hl-tags-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 8px; }
+.hl-tags-col { min-width: 0; }
+.hl-tags-ttl { font-size: 13px; font-weight: 700; }
+.hl-tags-ttl .hl-w { margin-left: 6px; font-weight: 400; }
+.hl-tags-good { color: var(--success); }
+.hl-tags-bad { color: var(--danger); }
+.hl-tags-msg { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.hl-tags-wrap { overflow-x: auto; }
+/* 清單（精簡版）：固定欄寬（1200px 含 240px 側欄時一欄約 420px 也放得下、不出現左右捲軸）。
+   第一格一行：名稱（截斷）＋同色燈號接在後面；營收（萬）、營收比上月兩欄。字級整張一致 12px */
+.hl-tags-tbl { table-layout: fixed; }
+.hl-tags-tbl th, .hl-tags-tbl td { padding: 5px 4px; font-size: 12px; line-height: 18px; }
+.hl-sub th.hl-tags-rev, .hl-sub td.hl-tags-rev { width: 64px; }
+.hl-sub th.hl-tags-g, .hl-sub td.hl-tags-g { width: 72px; }
+.hl-tags-item { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hl-tags-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hl-tags-chips { flex: 0 0 auto; white-space: nowrap; }
+.hl-tags-chips .hl-ptag { margin: 0 2px 0 0; padding: 0 3px; font-size: 10px; line-height: 16px; }
+.hl-tags-more { margin-top: 4px; padding: 2px 8px; font-size: 12px; }
+/* 口徑變更提醒（HEALTH_NOTICES）：一行短字＋ⓘ，點了看完整說明 */
+.hl-notice { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--warn); }
+.hl-notice-txt { font-weight: 600; }
+.hl-notice-i { display: inline; margin-left: 4px; }
+.hl-notice-i summary { display: inline; }
+.hl-notice-i[open] .hl-info-body { display: block; white-space: normal; color: var(--text); font-weight: 400; }
+/* 指標逐月變化表（塊 5 精簡版）：每格一個短數字、底色＝燈號（紅、黃格加底線，不只靠顏色）；分數、比上月在 title */
+.hl-mtable { margin-top: 16px; }
+.hl-mt-hd { font-size: 13px; font-weight: 700; color: var(--text); }
+.hl-mt-pick { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.hl-mt-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.hl-mt-wrap { overflow-x: auto; }
+.hl-mt-tbl th, .hl-mt-tbl td { font-size: 12px; }
+.hl-mt-tbl th[scope="row"] { white-space: nowrap; color: var(--text); }
+.hl-sub .hl-mt-trend { min-width: 150px; white-space: nowrap; color: var(--text); }
+.hl-mt-note td { padding-top: 0; border-bottom: 1px solid var(--border); }
+.hl-mt-note .hl-notice { margin-top: 0; }
+.hl-mt-row { cursor: pointer; }
+.hl-mt-row:hover th[scope="row"], .hl-mt-row.open th[scope="row"] { color: var(--primary-dark); }
+.hl-mt-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.hl-mt-k { margin-left: 6px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 10px; font-weight: 400; color: var(--text-muted); }
+.hl-mt-scored { border-color: var(--primary); color: var(--primary-dark); }
+.hl-sub .hl-mc { width: auto; min-width: 64px; }
+.hl-mc-green { background: var(--success-soft); color: var(--success); }
+.hl-mc-yellow { background: var(--warn-soft); color: var(--warn); text-decoration: underline dotted; text-underline-offset: 3px; }
+.hl-mc-red { background: var(--danger-soft); color: var(--danger); text-decoration: underline; text-underline-offset: 3px; }
+.hl-mc-gray { color: var(--text-muted); }
+.hl-mt-chart { margin-top: 8px; }
+/* 手機：卡片牆一排一張；展開的細項跟著變窄；子指標表收掉滿分標準欄（ⓘ 裡照樣看得到公式） */
+@media (max-width: 768px) {
+  .hl-tags-cols { grid-template-columns: 1fr; }
+  /* 手機：清單上下排；燈號放不下時換到名稱下一行（三欄都留） */
+  .hl-tags-item { flex-wrap: wrap; }
+  .hl-tags-name { flex: 1 1 96px; }   /* 名稱至少留 96px，燈號擠不下才換行 */
+  .hl-tags-wrap, .hl-mt-wrap { max-width: calc(100vw - 72px); }
+  .hl-tiles { grid-template-columns: 1fr; }
+  .hl-group { width: 100%; }
+  .hl-card { margin: 8px 4px 12px; padding: 12px; }
+  .hl-card-hd { align-items: flex-start; gap: 12px; }
+  .hl-ring { width: 56px; height: 56px; font-size: 20px; }
+  .hl-sub .hl-lim { display: none; }
+  /* 拖累清單：手機不設最小寬度（否則整張展開卡片會被撐寬、外層表格左右捲），商品名可換行 */
+  .hl-drag-table { min-width: 0; }
+  /* 表格儲存格會被內容撐寬：限制拖累清單容器不超過畫面寬，放不下的在自己框裡左右捲，不撐寬整張卡片 */
+  .hl-drag-wrap { max-width: calc(100vw - 72px); }
+  /* 面向標題列（名稱、權重、分數條、分數、待校準標章）放不下時換行，不撐寬卡片 */
+  .hl-dim-hd { flex-wrap: wrap; row-gap: 4px; }
+  .hl-drag-table .hl-drag-name { max-width: none; }
+  .hl-drag-table td, .hl-drag-table th { padding-left: 4px; padding-right: 4px; }
+  .hl-drag-table .hl-drag-opt { display: none; }   /* 手機只留品號、商品、原因、拖累金額、調整；營收／純利／廣告費在桌機看 */
+  .hl-info-body { max-width: 200px; }
+}

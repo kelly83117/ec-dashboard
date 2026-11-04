@@ -1051,6 +1051,7 @@ const App = {
     if (route === 'employees') return true;
     if (route === 'issues') return true;   // 問題追蹤：所有登入者可看（寫入權限由 issues.js 判斷）
     if (route === 'inventory') return true;   // 庫存：所有登入者可看（不是部門、不走 office-；寫入權限由 inventory.js 判斷）
+    if (route === 'health') return true;   // 通路健檢：所有登入者可看（老闆指示不鎖權限；不是部門、不走 office-；純讀取頁，見 js/pages/health.js）
     if (route === 'users') return user.role === 'admin' || user.role === 'view';  // view：唯讀檢視帳號頁
     if (route.startsWith('office-')) {
       const rest = route.slice('office-'.length);
@@ -1281,6 +1282,8 @@ const App = {
       case 'users': main.innerHTML = this.viewUsers(); break;
       case 'issues': main.innerHTML = this.viewIssues(); this.bindIssues(); break;
       case 'inventory': main.innerHTML = this.viewInventory(); this.bindInventory(); break;
+      // 通路健檢：刻意不加進 CLOUD_RENDER_ROUTES（雲端推播不重畫這頁；畫面上有「↻ 重新計算」）
+      case 'health': main.innerHTML = this.viewHealth(); this.bindHealth(); break;
       default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
@@ -3780,6 +3783,7 @@ async function __lsTidyClick(btn, other) {
     '壓縮 MOMO 商品主檔：' + ((r.momoCompressed && r.momoCompressed.done) || 0) + ' 把',
     '刪除舊報表：' + r.deleted.length + ' 把' + (r.deleted.length ? '（' + r.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
     '刪除洞察表本機副本：' + r.insight.deleted.length + ' 把' + (r.insight.skippedAll ? '（' + r.insight.skippedAll + '）' : ''),
+    '刪除舊版訂價表殘留：' + ((r.pricing && r.pricing.deleted.length) || 0) + ' 把' + (r.pricing && r.pricing.deleted.length ? '（' + r.pricing.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
     keptOld.length ? '保留：' + keptOld.map(x => x.key + '＝' + x.reason).join('；') : '',
     still ? '佔空間前 5 名：' + (after.top || []).slice(0, 5).map(x => x.key + ' ' + x.kb + 'KB').join('、') : '',
   ].filter(Boolean).join('\n');
