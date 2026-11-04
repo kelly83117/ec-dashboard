@@ -24329,8 +24329,12 @@ function momoBuildSyncPlan(parsed){
   ['甲配','乙配'].forEach(shop=>{
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
-    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], reactivate=[], newItems=[], noCost=[];
+    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], reactivate=[], f1102Only=[], blankStatus=[], newItems=[], noCost=[];
     const seen=new Set();
+    // 「本期」＝這個賣場有資料的最新月份；本期有銷售＝同動銷率分子口徑（grossQty>0 或營收≠0）。只對「將標下架」的少數候選算。
+    const salesMonth=(momoVisibleMonths(shop).slice(-1)[0])||'';
+    const _salesKeys=salesMonth?momoExpandPeriod(salesMonth+'-FULL'):[];
+    const _hasSales=p=>{ if(!_salesKeys.length) return false; try{ const a=momoAggregatePeriods(p,_salesKeys,shop,{lean:true}); const g=(a.grossQty!=null?a.grossQty:a.qty)||0; return g>0||Math.abs(a.revenue||0)>0.5; }catch(e){ return false; } };
     const f1102Skus=(shop==='乙配')?((momoLoadF1102(shop)||{}).skus||{}):{};   // 乙配 F1102 寄倉即時狀態，當復架輔助訊號
     if(hasInfo){
       const incoming=parsed.info.products[shop]||{};
@@ -24351,7 +24355,8 @@ function momoBuildSyncPlan(parsed){
         if(Number(p.purchasePrice)!==Number(inc.purchasePrice)||Number(p.salePrice)!==Number(inc.salePrice))
           priceChanged.push({sku, name:p.name, oldP:p.purchasePrice, newP:inc.purchasePrice, oldS:p.salePrice, newS:inc.salePrice});
         if(String(p.name||'')!==String(inc.name||'')) nameChanged.push({sku, old:p.name, new:inc.name});
-        if(inc.status && inc.status!=='進行' && !p.discontinued) discontinued.push({sku, name:p.name, status:inc.status});   // Q2
+        if(!inc.status) blankStatus.push({sku, name:p.name, discontinued:p.discontinued===true});   // 銷售狀況空白：多半是欄位沒帶出來／匯出不完整，不當非進行、不自動改上下架（60% 防呆也擋不住「部分欄位空白」），只在預覽列出
+        if(inc.status && inc.status!=='進行' && !p.discontinued) discontinued.push({sku, name:p.name, status:inc.status, hasSales:_hasSales(p)});   // Q2：銷售狀況≠進行 → 標下架（同商品多規格任一進行＝進行，已在 momoParseProductInfo 聚合）
       });
     } else if(hasCost){
       // 只有莫筆克成本 → 掃主檔既有商品，按其 origin 查成本檔比對（不比品名/售價/狀態、不新增品）
@@ -24362,25 +24367,25 @@ function momoBuildSyncPlan(parsed){
         if(Number(p.cost)!==Number(newCost)) costChanged.push({sku:p.sku, name:p.name, old:p.cost, new:newCost});
       });
     }
-    // 復架候選：掃「所有已下架品」（甲配 881／乙配 143 全掃，不只 incoming），主檔銷售狀況=進行、或（乙配）F1102 狀態=進行且有庫存 → 提出復架。
-    //   政策：人工確認、不自動復架（比照標下架流程）。F1102 只是輔助訊號、仍走人工。需上傳商品資訊檔才比對主檔訊號（同標下架）；F1102 訊號 乙配 恆可判。
+    // 復架：掃「所有已下架品」，商品資訊檔裡該品號銷售狀況＝進行 → 自動復架（併進「確認寫入上下架」）。
+    //   🔴 F1102（乙配）只是輔助訊號：「F1102 進行且可賣量>0、但商品資訊檔沒說進行」只列在 f1102Only 提示，【不】自動復架。需上傳商品資訊檔才比對。
     if(hasInfo){
       const incoming=parsed.info.products[shop]||{};
       master.forEach(p=>{
         if(p.discontinued!==true) return;
         const inc=incoming[p.sku];
-        const masterProg=!!inc && inc.status==='進行';                       // 主檔訊號：這份商品資訊說「進行」
+        const masterProg=!!inc && inc.status==='進行';
+        if(masterProg){ reactivate.push({sku:p.sku, name:p.name, masterStatus:inc.status, signals:['銷售狀況 進行']}); return; }
         const fe=f1102Skus[p.sku];
         const fStock=fe?(fe.sellable!=null?fe.sellable:(fe.consigned||0)):null;
-        const f1102Prog=!!fe && fe.status==='進行' && fStock>0;              // 乙配輔助訊號：F1102 進行且可賣量>0
-        if(masterProg||f1102Prog){
-          const signals=[masterProg?'主檔進行':null, f1102Prog?('F1102進行·庫存'+fStock):null].filter(Boolean);
-          reactivate.push({sku:p.sku, name:p.name, masterStatus:(inc?inc.status:null), f1102Status:(fe?fe.status:null), f1102Stock:fStock, signals});
-        }
+        if(!!fe && fe.status==='進行' && fStock>0) f1102Only.push({sku:p.sku, name:p.name, f1102Stock:fStock});
       });
     }
-    const notSeen=hasInfo?master.filter(p=>!seen.has(p.sku)).map(p=>p.sku):[];
-    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,reactivate,newItems,noCost,notSeen};
+    const notSeen=hasInfo?master.filter(p=>!seen.has(p.sku)).map(p=>p.sku):[];   // 不自動改上下架（甲乙配商品資訊檔不一定是完整在架清單）；預覽只列數量與清單
+    const activeCount=master.filter(p=>p.discontinued!==true).length;
+    // 防呆：將標下架超過「現有上架商品」的 60% → 這份商品資訊可能不完整或傳錯店，要勾「我確定」才能寫入
+    const overHalf=activeCount>0 && (discontinued.length/activeCount)>0.6;
+    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,reactivate,f1102Only,blankStatus,newItems,noCost,notSeen,activeCount,overHalf,salesMonth};
   });
   return plan;
 }
@@ -24407,23 +24412,29 @@ function momoSyncApplyName(shop){
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.name=it.new; });   // 名稱不進歷程
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆名稱');
 }
-function momoSyncApplyDiscontinued(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可標記下架的項目','info'); return; }
-  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
-  // 改動二：標下架也寫 history 留稽核軌跡（對稱復架；optlog 維持不寫——標下架非「資源異動」、不進工作日誌）。
-  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=true; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：標記下架（'+((it.signals||[]).join('／')||'主檔非進行')+'）'}); } });
-  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
+// 商品資訊同步的「確認寫入上下架」（取代原本的「標記下架」「批次復架」兩顆按鈕）：
+//   銷售狀況≠進行且目前上架 → 標下架；銷售狀況＝進行且目前已下架 → 復架。檔案裡沒有的品號（notSeen）不動；F1102 只是輔助訊號、不動。
+//   只翻 discontinued 旗標＋一筆 history 稽核，不刪商品、不動 periods（歷史營收／淨利照算）。寫完標待同步，照舊按「☁ 同步雲端」上雲。
+//   ⚠ history 只寫有值的欄位：值是 undefined 的欄位 Firestore 會整份退回（MO+ v753 出過事），所以逐欄檢查，再對被改的商品整條歷程清一次 undefined。
+function _momoSyncHist(p, note){
+  const h={...momoNowParts(), note};
+  ['cost','purchasePrice','salePrice'].forEach(k=>{ const v=p[k]; if(typeof v==='number' && isFinite(v)) h[k]=v; });
+  return h;
 }
-// 復架（對稱於標下架）：把已下架但主檔恢復進行／F1102 進行有庫存的商品設回上架。政策＝人工確認、不自動。
-//   ⚠ 復架＝商品重新出現在上架清單、計入動銷率分母，是「資源復活」的敏感變更 → 一律寫 history 留稽核軌跡（標下架未寫，但復架更需要）。
-function momoSyncApplyReactivate(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).reactivate||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可復架的項目','info'); return; }
+function momoSyncApplyStatus(shop){
+  if(!_momoSyncParsed || !_momoSyncParsed.info){ if(typeof showToast==='function') showToast('要先上傳 MOMO 商品資訊並產生預覽才能寫入上下架','warn'); return; }
+  const sp=momoBuildSyncPlan(_momoSyncParsed).shops[shop]||{};   // 用當下主檔重算（不信預覽時的舊結果）
+  const disc=sp.discontinued||[], rea=sp.reactivate||[];
+  if(!disc.length && !rea.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有要改的上下架','info'); return; }
+  if(sp.overHalf){ const chk=document.getElementById('momo-sync-sure-'+shop); if(!chk||!chk.checked){ if(typeof showToast==='function') showToast('將標下架超過上架商品的 60%，請先勾「我確定」','warn'); return; } }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
-  let n=0;
-  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=false; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：復架（'+((it.signals||[]).join('／')||'人工')+'）'}); n++; } });
+  let nd=0, nr=0; const touched=[];
+  disc.forEach(it=>{ const p=bySku.get(it.sku); if(!p||p.discontinued===true) return; p.discontinued=true; p.history=p.history||[]; p.history.push(_momoSyncHist(p,'商品資訊同步：標記下架（銷售狀況 '+(it.status||'非進行')+'）')); nd++; touched.push(p); });
+  rea.forEach(it=>{ const p=bySku.get(it.sku); if(!p||p.discontinued!==true) return; p.discontinued=false; p.history=p.history||[]; p.history.push(_momoSyncHist(p,'商品資訊同步：復架（銷售狀況 進行）')); nr++; touched.push(p); });
+  touched.forEach(p=>{ if(Array.isArray(p.history)) p.history.forEach(h=>{ if(h&&typeof h==='object') Object.keys(h).forEach(k=>{ if(h[k]===undefined) delete h[k]; }); }); });
   momoSaveProducts(shop,master);
-  if(n>0) momoLogProductAddOptlog(shop, 'sync-reactivate', '復架', '商品資料同步·復架 '+n+' 筆');   // 改動二：復架＝一筆彙總 optlog（工作日誌看得到；比照 15812『同步新建』synthetic key，不撞真品號、不洗版）
-  _momoSyncAfterApply(shop, shop+' 已復架 '+n+' 筆');
+  if(nr>0) momoLogProductAddOptlog(shop, 'sync-reactivate', '復架', '商品資訊同步·復架 '+nr+' 筆');   // 復架＝一筆彙總 optlog（工作日誌看得到；標下架非資源異動、不進工作日誌，同改版前）
+  _momoSyncAfterApply(shop, shop+' 已標下架 '+nd+' 個、復架 '+nr+' 個');
 }
 function momoSyncApplyNew(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可一鍵新增的未建檔項目','info'); return; }
@@ -24509,19 +24520,39 @@ function momoRenderSyncPreview(shop){
       <div style="flex:1;font-size:12px"><b style="color:${color}">${label} ${items.length}</b><div style="color:#9ca3af;margin-top:2px">${sample}${items.length>8?' …':''}</div></div>
       <button onclick="${fn}('${shop}')" style="padding:4px 12px;border-radius:6px;border:none;background:#10b981;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">${txt}</button></div>`;
   };
+  // 上下架區塊（銷售狀況＝進行 → 在架）：自動套用集合＋防呆＋單一「確認寫入上下架」。檔案沒有的品號與 F1102 輔助訊號只提示、不動。
+  const statusBlock=(s,sp)=>{
+    const disc=sp.discontinued||[], rea=sp.reactivate||[], f1102=sp.f1102Only||[], blank=sp.blankStatus||[];
+    if(!disc.length && !rea.length && !f1102.length && !blank.length) return (P.mode!=='cost')?'<div style="padding:6px 0;border-top:1px solid #f3f4f6;font-size:12px;color:#10b981">上下架：與商品資訊「銷售狀況」一致，沒有要改的（標下架 0、復架 0）</div>':'';   // 只傳成本檔（沒有商品資訊）時不比上下架
+    const lst=(label,arr,color,fmt)=>arr.length?`<details style="margin-top:4px"><summary style="cursor:pointer;color:${color};font-size:12px">${label}（${arr.length}）</summary><div style="max-height:170px;overflow:auto;font-size:11px;color:#6b7280;line-height:1.7;margin-top:4px;padding-left:8px">${arr.slice(0,500).map(fmt).join('<br>')}${arr.length>500?'<br>…共 '+arr.length+' 筆':''}</div></details>`:'';
+    const salesN=disc.filter(x=>x.hasSales).length;
+    const monthTxt=sp.salesMonth?(sp.salesMonth+' '):'本期';   // 預覽要寫出月份（例如「其中 2026-10 有銷售 3 個」），不只寫「本期」
+    const btnId='momo-sync-status-apply-'+s, chkId='momo-sync-sure-'+s;
+    const warn=sp.overHalf?`<div style="margin-top:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;color:#b91c1c;font-size:12px;line-height:1.6">⚠ <b>這份商品資訊可能不完整或傳錯店</b>：將標下架 ${disc.length.toLocaleString()} 個，超過現有上架商品（${(sp.activeCount||0).toLocaleString()} 個）的 60%。確認無誤請勾選下方再寫入。</div>`:'';
+    const apply=(disc.length||rea.length)
+      ? (sp.overHalf
+          ? `<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#b91c1c;font-weight:600"><input type="checkbox" id="${chkId}" onchange="var b=document.getElementById('${btnId}');if(b)b.disabled=!this.checked"> 我確定</label><button class="mm-btn-primary" id="${btnId}" style="margin-top:8px" disabled onclick="momoSyncApplyStatus('${s}')">✔ 確認寫入上下架</button>`
+          : `<button class="mm-btn-primary" id="${btnId}" style="margin-top:8px" onclick="momoSyncApplyStatus('${s}')">✔ 確認寫入上下架</button>`)
+      : '';
+    return `<div style="padding:8px 0;border-top:1px solid #f3f4f6;font-size:12px">
+      <b style="color:#374151">上下架（依商品資訊「銷售狀況」；同一品號任一規格進行＝在架）</b>
+      <div style="margin-top:4px;color:#374151">將標下架 <b>${disc.length}</b> 個${disc.length?`（其中 ${monthTxt}有銷售 <b>${salesN}</b> 個，歷史數字照算）`:''}　·　將復架 <b>${rea.length}</b> 個</div>
+      ${lst('將標下架明細',disc,'#9ca3af',x=>'· '+_momoEsc(x.name||'')+' <span style="color:#9ca3af">'+_momoEsc(x.sku)+'</span> <span style="color:#9ca3af">（銷售狀況：'+_momoEsc(x.status||'')+'）</span>'+(x.hasSales?' <span style="color:#d97706">'+_momoEsc(sp.salesMonth||'本期')+' 有銷售</span>':''))}
+      ${lst('將復架明細',rea,'#059669',x=>'· '+_momoEsc(x.name||'')+' <span style="color:#9ca3af">'+_momoEsc(x.sku)+'</span>')}
+      ${blank.length?`<details style="margin-top:4px"><summary style="cursor:pointer;color:#9ca3af;font-size:12px">銷售狀況空白 ${blank.length} 個（不自動改）</summary><div style="max-height:170px;overflow:auto;font-size:11px;color:#6b7280;line-height:1.7;margin-top:4px;padding-left:8px">${blank.slice(0,500).map(x=>'· '+_momoEsc(x.name||'')+' <span style="color:#9ca3af">'+_momoEsc(x.sku)+'</span> <span style="color:#9ca3af">（目前'+(x.discontinued?'已下架':'上架')+'）</span>').join('<br>')}${blank.length>500?'<br>…共 '+blank.length+' 筆':''}</div></details>`:''}
+      ${f1102.length?`<div style="margin-top:4px;color:#9ca3af">另有 ${f1102.length} 個已下架品 F1102 顯示進行且有庫存，但商品資訊檔沒說進行（<b>輔助訊號，不自動復架</b>）：${f1102.slice(0,6).map(x=>_momoEsc(x.name||x.sku)).join('、')}${f1102.length>6?' …':''}</div>`:''}
+      ${warn}${apply}</div>`;
+  };
   const shopBlock=s=>{
     const sp=P.shops[s]; if(!sp) return '';
     const inner=cat('成本有變動',sp.costChanged,'momoSyncApplyCost','套用成本','#374151')
       +cat('售價/進價有變動',sp.priceChanged,'momoSyncApplyPrice','套用價格','#374151')
       +cat('商品名稱有變動',sp.nameChanged,'momoSyncApplyName','套用名稱','#374151')
-      +cat('已下架（銷售狀況≠進行）',sp.discontinued,'momoSyncApplyDiscontinued','標記下架','#9ca3af')
-      +((sp.reactivate&&sp.reactivate.length)?`<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-top:1px solid #f3f4f6">
-        <div style="flex:1;font-size:12px"><b style="color:#059669">可復架（已下架但恢復進行）${sp.reactivate.length}</b><div style="color:#9ca3af;margin-top:2px">${sp.reactivate.slice(0,8).map(x=>`${_momoEsc(x.name||x.sku)}<span style="color:#059669">（${x.signals.join('／')}）</span>`).join('、')}${sp.reactivate.length>8?' …':''}</div></div>
-        <button onclick="momoSyncApplyReactivate('${s}')" style="padding:4px 12px;border-radius:6px;border:none;background:#059669;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">批次復架</button></div>`:'')
+      +statusBlock(s,sp)
       +cat('未建檔品項',sp.newItems,'momoSyncApplyNew','一鍵新增','#5b5fcf')
       +(sp.noCost.length?`<div style="font-size:12px;color:#f97316;padding:6px 0;border-top:1px solid #f3f4f6">查無成本 ${sp.noCost.length}（莫筆克表沒這些原廠編號，成本不動）：${sp.noCost.slice(0,10).map(x=>x.origin).join('、')}</div>`:'')
-      +(sp.notSeen.length?`<div style="font-size:12px;color:#9ca3af;padding:6px 0;border-top:1px solid #f3f4f6">本次未比對到 ${sp.notSeen.length}（主檔有、這份 MOMO資訊沒有）</div>`:'');
-    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!(sp.reactivate&&sp.reactivate.length)&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
+      +(sp.notSeen.length?`<details style="font-size:12px;color:#9ca3af;padding:6px 0;border-top:1px solid #f3f4f6"><summary style="cursor:pointer">本次未比對到 ${sp.notSeen.length}（主檔有、這份 MOMO資訊沒有；<b>不會自動改上下架</b>，因為這份檔不一定是完整在架清單）</summary><div style="max-height:170px;overflow:auto;font-size:11px;line-height:1.7;margin-top:4px;padding-left:8px">${sp.notSeen.slice(0,500).map(k=>'· '+_momoEsc(k)).join('<br>')}${sp.notSeen.length>500?'<br>…共 '+sp.notSeen.length+' 筆':''}</div></details>`:'');
+    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!(sp.reactivate&&sp.reactivate.length)&&!(sp.f1102Only&&sp.f1102Only.length)&&!(sp.blankStatus&&sp.blankStatus.length)&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
     return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:13px;font-weight:700;margin-bottom:2px">${s}</div>
       ${clean?'<div style="font-size:12px;color:#10b981">無差異</div>':inner}</div>`;
@@ -28873,7 +28904,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoEditSpInput,momoEditPpInput,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
   momoUploadFile,momoUploadF1102InvMonth,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
-  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyReactivate,momoSyncApplyNew,momoJumpShop,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyStatus,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
