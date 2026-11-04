@@ -1135,6 +1135,23 @@ try {
       e => console.error('[books_recon] 訂閱失敗：', e));
   } catch (e) { console.error('[books_recon] 訂閱失敗：', e); }
 
+  // ============== FriDay 主站對帳資料 app/friday_recon（2026-11-04；KPI FriDay「從報表帶入」用，入口與架構照 app/books_recon） ==============
+  //   結構：{ schema:1, months:{ 'YYYY-MM':{ 主站:{ orders:{…SCM 解析結果}, promo:{ 交易編號:{負擔,活動名稱,出貨日期} } } } } }。
+  //   寫入只有 writePaths（共用 kpiWriteTo）：orders 整塊覆蓋；promo 逐交易編號 FieldPath（同交易編號覆蓋＝冪等）。成功回 { ok:true }。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe。⚠ 新增這顆後本機防護物件數 30 → 31、寫入方法 +1（見 CLAUDE.md）。
+  //   訂閱照博客來：先緩存 window.__fridayReconCloudLatest，profit.js 載入後 drain。
+  const fridayReconRef = doc(db, 'app', 'friday_recon');
+  window.__cloudFridayRecon = {
+    TS: KPI_TS,
+    getDoc: () => getDoc(fridayReconRef),
+    subscribe: (cb, onErr) => onSnapshot(fridayReconRef, snap => cb(snap.exists() ? (snap.data() || {}) : {}), onErr),
+    writePaths: (pairs) => kpiWriteTo(fridayReconRef, pairs).then(() => ({ ok: true })),
+  };
+  try {
+    window.__cloudFridayRecon.subscribe(data => { window.__fridayReconCloudLatest = data; if (typeof window.__fridayApplyCloudRecon === 'function') window.__fridayApplyCloudRecon(data); },
+      e => console.error('[friday_recon] 訂閱失敗：', e));
+  } catch (e) { console.error('[friday_recon] 訂閱失敗：', e); }
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // ⚡ 重量級訂閱（profits + momo_products/origins/… 全部訂完初次快照約 10MB）：

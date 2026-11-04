@@ -62,8 +62,9 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：30 個物件 / 48 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 30**（2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
+   **「TEST_NOWRITE v2 已啟用：31 個物件 / 49 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 31**（2026-11-04 KPI FriDay 主站加 `__cloudFridayRecon`（寫入只有 `writePaths`）→ 30 變 31、方法 48 變 49——**防護碼實測**（floor 31、MUST 補 `['__cloudFridayRecon','writePaths']`）。
+   再之前：2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
    同日離線實數（假 SDK、READ_OK 規則）是 30 / 47，比推算少 1（差 1 從 2026-10-27 就有），方法數以防護碼實際輸出為準。
    再之前：2026-11-04 KPI 博客來加 `__cloudBooksRecon`（寫入只有 `writePaths`）→ 28 變 29、
    方法 46 變 47——**這組是防護碼實測**（floor 29、MUST 補 `['__cloudHealthRules','writePaths']`、`['__cloudBooksRecon','writePaths']`）。
@@ -87,7 +88,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 30 / 48 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 31 / 49 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -104,13 +105,13 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
-   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`，
-   物件下限改 30，否則新物件沒有 fail-loud 保護。
+   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`、`['__cloudFridayRecon', 'writePaths']`，
+   物件下限改 31，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 30** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 31** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -123,7 +124,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 30）。
+不要相信文件上的數字（包括上面那個 31）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -242,6 +243,14 @@ ESM 有個致命陷阱必須牢記：
   🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。財務儀表板目前仍讀舊的 Google 試算表，沒動。
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
+- `app/friday_recon` — FriDay 對帳資料（2026-11-04；目前只做**主站**），**不放 app/main**。透過 `window.__cloudFridayRecon`：讀 `subscribe` / `getDoc`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。入口與架構照 `app/books_recon`。
+  形狀 `{ schema:1, months:{ 'YYYY-MM':{ 主站:{ orders:{ 訂單數, 件數, 出貨件數, 營收, 4%費用, 超商出貨數, 宅配數, 退貨列數, 最後訂單日, rows:[{交易編號,訂單編號,料號,商品名稱,數量,總貨款,是否退貨,同號}], file, at, by },
+  promo:{ 交易編號:{ 負擔, 活動名稱, 出貨日期, file, at, by } } } } } }`。orders 整塊覆蓋（同月重傳覆蓋）；promo 逐交易編號 FieldPath（同交易編號覆蓋＝冪等、不累加；同一份檔內同交易編號先加總）。
+  月份一律取交易編號前 8 碼（R 退貨列取 R 後 8 碼；SCM 訂單時間沒有年份）。解析 `fridayParseWorkbook`：SCM 訂單匯出（標題列含交易編號／總貨款／廠商商品料號／配送方式）、
+  結帳單費用明細（工作表「詳細資料」，標題列含「促銷折扣負擔」才寫入；「活動贊助費」「銷售獎勵金」只核對 SCM × 2%、不寫；其他拒絕）。「同號⭡」沿用上一列訂單、不算新訂單；R 退貨列料號「-」用同訂單原始列補。
+  超商出貨數＝有物流包裹號的超商（7-11／全家）訂單；宅配數＝宅配訂單筆數（含出貨前就退的）。不存物流包裹號。上傳時選站別（i站 disabled「尚未支援」）。
+  KPI「從報表帶入」只寫 `FriDay-主站`：純函式 `fridayKpiFromRecon(月)`（平台費＝4%＋超商物流費×60＋系統費 500＋訂單數×1＋促銷負擔，`FRIDAY_*` 常數；耗材、物流運費手填，SCM 出貨件數只在上傳摘要顯示），
+  快照 `snapshots.{月}.preAutofillFriday`、還原 `__kpiFridayRestore`、補成本 `kpiFridayOpenMissingCostPanel`（src 'FriDay'）。
 - `app/books_recon` — 博客來對帳資料（2026-11-04；目前只做**寄倉**），**不放 app/main**。透過 `window.__cloudBooksRecon`：讀 `subscribe` / `getDoc`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。
   形狀 `{ schema:1, months:{ '結算帳月 YYYY-MM':{ sales:{ rows:[{店內碼,商品貨號,商品名稱,結算類型,數量,成本小計}], n, qty, amt, recalc, nonConsignN, nonConsignAmt, file, at, by },
   rebate:{ total, pct, base, from, to, codes, file, at, by }, fee:{ items:[{name,amt}], total, shipQty, shipAmt, packAmt, file, at, by },

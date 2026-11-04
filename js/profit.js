@@ -10068,11 +10068,20 @@ const KPI_GROUPS=[
   // 2026-11-04 拆兩店：FriDay-主站（在上）／FriDay-i站，名稱欄顯示「主站」「i站」（KPI_SHOP_LABELS）；欄位、公式、格子型別不動（等報表分析後再改）。
   //   兩列都照一般規則計入填寫進度、有小計列。正式站拆店前 FriDay 沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
   {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay-主站','FriDay-i站'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+    // 2026-11-04 主站「從報表帶入」（app/friday_recon，見下方「FriDay 主站對帳資料」）：訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
+    //   物流運費（宅配運費，我們自付）、耗材手填（耗材 2026-11-04 改手填：不從 SCM 出貨件數推算）；稅金＝公式欄（同 MOMO）。手續費只改顯示名稱「平台費」（key 還是 fee）。拿掉退貨運費（雲端既有值不刪；查過正式站沒有存值）。
+    //   i站本次全部手填，欄位同上。
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},
+      {k:'fee',l:'平台費',get desc(){return '平台費 = 活動贊助費＋銷售獎勵金（Σ總貨款 × 2% × 2）＋ 超商物流費（有物流包裹號的超商訂單 × $'+FRIDAY_CVS_FEE+'）＋ 系統使用費 $'+FRIDAY_SYS_FEE+' ＋ 訂單處理費（訂單數 × $'+FRIDAY_ORDER_FEE+'）＋ 促銷折扣負擔（結帳單明細加總）';}},
+      {k:'ship',l:'物流運費'},{k:'material',l:'耗材'}],
+    order:['qty','rev','cost','fee','tax','ship','material','pure','pureRate'],
     formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
-    ]},
+      // ⚠ tax 要排在 pure 前面（_kpiCalcAll 依序算）
+      {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 營收 × 5/105（含稅金額內含的營業稅，可手動覆蓋）'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.ship-d.material,desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 物流運費 − 耗材'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.ship-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+    ],
+    fillFormula:['tax']},
   // 2026-11-04：博客來寄倉「從報表帶入」（app/books_recon，見下方「博客來對帳資料」）。訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
   //   寄倉運費手填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
   //   拿掉退貨運費、耗材（雲端既有值不刪；查過正式站博客來各月都沒有存值）。KPI 月份 M＝結算帳月 M。
@@ -11224,6 +11233,12 @@ function _kpiFillHtml(row){
     const h=pr.ok?_kpiPchomeAutoHint(month,row):null;
     autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${pr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(pr.why)}">等對帳</span>`}<button id="km-au-btn" class="km-au-btn${pr.ok?'':' km-au-off'}"${pr.ok?'':' disabled'} onclick="kpiPchomeAutoFill()" title="${_kpiEscAttr(pr.ok?'訂單數／營收／商品成本／平台費／耗材，從 PChome 月對帳（帳務月 '+month+'）與商品主檔帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；物流運費維持手填。':pr.why)}">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
   }
+  // FriDay：上傳 SCM／結帳單促銷明細（存 app/friday_recon）＋主站從報表帶入；完全沒有報表 → 帶入鈕 disabled
+  if(group.key==='friday'){
+    const fr=fridayKpiFromRecon(month);
+    const h=fr.ok?_kpiFridayAutoHint(month,row):null;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），會自動辨識。先預覽、確認才寫入。">上傳 FriDay 報表</button><button id="km-au-btn" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill()" title="${_kpiEscAttr(fr.ok?'主站的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填，i站全部手填。':fr.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+  }
   // 博客來：上傳三種報表（存 app/books_recon）＋從報表帶入營收／商品成本／平台費；完全沒有報表 → 帶入鈕 disabled
   if(group.key==='books'){
     const br=booksKpiFromRecon(month);
@@ -11669,7 +11684,7 @@ function _kpiAutoPreviewHtml(month,plan){
     return `<tr class="${sc}"><td class="km-au-c">${chk}</td><td>${_kpiShopLabel(it.shop)}${it.segs[0]==='kpiFieldMerges'?'＋乙配':''}</td><td>${it.label}</td>
       <td class="km-n">${v(it,it.cur)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${val}</td>
       <td class="km-au-st">${sl}${it.srcChanged?'<span class="km-au-upd">來源已更新</span>':''}</td>
-      <td class="km-au-src">${_kpiEscAttr(it.comp||it.note||'')}${it.compNote?`<div class="km-au-note">${_kpiEscAttr(it.compNote)}</div>`:''}</td></tr>`
+      <td class="km-au-src">${_kpiEscAttr(it.comp||it.note||'')}${it.compNote?`<div class="km-au-note">${_kpiEscAttr(it.compNote)}</div>`:''}${(it.compList||[]).map(x=>`<div class="km-au-note">${_kpiEscAttr(x)}</div>`).join('')}</td></tr>`
       // MO+ 商品成本：缺成本的原廠編號（黃字警示，不擋寫入；這些件數不算進成本）
       +((it.warn&&it.warn.length)?`<tr class="km-au-warn"><td></td><td></td><td colspan="6"><div class="km-au-warn-t">⚠ 缺成本 ${fmtN(it.warn.reduce((a,x)=>a+x.qty,0))} 件（不算進成本，照樣可以寫入；補成本表後重新帶入才會算）</div>
         <table class="km-au-warn-tbl"><thead><tr><th>品號</th><th class="km-n">數量</th><th>原廠編號</th></tr></thead><tbody>${it.warn.map(w=>`<tr><td>${_kpiEscAttr(w.sku)}</td><td class="km-n">${fmtN(w.qty)}</td><td>${w.origin?_kpiEscAttr(w.origin):'<span class="km-au-nil">（空白）</span>'}</td></tr>`).join('')}</tbody></table></td></tr>`:'')
@@ -12641,6 +12656,421 @@ async function __kpiBooksRestore(month){
         return true;
       }});
   });
+}
+// ══ FriDay 主站對帳資料（app/friday_recon）＋ KPI「從報表帶入」（2026-11-04；入口與架構照博客來）══
+//   上傳入口暫放 KPI 填寫模式 FriDay 群組；解析 fridayParseWorkbook 與雲端 __cloudFridayRecon 獨立，之後淨利表 FriDay 沿用。
+//   兩種檔：SCM 訂單匯出（*_SCM.xlsx）、結帳單費用明細（payable_detail_*.xlsx，工作表「詳細資料」）。
+//     SCM 沒有站別 → 上傳時選站別，本次只開放主站（i站 disabled「尚未支援」）。
+//     促銷折扣負擔明細：每張結帳單傳一次，依交易編號日期歸月、以交易編號為 key 寫入（同交易編號覆蓋＝冪等，不累加）。
+//     活動贊助費／銷售獎勵金明細：只核對（與 SCM 總貨款 × 2% 比對），不寫入。其他結帳單明細一律拒絕。
+//   雲端：app/friday_recon months.{YYYY-MM}.主站.{orders, promo}
+//     orders＝該月 SCM 解析結果（整塊覆蓋）；promo＝{ 交易編號:{負擔,活動名稱,出貨日期} }（逐交易編號 FieldPath 寫入）。
+//     不存物流包裹號與其他文字欄（只留商品名稱給缺成本清單）；檔案沒有個資。
+//   KPI 月份 M ＝ 交易編號日期的年月（訂單時間沒有年份）。
+// ── FriDay 報表解析（2026-11-04）：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔／活動贊助費／銷售獎勵金）──
+//   以「工作表＋標題列欄名」辨識；共用博客來的 _booksTrim/_booksNum/_booksDate/_booksAoa/_booksR2。
+const FRIDAY_SPONSOR_RATE=0.02;   // 活動贊助費、銷售獎勵金各 2%（每列總貨款 × 2% × 2，整月加總後才四捨五入）
+const FRIDAY_CVS_FEE=60;          // 超商物流費（每張有物流包裹號的超商訂單；出貨前就退、沒有包裹號的不算）
+const FRIDAY_SYS_FEE=500;         // 系統使用費（每月）
+const FRIDAY_ORDER_FEE=1;         // 訂單處理費（每筆訂單）
+const _friYM=d=>d&&d.length>=6?d.slice(0,4)+'-'+d.slice(4,6):'';
+const _friShipped=p=>{const s=_booksTrim(p);return !!s&&s!=='-';};
+const _friIsCvs=m=>/7-11|全家/.test(String(m||''));
+function fridayParseWorkbook(wb,file){
+  const names=(wb&&wb.SheetNames)||[];
+  // 結帳單費用明細：工作表「詳細資料」；標題列含哪一個金額欄決定類型（欄名要完全相同，例「促銷折扣負擔(-)」那種彙總匯出不算）
+  if(names.includes('詳細資料')){
+    const a=_booksAoa(wb.Sheets['詳細資料']);const hi=a.findIndex(r=>r.some(c=>_booksTrim(c)==='交易編號'));
+    const H=hi>=0?a[hi].map(_booksTrim):[];
+    if(H.includes('促銷折扣負擔'))return _friParsePayable(a,hi,'promo','促銷折扣負擔',file);
+    if(H.includes('活動贊助費'))return _friParsePayable(a,hi,'sponsor','活動贊助費',file);
+    if(H.includes('銷售獎勵金'))return _friParsePayable(a,hi,'reward','銷售獎勵金',file);
+    return{type:'unknown',file,error:'「詳細資料」不是促銷折扣負擔／活動贊助費／銷售獎勵金明細，這種結帳單明細目前不支援'};
+  }
+  for(const sn of names){
+    const a=_booksAoa(wb.Sheets[sn]);const hi=a.findIndex(r=>{const h=r.map(_booksTrim);return h.includes('交易編號')&&h.includes('總貨款')&&h.includes('廠商商品料號')&&h.includes('配送方式');});
+    if(hi>=0)return _friParseScm(a,hi,file);
+  }
+  return{type:'unknown',file,error:'認不出是哪一種 FriDay 報表（工作表：'+(names.join('、')||'無')+'）'};
+}
+// SCM 訂單匯出：一列一項商品。「同號⭡」＝上一列同一筆訂單的另一項（沿用交易編號／訂單編號／包貨編號／配送方式，算營收件數成本、不算新訂單）；
+//   「R」開頭＝退貨（數量金額為負，月份取 R 後 8 碼；料號是「-」就用同訂單編號的原始列補）。年月一律取交易編號前 8 碼（訂單時間沒有年份）。
+function _friParseScm(a,hi,file){
+  const H=a[hi].map(_booksTrim),ix=n=>H.indexOf(n),errs=[];
+  const lack=['交易編號','訂單編號','廠商商品料號','數量','總貨款','配送方式','已出貨物流包裹號'].filter(n=>ix(n)<0);
+  if(lack.length)return{type:'scm',file,month:'',months:[],errs:['SCM 標題列缺欄位：'+lack.join('、')]};
+  const iName=ix('商品名稱');
+  const rows=[];let prev=null;
+  a.slice(hi+1).forEach(r=>{
+    let tx=_booksTrim(r[ix('交易編號')]);if(!tx)return;
+    const same=/同號/.test(tx);
+    if(same&&!prev){errs.push('第一筆資料就是「同號⭡」，沒有上一列可以沿用，略過');return;}
+    let order=_booksTrim(r[ix('訂單編號')]),mode=_booksTrim(r[ix('配送方式')]);
+    if(same){tx=prev.tx;order=prev.order;mode=mode||prev.mode;}
+    const isR=/^R/.test(tx),d=isR?tx.slice(1,9):tx.slice(0,8);
+    // 退貨列：實際檔案的數量是正數、只有金額是負的 → 一律轉成負數（件數淨額、退貨回沖成本才對）
+    const q0=_booksNum(r[ix('數量')]),a0=_booksNum(r[ix('總貨款')]);
+    const row={tx,order,code:_booksTrim(r[ix('廠商商品料號')]),name:iName>=0?_booksTrim(r[iName]):'',qty:isR?-Math.abs(q0):q0,amt:isR?-Math.abs(a0):a0,
+      mode,shipped:_friShipped(r[ix('已出貨物流包裹號')]),same,isR,date:d,month:_friYM(d)};
+    if(!same)prev={tx,order,mode};
+    rows.push(row);
+  });
+  // 退貨列料號「-」→ 同訂單編號的原始列補回
+  const codeByOrder={};rows.forEach(r=>{if(!r.isR&&r.code&&r.code!=='-'&&!codeByOrder[r.order])codeByOrder[r.order]=r.code;});
+  let filled=0;rows.forEach(r=>{if(r.isR&&(!r.code||r.code==='-')&&codeByOrder[r.order]){r.code=codeByOrder[r.order];filled++;}});
+  const byMonth={};
+  rows.forEach(r=>{if(!r.month){errs.push('交易編號 '+r.tx+' 讀不出日期，略過');return;}
+    const o=byMonth[r.month]=byMonth[r.month]||{訂單數:0,件數:0,出貨件數:0,營收:0,_fee4:0,超商出貨數:0,宅配數:0,退貨列數:0,最後訂單日:'',rows:[]};
+    o.件數+=r.qty;o.營收+=r.amt;o._fee4+=r.amt*FRIDAY_SPONSOR_RATE*2;
+    if(r.isR)o.退貨列數++;else o.出貨件數+=r.qty;
+    if(!r.isR&&!r.same){o.訂單數++;if(_friIsCvs(r.mode)){if(r.shipped)o.超商出貨數++;}else o.宅配數++;   // 超商出貨數只算有物流包裹號的（算超商物流費）；宅配數＝宅配訂單筆數（含出貨前就退的）
+      const dd=r.date.slice(0,4)+'/'+r.date.slice(4,6)+'/'+r.date.slice(6,8);if(dd>o.最後訂單日)o.最後訂單日=dd;}
+    o.rows.push({交易編號:r.tx,訂單編號:r.order,料號:r.code,商品名稱:r.name,數量:r.qty,總貨款:r.amt,是否退貨:r.isR,同號:r.same});
+  });
+  Object.values(byMonth).forEach(o=>{o['4%費用']=Math.round(o._fee4);delete o._fee4;o.營收=_booksR2(o.營收);});
+  const months=Object.keys(byMonth).sort();
+  return{type:'scm',file,month:months[0]||'',months,byMonth,errs,codeFilled:filled,
+    missCode:rows.filter(r=>!r.code||r.code==='-').map(r=>r.tx)};
+}
+// 結帳單費用明細：每列一項；表尾「總計: X」不是資料列（用來核對）。同一份檔案內同交易編號先加總（一筆交易可能有好幾列）。
+function _friParsePayable(a,hi,type,amtCol,file){
+  const H=a[hi].map(_booksTrim),ix=n=>H.indexOf(n),errs=[];
+  let total=null;const byTx={};let n=0,sum=0;
+  a.slice(hi+1).forEach(r=>{
+    const c0=_booksTrim(r[0]);const mt=c0.match(/^總計[:：]\s*([-\d,\.]+)/);if(mt){total=_booksNum(mt[1]);return;}
+    const tx=_booksTrim(r[ix('交易編號')]);if(!/^R?\d{8}/.test(tx))return;
+    const v=_booksNum(r[ix(amtCol)]);n++;sum+=v;
+    const d=/^R/.test(tx)?tx.slice(1,9):tx.slice(0,8);
+    const o=byTx[tx]=byTx[tx]||{負擔:0,活動名稱:'',出貨日期:'',month:_friYM(d),數量:0};
+    o.負擔=_booksR2(o.負擔+v);o.數量+=_booksNum(r[ix('數量')]);
+    const an=ix('活動名稱')>=0?_booksTrim(r[ix('活動名稱')]):'';if(an&&!o.活動名稱.split('、').includes(an))o.活動名稱=o.活動名稱?o.活動名稱+'、'+an:an;
+    const sd=ix('出貨日期')>=0?_booksDate(r[ix('出貨日期')]):'';if(sd>o.出貨日期)o.出貨日期=sd;
+  });
+  const months=[...new Set(Object.values(byTx).map(o=>o.month))].sort();
+  if(total==null)errs.push('找不到表尾「總計」');
+  return{type,file,amtCol,month:months[0]||'',months,byTx,n,sum:_booksR2(sum),total,errs};
+}
+const FRIDAY_RECON_KEY='ec_friday_recon';
+// 雲端 → 記憶體（照博客來：firebase.js boot 就訂閱、先緩存在 window.__fridayReconCloudLatest；這裡定義後立刻 drain）
+window.__fridayApplyCloudRecon=function(data){
+  try{
+    Store._profitMem=Store._profitMem||{};Store._profitMem[FRIDAY_RECON_KEY]=(data&&data.months)||{};
+    if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();
+  }catch(e){console.error('[friday_recon] 套用雲端失敗：',e);}
+};
+try{if(typeof window.__fridayReconCloudLatest!=='undefined')window.__fridayApplyCloudRecon(window.__fridayReconCloudLatest);}catch(e){}
+function fridayLoadRecon(){try{return(Store._profitMem&&Store._profitMem[FRIDAY_RECON_KEY])||{};}catch{return{};}}
+const FRIDAY_SITE='主站';   // 本次只做主站（i站之後再做）
+const FRIDAY_TYPE_LABEL={scm:'SCM 訂單匯出',promo:'促銷折扣負擔明細',sponsor:'活動贊助費明細（只核對）',reward:'銷售獎勵金明細（只核對）',unknown:'無法辨識'};
+// ── 上傳 ──
+function kpiFridayUpload(){
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  if(typeof XLSX==='undefined'){if(typeof showToast==='function')showToast('Excel 元件還沒載入，請稍後再試','error');return;}
+  const inp=document.createElement('input');inp.type='file';inp.multiple=true;inp.accept='.xls,.xlsx';
+  inp.onchange=async()=>{
+    const files=[...(inp.files||[])];if(!files.length)return;
+    const parsed=[];
+    for(const f of files){
+      try{parsed.push(fridayParseWorkbook(XLSX.read(await f.arrayBuffer(),{type:'array'}),f.name));}
+      catch(e){parsed.push({type:'unknown',file:f.name,error:'讀檔失敗：'+((e&&e.message)||e)});}
+    }
+    _fridayUploadPreview(parsed);
+  };
+  inp.click();
+}
+// 某月 SCM 的交易編號 → 總貨款（這次上傳的優先，否則雲端已存的）；退貨列不算。upByMonth＝這次上傳的所有 SCM 依月份合併
+function _fridayScmTx(month,upByMonth){
+  const up=upByMonth&&upByMonth[month];
+  const rows=up?up.rows:(((fridayLoadRecon()[month]||{})[FRIDAY_SITE]||{}).orders||{}).rows;
+  if(!rows)return null;
+  const m={};rows.forEach(r=>{if(r.是否退貨)return;m[r.交易編號]=(m[r.交易編號]||0)+(Number(r.總貨款)||0);});
+  return{map:m,src:up?'這次上傳的 SCM':'雲端已存的 SCM'};
+}
+function _fridayChecks(ok){
+  const out=[];const upScm={};ok.filter(p=>p.type==='scm').forEach(p=>p.months.forEach(m=>{upScm[m]=p.byMonth[m];}));
+  ok.filter(p=>p.type!=='scm').forEach(p=>{
+    const lab=FRIDAY_TYPE_LABEL[p.type];
+    if(p.total!=null)out.push({ok:Math.abs(p.sum-p.total)<1,t:p.file+'：'+lab+' 明細加總 '+p.sum+' vs 表尾總計 '+p.total});
+    // 每筆交易編號都要在 SCM 找得到（依交易編號月份去找那個月的 SCM）
+    const miss=[],bad=[];let noScm=new Set();
+    Object.entries(p.byTx).forEach(([tx,o])=>{
+      const s=_fridayScmTx(o.month,upScm);if(!s){noScm.add(o.month);return;}
+      if(s.map[tx]==null){miss.push(tx+'（'+o.month+'，'+p.amtCol+' '+o.負擔+'）');return;}
+      if(p.type!=='promo'){const exp=_booksR2(s.map[tx]*FRIDAY_SPONSOR_RATE);if(Math.abs(exp-o.負擔)>0.01)bad.push(tx+'：明細 '+o.負擔+' vs SCM 總貨款 '+s.map[tx]+' × 2% ＝ '+exp);}
+    });
+    if(noScm.size)out.push({ok:null,t:p.file+'：'+[...noScm].join('、')+' 還沒有 SCM，這幾個月的交易編號先不核對'});
+    out.push(miss.length?{ok:false,t:p.file+'：'+miss.length+' 筆交易編號在 SCM 找不到',list:miss}:{ok:true,t:p.file+'：交易編號都在 SCM 找得到'});
+    if(p.type!=='promo')out.push(bad.length?{ok:false,t:p.file+'：'+bad.length+' 筆和 SCM × 2% 對不上',list:bad}:{ok:true,t:p.file+'：逐筆與 SCM 總貨款 × 2% 吻合'});
+  });
+  return out;
+}
+function _fridayUploadPreview(parsed){
+  const esc=_kpiEscAttr,m0=v=>v==null?'—':_kpiMoney(v);
+  const ok=parsed.filter(p=>p.type!=='unknown'&&!(p.errs&&p.errs.length)&&p.months&&p.months.length);
+  const scms=ok.filter(p=>p.type==='scm');
+  const scmDup=scms.length>1&&(()=>{const seen={};return scms.some(p=>p.months.some(m=>{if(seen[m])return true;seen[m]=1;return false;}));})();
+  const rowsHtml=parsed.map(p=>{
+    let info='';
+    if(p.type==='scm')info=p.months.map(m=>{const o=p.byMonth[m];return `<div><b>${m}</b>：訂單數 ${fmtN(o.訂單數)} · 營收 ${m0(o.營收)} · 4% 費用 ${m0(o['4%費用'])} · 超商出貨 ${fmtN(o.超商出貨數)} · 宅配 ${fmtN(o.宅配數)} · 退貨列 ${fmtN(o.退貨列數)} · 件數 ${_kpiNum(o.件數)}（出貨 ${_kpiNum(o.出貨件數)}）</div>`;}).join('')
+      +(p.missCode&&p.missCode.length?`<div class="km-au-note">⚠ 料號是「-」、同訂單也補不回來：${p.missCode.map(esc).join('、')}（商品成本會列在缺成本）</div>`:'')
+      +(p.codeFilled?`<div class="km-au-note">退貨列料號用原始列補回 ${p.codeFilled} 筆</div>`:'');
+    else if(p.type==='promo'||p.type==='sponsor'||p.type==='reward'){
+      const bm={};Object.values(p.byTx).forEach(o=>{bm[o.month]=_booksR2((bm[o.month]||0)+o.負擔);});
+      info=`${fmtN(p.n)} 列（${Object.keys(p.byTx).length} 筆交易）· 明細加總 ${p.sum} · 表尾總計 ${p.total==null?'—':p.total}<div class="km-au-note">依交易編號日期歸月：${Object.keys(bm).sort().map(m=>m+' '+bm[m]).join('、')}</div>`;
+    }
+    const err=p.error||((p.errs||[]).join('；'));
+    return `<tr class="${err?'km-au-x':''}"><td>${esc(p.file)}</td><td>${FRIDAY_TYPE_LABEL[p.type]||p.type}</td><td>${(p.months||[]).join('、')||'—'}</td><td>${err?`<span class="km-bk-err">${esc(err)}</span>`:info}</td></tr>`;
+  }).join('');
+  const checks=_fridayChecks(ok);
+  const chkHtml=checks.length?`<div class="km-bk-chk"><b>核對</b>`+checks.map(c=>`<div class="km-au-check ${c.ok===true?'ok':c.ok===false?'warn':''}">${c.ok===true?'✓':c.ok===false?'⚠':'·'} ${esc(c.t)}${c.list?`<div class="km-au-note">${c.list.slice(0,30).map(esc).join('<br>')}${c.list.length>30?'<br>…':''}</div>`:''}</div>`).join('')+'</div>':'';
+  const dupWarn=scmDup?`<div class="km-bk-errbox">⚠ 同一個月的 SCM 傳了兩份：不知道要用哪一份，這次不寫入，請只選一份重傳。</div>`:'';
+  const willWrite=scmDup?ok.filter(p=>p.type==='promo'):ok.filter(p=>p.type==='scm'||p.type==='promo');
+  const exist=fridayLoadRecon();
+  const writeList=[];
+  willWrite.forEach(p=>{
+    if(p.type==='scm')p.months.forEach(m=>writeList.push(m.replace('-','/')+' SCM 訂單'+((((exist[m]||{})[FRIDAY_SITE]||{}).orders)?'（覆蓋雲端已存的）':'')));
+    else{const bm={};Object.values(p.byTx).forEach(o=>{bm[o.month]=(bm[o.month]||0)+1;});Object.keys(bm).sort().forEach(m=>writeList.push(m.replace('-','/')+' 促銷明細 '+bm[m]+' 筆交易（同交易編號覆蓋）'));}
+  });
+  const siteSel=`<div class="km-fr-site">站別：<label><input type="radio" name="fr-site" value="主站" checked> 主站</label> <label class="km-fr-off" title="尚未支援"><input type="radio" name="fr-site" value="i站" disabled> i站（尚未支援）</label></div>`;
+  App.openModal({title:'上傳 FriDay 報表',width:'1000px',
+    bodyHtml:`<div class="km-au">${siteSel}
+      <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>檔案</th><th>類型</th><th>月份</th><th>內容</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+      ${dupWarn}${chkHtml}
+      <div class="km-au-sub">${writeList.length?'確認後寫入雲端（app/friday_recon 主站）：'+writeList.map(esc).join('、'):'沒有可以寫入的檔案（活動贊助費／銷售獎勵金明細只核對、不寫入）'}</div></div>`,
+    saveLabel:writeList.length?'確認寫入 '+writeList.length+' 項':'關閉',
+    onSave:()=>{if(!writeList.length)return true;_fridayWriteRecon(willWrite);return true;}});
+}
+async function _fridayWriteRecon(list){
+  const by=_kpiWho(),at=Date.now(),pairs=[[['schema'],1]],expect=[];
+  list.forEach(p=>{
+    if(p.type==='scm')p.months.forEach(m=>{const o=p.byMonth[m];
+      pairs.push([['months',m,FRIDAY_SITE,'orders'],Object.assign({},o,{file:p.file,at,by})]);expect.push({m,k:'orders',n:o.rows.length});});
+    else Object.entries(p.byTx).forEach(([tx,o])=>{
+      pairs.push([['months',o.month,FRIDAY_SITE,'promo',tx],{負擔:o.負擔,活動名稱:o.活動名稱,出貨日期:o.出貨日期,file:p.file,at,by}]);expect.push({m:o.month,k:'promo',tx,v:o.負擔});});
+  });
+  let r;try{r=await window.__cloudFridayRecon.writePaths(pairs);}catch(e){console.error('[friday_recon] 寫入失敗',e);if(typeof showToast==='function')showToast('寫入失敗：'+((e&&e.message)||e),'error',8000);return;}
+  if(!(r&&r.ok)){if(typeof showToast==='function')showToast('沒有寫入（唯讀或本機防護）','error');return;}
+  try{
+    const snap=await window.__cloudFridayRecon.getDoc();const d=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+    const bad=expect.filter(x=>{const s=(((d.months||{})[x.m])||{})[FRIDAY_SITE]||{};
+      if(x.k==='orders')return !s.orders||s.orders.at!==at||(s.orders.rows||[]).length!==x.n;
+      const g=(s.promo||{})[x.tx];return !g||g.負擔!==x.v;});
+    if(bad.length){if(typeof showToast==='function')showToast('寫入後讀回對不上 '+bad.length+' 項，請重傳一次','error',10000);return;}
+    window.__fridayApplyCloudRecon(d);
+  }catch(e){console.warn('[friday_recon] 讀回失敗',e);}
+  if(typeof showToast==='function')showToast('已寫入 FriDay 主站報表','success');
+}
+// 純函式：月份 → KPI 主站 訂單數／營收／商品成本／平台費（耗材手填，不算；上傳摘要的出貨件數只供參考）。只讀 app/friday_recon（＋成本表 cost_by_origin，同博客來查法與補零規則）。
+function fridayKpiFromRecon(month,costMap){
+  const s=(fridayLoadRecon()[month]||{})[FRIDAY_SITE]||null;
+  const od=s&&s.orders||null,promo=(s&&s.promo)||{};
+  const promoTx=Object.keys(promo);
+  if(!od&&!promoTx.length)return{ok:false,why:month+' 還沒有上傳 FriDay 主站報表（SCM 訂單匯出）'};
+  const out={ok:true,month,orders:od,qty:null,rev:null,cost:null,fee:null,missing:[],mapped:[],why:{},feeParts:null,promoN:promoTx.length};
+  const promoSum=_booksR2(promoTx.reduce((t,k)=>t+(Number(promo[k].負擔)||0),0));
+  const promoMaxShip=promoTx.reduce((mx,k)=>{const d=promo[k].出貨日期||'';return d>mx?d:mx;},'');
+  out.promoSum=promoSum;out.promoMaxShip=promoMaxShip;
+  if(!od){out.why.qty=out.why.rev=out.why.cost=out.why.fee='缺 SCM 訂單匯出';return out;}
+  out.qty=Number(od.訂單數)||0;out.rev=Number(od.營收)||0;
+  const p4=Number(od['4%費用'])||0,cvs=(Number(od.超商出貨數)||0)*FRIDAY_CVS_FEE,ordFee=out.qty*FRIDAY_ORDER_FEE;
+  out.feeParts=[
+    {k:'4%',l:'活動贊助費＋銷售獎勵金',v:p4,f:'Σ總貨款 × 2% × 2（整月加總後四捨五入）'},
+    {k:'cvs',l:'超商物流費',v:cvs,f:'有物流包裹號的超商訂單 '+fmtN(od.超商出貨數||0)+' × $'+FRIDAY_CVS_FEE},
+    {k:'sys',l:'系統使用費',v:FRIDAY_SYS_FEE,f:'每月 $'+FRIDAY_SYS_FEE},
+    {k:'ord',l:'訂單處理費',v:ordFee,f:'訂單數 '+fmtN(out.qty)+' × $'+FRIDAY_ORDER_FEE},
+    {k:'promo',l:'促銷折扣負擔',v:promoSum,f:promoTx.length?'結帳單明細 '+promoTx.length+' 筆交易加總（明細已涵蓋出貨至 '+promoMaxShip+'）':'尚無明細（可能未結帳）'},
+  ];
+  out.fee=out.feeParts.reduce((t,x)=>t+x.v,0);
+  out.promoNone=!promoTx.length;
+  out.promoLate=!!(promoTx.length&&od.最後訂單日&&od.最後訂單日>promoMaxShip);
+  const cm=costMap||momoLoadCostByOrigin()||{};
+  if(!Object.keys(cm).length){out.why.cost='成本表還沒載入';out.cost=null;}
+  else{
+    const q={},amt={},nm={};(od.rows||[]).forEach(r=>{const c=r.料號||'-';q[c]=(q[c]||0)+(Number(r.數量)||0);amt[c]=(amt[c]||0)+(Number(r.總貨款)||0);if(r.商品名稱&&!nm[c])nm[c]=r.商品名稱;});
+    let cost=0;Object.keys(q).forEach(c=>{const hit=c==='-'?null:_booksCostLookup(cm,c);
+      if(hit){cost+=hit.u*q[c];if(hit.key!==c)out.mapped.push({from:c,to:hit.key,qty:q[c]});return;}
+      if(q[c]||amt[c])out.missing.push({code:c,name:nm[c]||'',qty:q[c],amt:_booksR2(amt[c])});});
+    out.cost=cost;
+  }
+  return out;
+}
+const KPI_FRIDAY_AUTO_FIELDS=['qty','rev','cost','fee'];   // 耗材手填（2026-11-04 更正）
+const KPI_FRIDAY_MAIN='FriDay-主站';   // 從報表帶入只寫主站（i站本次全手填）
+function _kpiFridayAutoPlan(month,row,costMap){
+  row=row||getOrCreateKpiRow(month);
+  const group=KPI_GROUPS.find(g=>g.key==='friday'),shop=KPI_FRIDAY_MAIN;
+  const sd=((row.friday||{})[shop])||{},items=[],fr=fridayKpiFromRecon(month,costMap),m0=v=>_kpiMoney(v),src='friday-recon:'+month;
+  const push=(it)=>{
+    const meta=_kpiMetaAt(month,it.segs);
+    it.auto=_kpiIsAutoMeta(meta);it.metaVal=meta&&meta.val;
+    if(it.status==='write'){
+      if(it.cur===it.val&&it.auto&&it.metaVal===it.val)it.status='same';
+      it.srcChanged=it.auto&&it.metaVal!=null&&it.metaVal!==it.val;
+    }
+    items.push(it);
+  };
+  const od=fr.orders;
+  const comp=od?{
+    qty:'SCM 訂單數（不含「同號⭡」與退貨列；超商出貨 '+fmtN(od.超商出貨數)+'、宅配 '+fmtN(od.宅配數)+'）',
+    rev:'SCM Σ總貨款（含稅；退貨列 '+fmtN(od.退貨列數)+' 筆負數一併加總）',
+    cost:'Σ 成本表單位成本 × 數量（廠商商品料號＝原廠編號）',
+    fee:'六項加總（見下）',
+  }:{};
+  KPI_FRIDAY_AUTO_FIELDS.forEach(f=>{
+    const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['friday',shop,f],cur:sd[f]};
+    const v=fr.ok?fr[f]:null;
+    if(v==null)Object.assign(it,{status:'wait',note:fr.ok?(fr.why[f]||'算不出來'):fr.why});
+    else{
+      Object.assign(it,{status:'write',val:Math.round(v),src,comp:comp[f]});
+      if(f==='cost')it.hintNote=[fr.mapped.length?'補零對應 '+fr.mapped.length+' 個（原貨號 → 對應貨號）：'+fr.mapped.map(x=>x.from+' → '+x.to).join('、'):'',
+        fr.missing.length?'缺成本 '+fr.missing.length+' 個料號（見上方），這些件數沒算進成本':''].filter(Boolean).join('；')||null;
+      if(f==='fee'){
+        it.compList=fr.feeParts.map(x=>x.l+' '+m0(x.v)+'：'+x.f);
+        if(fr.promoNone)it.warnNote='促銷折扣負擔：尚無明細（可能未結帳）';   // 預設不勾
+        else if(fr.promoLate)it.hintNote='可能尚有未結帳的促銷負擔（明細涵蓋出貨至 '+fr.promoMaxShip+'，該月最後一筆訂單 '+od.最後訂單日+'）';
+      }
+    }
+    push(it);
+  });
+  let topHtml='';
+  if(fr.ok&&fr.missing.length)topHtml+=`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ 缺成本 ${fr.missing.length} 個料號（廠商商品料號；影響營收 ${m0(fr.missing.reduce((t,x)=>t+x.amt,0))}，含稅）：這些件數沒算進商品成本，照樣可以帶入；成本表補上後重新帶入才會算 <button class="mm-linkbtn" onclick="kpiFridayOpenMissingCostPanel('${month}')">補成本</button></div>
+    <table class="km-au-warn-tbl"><thead><tr><th>料號</th><th class="km-n">數量</th><th class="km-n">影響營收</th></tr></thead><tbody>${fr.missing.map(w=>`<tr><td>${_kpiEscAttr(w.code==='-'?'（料號空白）':w.code)}</td><td class="km-n">${_kpiNum(w.qty)}</td><td class="km-n">${m0(w.amt)}</td></tr>`).join('')}</tbody></table></div>`;
+  return{items,checks:{},groupName:'FriDay',restoreFn:'__kpiFridayRestore',topHtml,subLabel:'FriDay 主站（'+month+'）'};
+}
+function _kpiFridayAutoHint(month,row){
+  if(!KPI_FRIDAY_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['friday',KPI_FRIDAY_MAIN,f]))))return null;
+  try{return _kpiFridayAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] FriDay 帶入提示計算失敗',e);return null;}
+}
+const _kpiFridaySnapLocal=new Map();
+function _kpiFridayCells(row){
+  const cells=[];
+  _kpiLeaves((row&&row.friday)||{},[],[]).forEach(([p,v])=>{if(v!=null)cells.push([['friday'].concat(p),v]);});
+  const o=(row&&row.kpiFieldNotes)||{};Object.keys(o).forEach(x=>{if(x.startsWith('friday:')&&o[x]!=null)cells.push([['kpiFieldNotes',x],o[x]]);});
+  return cells;
+}
+function _kpiFridaySnapGet(month){
+  const c=_kpiV2.cloud&&_kpiV2.cloud.snapshots&&_kpiV2.cloud.snapshots[month]&&_kpiV2.cloud.snapshots[month].preAutofillFriday;
+  if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
+  return _kpiFridaySnapLocal.get(month)||null;
+}
+async function _kpiEnsureFridayData(){
+  const t0=Date.now();
+  if(!Object.keys(momoLoadCostByOrigin()||{}).length){try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}}
+  while(Date.now()-t0<15000){
+    if(typeof window.__fridayReconCloudLatest!=='undefined'&&Object.keys(momoLoadCostByOrigin()||{}).length)return true;
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return typeof window.__fridayReconCloudLatest!=='undefined';
+}
+async function kpiFridayAutoFill(){
+  const month=_kpiYM();
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入 FriDay 資料與成本表中…';}
+  const ready=await _kpiEnsureFridayData();
+  if(btn){btn.disabled=false;btn.textContent='從報表帶入 '+month.replace('-','/');}
+  if(!ready){if(typeof showToast==='function')showToast('FriDay 報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  const fr=fridayKpiFromRecon(month);
+  if(!fr.ok){if(typeof showToast==='function')showToast(fr.why,'error',6000);renderKpiTab();return;}
+  const plan=_kpiFridayAutoPlan(month);
+  const writes=plan.items.filter(x=>x.status==='write');
+  const row0=getOrCreateKpiRow(month);
+  plan.snap=_kpiFridaySnapGet(month);
+  const snapCells=plan.snap?null:_kpiFridayCells(row0);
+  plan.snapCells=snapCells?snapCells.length:0;
+  App.openModal({title:'從報表帶入 '+month.replace('-','/')+'（FriDay 主站）',width:'980px',bodyHtml:_kpiAutoPreviewHtml(month,plan),
+    saveLabel:(()=>{const n=writes.filter(it=>!_kpiAutoWarn(it)).length;return n?'確認寫入 '+n+' 格':(writes.length?'沒有勾選的格子':'沒有可寫入的格子');})(),
+    onSave:()=>{
+      const sel=new Set([...document.querySelectorAll('.km-au-chk:checked')].map(x=>+x.dataset.i));
+      const chosen=writes.filter(it=>sel.has(plan.items.indexOf(it)));
+      if(!chosen.length)return true;
+      // 第一次帶入這個月：舊值快照跟帶入值【同一次 updateDoc】寫進 snapshots.{月}.preAutofillFriday（只存一次）
+      let extra=null;
+      if(snapCells&&!_kpiFridaySnapGet(month)){
+        const by=_kpiWho();
+        extra=[[['snapshots',month,'preAutofillFriday'],{by,at:window.__cloudKpi.TS,n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))}]];
+        _kpiFridaySnapLocal.set(month,{by,atMs:Date.now(),n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))});
+      }
+      const pairs=[];
+      chosen.forEach(it=>{
+        pairs.push([it.segs,it.val,{src:'auto',from:it.src,val:it.val}]);
+        const sd=((getOrCreateKpiRow(month).friday||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);
+      });
+      kpiWriteCell(month,pairs,undefined,{extra}).then(ok=>{
+        if(!ok&&extra)_kpiFridaySnapLocal.delete(month);
+        if(ok&&typeof showToast==='function')showToast('已帶入 '+chosen.length+' 格（FriDay 主站 '+month+'）'+(extra?'，已保留舊值快照':''),'success');
+      });
+      _kpiFillRerender();
+      return true;
+    }});
+  renderKpiTab();
+}
+// __kpiFridayRestore('2026-09')：用 preAutofillFriday 快照把該月 FriDay 還原回帶入前的值。先預覽，確認後一次原子寫入。
+async function __kpiFridayRestore(month){
+  if(!/^\d{4}-\d{2}$/.test(month||'')){console.error('用法：__kpiFridayRestore("2026-09")');return null;}
+  const snap=_kpiFridaySnapGet(month);
+  if(!snap){console.warn('[KPI 還原] '+month+' 沒有 FriDay 帶入前快照（這個月還沒用「從報表帶入」寫過）');if(typeof showToast==='function')showToast(month+' 沒有 FriDay 帶入前快照','error');return null;}
+  const key=p=>p.join('\u0001');
+  const cur=new Map(_kpiFridayCells(getOrCreateKpiRow(month)).map(([p,v])=>[key(p),{p,v}]));
+  const want=new Map((snap.cells||[]).map(c=>[key(c.p),{p:c.p,v:c.v}]));
+  const changes=[];
+  want.forEach((w,k)=>{const c=cur.get(k);if(!c||c.v!==w.v)changes.push({p:w.p,from:c?c.v:undefined,to:w.v});
+    else if(_kpiIsAutoMeta(_kpiMetaAt(month,w.p)))changes.push({p:w.p,from:c.v,to:w.v,tagOnly:true});});
+  cur.forEach((c,k)=>{if(!want.has(k))changes.push({p:c.p,from:c.v,to:undefined});});
+  console.table(changes.map(c=>({格子:c.p.join(' › '),目前值:c.from===undefined?'（空白）':c.from,還原成:c.to===undefined?'（刪除）':c.to})));
+  if(!changes.length){if(typeof showToast==='function')showToast(month+' FriDay 已經和快照相同，不用還原','success');return{changes:0};}
+  const fmt=x=>x===undefined?'<span class="km-au-nil">空白</span>':_kpiEscAttr(typeof x==='number'?fmtN(x):x);
+  const fl=k=>((KPI_GROUPS.find(g=>g.key==='friday').manual.find(f=>f.k===k)||{}).l)||({ret:'退貨運費（已移除的欄位）',tax:'稅金'})[k]||k;
+  const lbl=p=>p[0]==='friday'?_kpiShopLabel(p[1])+' '+fl(p[2]):p.join(' › ');
+  const rows=changes.map(c=>`<tr><td>${_kpiEscAttr(lbl(c.p))}</td><td class="km-n">${fmt(c.from)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${c.to===undefined?'（刪除）':c.tagOnly?fmt(c.to)+'<div class="km-au-note">值不變，只清「自動」標籤</div>':fmt(c.to)}</td></tr>`).join('');
+  return new Promise(resolve=>{
+    App.openModal({title:'還原 FriDay '+month.replace('-','/')+' 到帶入前',width:'720px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">快照：${_kpiEscAttr(snap.by||'?')} ${snap.atMs?_kpiFmtTime(snap.atMs):''} · 會改 <b>${changes.length}</b> 格（一次寫入）</div>
+        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>格子</th><th class="km-n">目前值</th><th></th><th class="km-n">還原成</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
+      saveLabel:'確認還原 '+changes.length+' 格',
+      onCancel:()=>resolve({cancelled:true}),
+      onSave:()=>{
+        kpiWriteCell(month,changes.map(c=>[c.p,c.to,c.to===undefined?undefined:{src:'restore'}])).then(ok=>{
+          if(typeof showToast==='function')showToast(ok?'已還原 FriDay '+month+'（'+changes.length+' 格）':'還原失敗，請看紅色格子',ok?'success':'error');
+          resolve({changes:changes.length,ok});
+        });
+        if(document.getElementById('kpi-tab-content'))renderKpiTab();
+        return true;
+      }});
+  });
+}
+// FriDay 缺成本 → 補成本（照博客來 kpiBooksOpenMissingCostPanel／酷澎 cupOpenMissingCostPanel；src 'FriDay'）
+function kpiFridayOpenMissingCostPanel(month){
+  const fr=fridayKpiFromRecon(month);
+  const list=((fr.ok&&fr.missing)||[]).filter(e=>e.code!=='-').slice().sort((a,b)=>b.amt-a.amt);
+  const blank=((fr.ok&&fr.missing)||[]).filter(e=>e.code==='-');
+  let ov=document.getElementById('friday-misscost-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='friday-misscost-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  const rowsHtml=list.length? list.map((e,i)=>{ const oid=String(e.code).replace(/[^A-Za-z0-9]/g,'_');
+    return `<tr><td style="text-align:right;color:#9ca3af;padding:5px 8px">${i+1}</td><td style="font-weight:700;padding:5px 8px">${_momoEsc(e.code)}</td><td style="color:#6b7280;font-size:12px;padding:5px 8px">${_momoEsc(e.name||'').slice(0,40)}</td><td style="text-align:right;padding:5px 8px">${_kpiNum(e.qty)}</td><td style="text-align:right;padding:5px 8px">${momoMoney(e.amt)}</td>
+      <td style="padding:5px 8px;white-space:nowrap"><input id="friday-mc-${oid}" type="number" placeholder="成本" style="width:80px;padding:3px 6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px"><button onclick="kpiFridayMissCostSave('${month}','${_momoEsc(e.code)}')" style="margin-left:6px;padding:3px 12px;border:none;border-radius:6px;background:#10b981;color:#fff;font-size:12px;font-weight:600;cursor:pointer">存</button></td></tr>`; }).join('')
+    : `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:20px">此期別沒有可補的缺成本 🎉</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
+      <div><div style="font-size:16px;font-weight:800">缺成本清單（FriDay 主站 · ${_momoEsc(month)}）</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px"><b>${list.length}</b> 個料號查無成本 · 影響營收 <b>${momoMoney(list.reduce((s,e)=>s+e.amt,0))}</b>。⚠ 補的成本寫入共用成本表（cost_by_origin）→ <b>甲配／MO+／酷澎／博客來／FriDay 共用、補一次全受惠</b>；存後帶入預覽立即重算商品成本。</div>
+        <div style="font-size:12px;color:#b45309;font-weight:700;margin-top:4px">組合品（如 2 入）請填 單件成本 × 入數</div></div>
+      <button class="mm-linkbtn" onclick="document.getElementById('friday-misscost-overlay').remove()">關閉</button>
+    </div>
+    <div style="overflow:auto;padding:4px 20px 16px"><table style="width:100%;border-collapse:collapse;margin-top:8px">
+      <thead><tr style="text-align:left;border-bottom:2px solid #eef0f3;color:#6b7280;font-size:12px"><th style="text-align:right;padding:6px 8px">#</th><th style="padding:6px 8px">料號</th><th style="padding:6px 8px">商品</th><th style="text-align:right;padding:6px 8px">數量</th><th style="text-align:right;padding:6px 8px">影響營收</th><th style="padding:6px 8px">補成本</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table>
+      ${blank.length?`<div style="font-size:12px;color:#b45309;margin-top:10px">另有 ${blank.length} 組料號是「-」（SCM 沒填、同訂單也補不回來；淨數量 ${_kpiNum(blank.reduce((t,e)=>t+e.qty,0))}）：沒有料號沒辦法查成本表，這裡不能補。</div>`:''}
+      <div style="font-size:11px;color:#9ca3af;margin-top:10px">已套用補零規則仍查不到的才列在此；存的成本只在這台電腦，記得按「☁ 同步雲端」推上雲。</div>
+    </div></div>`;
+}
+function kpiFridayMissCostSave(month, code){
+  const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('friday-mc-'+oid);
+  const c=inp?parseFloat(inp.value):NaN; if(!(c>=0)){ alert('成本需為 ≥0 的數字'); return; }
+  try{ momoSetCostByOrigin(code, c, {manual:true, shop:'FriDay', by:momoCurrentUserName(), note:'FriDay缺成本補填', src:'FriDay'}); }catch(e){ alert('補成本失敗：'+e.message); return; }
+  if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
+  kpiFridayOpenMissingCostPanel(month);
+  if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiFridayAutoFill();
 }
 // ── 蝦皮手續費整理（2026-10-01，手續費改成「自動＝實際營收×費率、可覆蓋」時用）──
 //   規則：存的手續費＝新公式（誤差 ≤1 元）→ 刪掉改自動計算（值不變）；例外：維克 2026-05（手填時用了 20.5%）→ 刪掉改自動（17.5%，純利會變）；
@@ -28309,7 +28739,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
