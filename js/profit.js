@@ -10358,10 +10358,10 @@ function _kpiMoney(v){v=Number(v)||0;return (v<0?'−':'')+'$'+fmtN(v);}
 //   滑鼠移上去或點一下（手機）都會顯示：CSS :hover / :focus 控制顯示，kpiInfoPos 把氣泡定位到視窗座標
 //   （position:fixed，才不會被表格外層 overflow 捲動框裁掉）。
 function _kpiDesc(group,k){return ((group.formula||[]).find(f=>f.k===k)||{}).desc||'';}
-function _kpiInfoHtml(title,lines){
+function _kpiInfoHtml(title,lines,cls){
   const ls=lines.filter(Boolean);
   if(!ls.length)return '';
-  return `<span class="km-info" tabindex="0" role="button" aria-label="計算說明" onmouseenter="kpiInfoPos(this)" onfocus="kpiInfoPos(this)" onclick="event.stopPropagation();kpiInfoPos(this)">ⓘ<span class="km-info-pop" role="tooltip"><span class="km-info-t">${_kpiEscAttr(title)}</span>${ls.map(l=>`<span class="km-info-l">${_kpiEscAttr(l)}</span>`).join('')}</span></span>`;
+  return `<span class="km-info" tabindex="0" role="button" aria-label="計算說明" onmouseenter="kpiInfoPos(this)" onfocus="kpiInfoPos(this)" onclick="event.stopPropagation();kpiInfoPos(this)">ⓘ<span class="km-info-pop${cls?' '+cls:''}" role="tooltip"><span class="km-info-t">${_kpiEscAttr(title)}</span>${ls.map(l=>`<span class="km-info-l">${_kpiEscAttr(l)}</span>`).join('')}</span></span>`;
 }
 function kpiInfoPos(el){
   requestAnimationFrame(()=>{
@@ -11168,7 +11168,8 @@ function _kpiFillHtml(row){
         +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="${fxTtl}">手動</span></div>`:'')
         +(auKind==='auto'?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'')
         +(auKind==='legacy'?`<div class="km-sublabel"><span class="km-legacy-tag" title="2026/10/01 舊版從淨利表帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；之後的對帳單帶入沒有寫這一格">舊版帶入</span></div>`:'')
-        +_kpiAnomTagHtml(ax,JSON.stringify(cell.segs));
+        +_kpiAnomTagHtml(ax,JSON.stringify(cell.segs))
+        +_kpiCostMissTagHtml(group,shop,f.k,month);
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const gt=_kpiCommonColTotals(row,group);
@@ -11236,13 +11237,13 @@ function _kpiFillHtml(row){
   if(group.key==='friday'){
     const fr=fridayKpiFromRecon(month);
     const h=fr.ok?_kpiFridayAutoHint(month,row):null;
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），會自動辨識。先預覽、確認才寫入。">上傳 FriDay 報表</button><button id="km-au-btn" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill()" title="${_kpiEscAttr(fr.ok?'主站的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填，i站全部手填。':fr.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），會自動辨識。先預覽、確認才寫入。">上傳 FriDay 報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('FriDay 主站要傳 2 種：',FRIDAY_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill()" title="${_kpiEscAttr(fr.ok?'主站的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填，i站全部手填。':fr.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   // 博客來：上傳三種報表（存 app/books_recon）＋從報表帶入營收／商品成本／平台費；完全沒有報表 → 帶入鈕 disabled
   if(group.key==='books'){
     const br=booksKpiFromRecon(month);
     const h=br.ok?_kpiBooksAutoHint(month,row):null;
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('博客來寄倉每月傳 4 種：',BOOKS_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
@@ -12205,6 +12206,8 @@ async function __kpiPchomeRestore(month){
 //   雲端：app/books_recon months.{結算帳月}.{sales|rebate|fee|orders}，每塊整塊覆蓋（同月重傳覆蓋、絕不累加）。
 //   KPI 月份 M ＝ 結算帳月 M。
 const BOOKS_RECON_KEY='ec_books_recon';
+// 填寫模式「上傳博客來報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；做法同 FRIDAY_HOWTO_LINES）
+const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費請手填。'];
 const _booksNum=v=>{if(v==null||v==='')return 0;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:0;};
 const _booksYM=s=>{const m=String(s==null?'':s).match(/(\d{4})\D?(\d{2})/);return m?m[1]+'-'+m[2]:'';};
 const _booksTrim=v=>String(v==null?'':v).trim();
@@ -12621,6 +12624,7 @@ function kpiBooksMissCostSave(month, code){
   if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
   kpiBooksOpenMissingCostPanel(month);   // 重繪面板（該列消失）
   if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiBooksAutoFill();   // 帶入預覽開著 → 重開（商品成本立即重算）
+  else if(document.getElementById('kpi-tab-content')) _kpiRefreshViews();   // 商品成本格的「缺成本」標籤跟著更新
 }
 // __kpiBooksRestore('2026-09')：用 preAutofillBooks 快照把該月博客來還原回帶入前的值。先預覽，確認後一次原子寫入。
 async function __kpiBooksRestore(month){
@@ -12750,6 +12754,8 @@ function _friParsePayable(a,hi,type,amtCol,file){
   return{type,file,amtCol,month:months[0]||'',months,byTx,n,sum:_booksR2(sum),total,errs};
 }
 const FRIDAY_RECON_KEY='ec_friday_recon';
+// 填寫模式「上傳 FriDay 報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；開頭空白是縮排，靠 .km-info-pre 保留）
+const FRIDAY_HOWTO_LINES=['① 訂單匯出｜每月 1 次','   訂單管理 → 匯出，日期選整個月','② 促銷折扣負擔｜每張結帳單 1 次','   撥款作業 → 點結帳單 → 促銷折扣負擔「詳」→ 匯出Excel','重傳不會重複計算。','物流運費、耗材請手填。'];
 // 雲端 → 記憶體（照博客來：firebase.js boot 就訂閱、先緩存在 window.__fridayReconCloudLatest；這裡定義後立刻 drain）
 window.__fridayApplyCloudRecon=function(data){
   try{
@@ -13063,6 +13069,22 @@ function kpiFridayOpenMissingCostPanel(month){
       <div style="font-size:11px;color:#9ca3af;margin-top:10px">已套用補零規則仍查不到的才列在此；存的成本只在這台電腦，記得按「☁ 同步雲端」推上雲。</div>
     </div></div>`;
 }
+// 商品成本格下方「⚠ 缺成本 N」（2026-11-04）：博客來寄倉／FriDay 主站用報表算成本時，成本表（套補零規則後）仍查不到的料號 → 點了開補成本視窗。
+//   只看報表與成本表，不管這格目前是帶入、手填或空白；成本表還沒載入、沒有報表時不顯示。FriDay 料號「-」（補不了）不算。酷澎還沒做完，先不加。
+function _kpiCostMissTagHtml(group,shop,k,month){
+  if(k!=='cost')return '';
+  let r=null,open='';
+  try{
+    if(group.key==='books'&&shop===KPI_BOOKS_CONSIGN){r=booksKpiFromRecon(month);open='kpiBooksOpenMissingCostPanel';}
+    else if(group.key==='friday'&&shop===KPI_FRIDAY_MAIN){r=fridayKpiFromRecon(month);open='kpiFridayOpenMissingCostPanel';}
+  }catch(e){return '';}
+  if(!r||!r.ok)return '';
+  const miss=(r.missing||[]).filter(x=>x.code!=='-');
+  if(!miss.length)return '';
+  const amt=miss.reduce((t,x)=>t+(x.amt||0),0);
+  const tip='成本表查不到 '+miss.length+' 個料號：'+miss.map(x=>x.code).join('、')+'（影響營收 '+_kpiMoney(amt)+'，含稅）。這些件數沒算進商品成本；點這裡補成本，補完重新「從報表帶入」才會算進去';
+  return `<div class="km-sublabel"><span class="km-cost-miss" role="button" tabindex="0" onclick="${open}('${month}')" onkeydown="if(event.key==='Enter')this.click()" title="${_kpiEscAttr(tip)}">⚠ 缺成本 ${miss.length}</span></div>`;
+}
 function kpiFridayMissCostSave(month, code){
   const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('friday-mc-'+oid);
   const c=inp?parseFloat(inp.value):NaN; if(!(c>=0)){ alert('成本需為 ≥0 的數字'); return; }
@@ -13070,6 +13092,7 @@ function kpiFridayMissCostSave(month, code){
   if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
   kpiFridayOpenMissingCostPanel(month);
   if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiFridayAutoFill();
+  else if(document.getElementById('kpi-tab-content')) _kpiRefreshViews();   // 商品成本格的「缺成本」標籤跟著更新
 }
 // ── 蝦皮手續費整理（2026-10-01，手續費改成「自動＝實際營收×費率、可覆蓋」時用）──
 //   規則：存的手續費＝新公式（誤差 ≤1 元）→ 刪掉改自動計算（值不變）；例外：維克 2026-05（手填時用了 20.5%）→ 刪掉改自動（17.5%，純利會變）；
