@@ -1011,6 +1011,8 @@ Object.assign(App, {
       const c = parsed.counts, text = `已存：${shop} ${period.month.replace('-', '/')} 動銷率 ${_insPmRate(c)}（${c.soldNormal}／${c.normal}）`;
       say(text, 'ok');
       showToast(text, 'success');
+      // 通知健檢與淨利表清掉這一格的快取（只有讀回比對成功才走到這裡）。通知失敗不影響「已存」。
+      try { window.dispatchEvent(new CustomEvent('shopee-perf-saved', { detail: { shop, month: period.month } })); } catch (e) { console.warn('[整月商品表現] 更新通知失敗', e); }
       return true;
     } finally { _insPm.busy = false; }
   },

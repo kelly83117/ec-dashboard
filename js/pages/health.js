@@ -589,9 +589,28 @@ function _hlSellThrough(rows) {
   return { company: { num: cs.filter(c => c.sold).length, den: cs.length }, page: { num: ps.filter(p => p.sold).length, den: ps.length },
     deadDupPages: deadDup, fallback: cs.filter(c => c.fallback).length };
 }
-// 這個平台沒有上架清單（_hlProdNormalize 給 active:null，_hlSellThrough 因此回 null，動銷率寫「待上傳」）。
-//   計分的待上傳字與「看完整規則」表格共用這一個條件；哪天蝦皮接上上架清單，這裡和 _hlProdNormalize 一起改。
-function _hlNoListing(platform) { return platform === 'shopee'; }
+// 蝦皮的動銷率不走商品層，改讀洞察表每月上傳的整月商品表現（shopee_perf_month）。商品層的其他用途（商品標籤、拖累清單）不變。
+function _hlStFromPerf(ch) { return !!(ch && ch.prod && ch.prod.platform === 'shopee'); }
+// 把蝦皮的動銷率子指標換成整月資料（純函式：只讀 snap.shopeePerf，內容由 _hlSpWant 填）。商品層在載入、資料不足都不影響這一項。
+//   snap 沒有 shopeePerf（只算 KPI 的呼叫端、node 測試）⇒ 不適用；有 shopeePerf 但還沒有這個 key ⇒ 載入中。
+function _hlShopeeStApply(subs, ch, m, snap) {
+  if (!_hlStFromPerf(ch)) return;
+  const by = k => subs.find(x => x.key === k), sT = by('sellThrough');
+  [by('sellThroughPage'), by('deadDupPages')].forEach(x => { if (x) Object.assign(x, { status: 'na', reason: '不適用：蝦皮的整月商品表現沒有這個口徑', raw: null, score: null, trace: null }); });
+  if (!sT) return;
+  const set = (status, reason, stText) => Object.assign(sT, { status, reason, raw: null, score: null, trace: null }, stText ? { stText } : null);
+  const map = snap && snap.shopeePerf;
+  if (!map) return set('na', '不適用：這次沒有讀整月商品表現');
+  const e = map[ch.shop + '|' + m];
+  if (!e || e.state === 'loading') return set('loading', '整月商品表現讀取中');
+  if (e.state === 'failed') return set('readFail', '整月商品表現讀取失敗');
+  if (e.state === 'none') return set('pending', `${_hlYmLabel(m)} 整月商品表現還沒上傳（洞察表）`, '尚未上傳');
+  if (!(e.normal > 0)) return set('insufficient', `資料不足：${_hlYmLabel(m)} 整月商品表現沒有正常商品`);
+  set('ok', '');
+  sT.raw = e.soldNormal / e.normal;
+  sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
+  sT.trace = { src: `洞察表整月商品表現 ${ch.shop} ${_hlYmLabel(m)}`, text: `正常商品裡有賣出 ${e.soldNormal} ÷ 正常商品 ${e.normal}` };
+}
 // 這個通路這個月的商品層快照狀態：{ state:'na'|'notLoaded'|'loading'|'timeout'|'ready', snap? }
 //   snap 完全沒有 prodState（只算 KPI 的呼叫端：舊的回測、node 測試）⇒ 'off'：商品層面向一律「不適用」，分數跟塊 A 一樣只看 KPI。
 function _hlProdOf(ch, month, snap) {
@@ -692,7 +711,8 @@ function _hlStructureDim(ch, m, snap, R) {
   const lim = s => (s.key === 'sellThrough'
     ? { zero: t.sellThrough ? t.sellThrough[0] : null, full: t.sellThrough ? t.sellThrough[1] : null, flag: (t.sellThrough && t.stFlag) || '', flagN: t.stN || null }
     : { zero: s.zero, full: s.full });
-  const all = (st, reason) => _hlFinishDim(def, _hlSubs(S.subs, st, reason, lim));
+  const finish = subs => { _hlShopeeStApply(subs, ch, m, snap); return _hlFinishDim(def, subs); };
+  const all = (st, reason) => finish(_hlSubs(S.subs, st, reason, lim));
   if (!ch.prod) return all('na', '不適用：這個通路只有 KPI 月合計，沒有商品層資料');
   const p = _hlProdOf(ch, m, snap), fail = _hlProdFail(p, m);
   if (fail) return all(fail[0], fail[1]);
@@ -728,9 +748,7 @@ function _hlStructureDim(ch, m, snap, R) {
   // 動銷率
   const st = _hlSellThrough(rows), sT = by('sellThrough'), sP = by('sellThroughPage'), sD = by('deadDupPages');
   if (!t.sellThrough) [sT, sP, sD].forEach(s => set(s, 'na', '不適用：這個類型不評動銷率'));
-  else if (!st) [sT, sP, sD].forEach(s => set(s, 'pending', _hlNoListing(ch.prod.platform)
-    ? '尚未上傳：蝦皮的上架清單要等洞察表「商品表現」按月保存（塊 C）才有，現在算不出分母'
-    : '尚未上傳：沒有上架狀態，算不出分母'));
+  else if (!st) [sT, sP, sD].forEach(s => set(s, 'pending', '尚未上傳：沒有上架狀態，算不出分母'));
   else if (!st.company.den) [sT, sP, sD].forEach(s => set(s, 'insufficient', '資料不足：沒有上架或有銷售的商品'));
   else {
     sT.raw = st.company.num / st.company.den; sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
@@ -742,7 +760,7 @@ function _hlStructureDim(ch, m, snap, R) {
     sP.trace = { src, text: `有銷售的商品頁 ${st.page.num} ÷ 上架或有銷售的商品頁 ${st.page.den}` + (pc ? `（同 MOMO 總覽：${pc.sold}/${pc.total}）` : '') + pcText };
     sD.raw = st.deadDupPages; sD.trace = { src, text: `多頁公司商品裡沒賣出的頁 ${st.deadDupPages} 頁` };
   }
-  return _hlFinishDim(def, subs);
+  return finish(subs);
 }
 
 // 拖累商品清單（純函式）。回 { status, reason, items:[前 N 名], more, info:[連續零動銷…], infoCount }。
@@ -981,7 +999,7 @@ const _HL_WAIT_ITEM = { loading: 'prodLoading', notLoaded: 'prodIdle', timeout: 
 //   成長、廣告效率不再在這裡算（函式留著，之後做商品標籤用）。
 //   - 純利率沒有分數（標準未設定、營收過小、KPI 未填、資料不足）⇒ 沒有總分（列到「未評分」）。
 //   - 動銷率有標準、但還在等商品層 ⇒ 先不給總分（載入中）；動銷率沒標準或沒資料 ⇒ 總分＝純利率分數（pureOnly，卡片標「只看純利率」）。
-//   - 蝦皮沒有動銷率標準 ⇒ 不等蝦皮淨利表，一開頁就有分數。
+//   - 蝦皮的動銷率讀整月商品表現（_hlShopeeStApply），不等商品層：沒有標準 ⇒ 顯示數字、不給分；有標準 ⇒ 只等這份小文件。
 //   回 { id, label, type, month, status, reason, score, light, isReference, ranked, dimsUsed:N, dimsTotal:M, dims:[…], next:[…], topReason, fill }
 //   沒傳 rules ⇒ 用這個月適用的標準（healthRulesForMonth，版本清單從 snap.healthRuleVersions 來）。
 function computeChannelHealth(ch, month, snap, rules) {
@@ -1196,7 +1214,7 @@ function _hlGuideLineText(name, lines, tiers) {
 }
 // 一個計分項目的「標準」欄（純函式，回一行一字串）。同類型線都一樣合成一行寫類型名；通路自己覆蓋（而且跟類型不同）的另列那一家（同樣的線併一行）；
 //   整類型都被覆蓋成同一組也寫類型名。沒有線的通路收成最後一行「其他通路」；
-//   但動銷率要分開寫：資料來源還沒接上的（_hlNoListing）寫「資料還沒接上」，類型本來就不算動銷率的（_hlNoSellThrough）寫「不算動銷率」。
+//   但動銷率要分開寫：類型本來就不算動銷率的（_hlNoSellThrough）寫「不算動銷率」。
 function _hlGuideLineRows(it, R) {
   const T = R.score.tiers, rows = [], notCounted = [];
   let none = false;
@@ -1204,12 +1222,10 @@ function _hlGuideLineRows(it, R) {
     const chs = HEALTH_CHANNELS.filter(ch => ch.type === t);
     const typeLines = it.lines && it.lines[t], typeSig = typeLines ? JSON.stringify(typeLines) : null;
     const groups = new Map();
-    let noData = false;
     chs.forEach(ch => {
       const l = _hlLinesFor(it, ch);
       if (!l) {
         if (it.key === 'sellThrough' && _hlNoSellThrough(t)) { if (notCounted.indexOf(R.types[t].label) < 0) notCounted.push(R.types[t].label); }
-        else if (it.key === 'sellThrough' && ch.prod && _hlNoListing(ch.prod.platform)) noData = true;
         else none = true;
         return;
       }
@@ -1221,7 +1237,6 @@ function _hlGuideLineRows(it, R) {
     const typeName = _HL_GUIDE_TYPE_NAME[t] || R.types[t].label;
     groups.forEach((g, sig) => { if (isType(sig, g)) rows.push(_hlGuideLineText(typeName, g.lines, T)); });
     groups.forEach((g, sig) => { if (!isType(sig, g)) rows.push(_hlGuideLineText(g.chs.map(ch => ch.label).join('、'), g.lines, T)); });
-    if (noData) rows.push(`${typeName}：資料還沒接上，暫不計分`);
   });
   if (none) rows.push('其他通路：標準未設定，不給分（不算 0 分）');
   if (notCounted.length) rows.push(`${notCounted.join('、')}：不算動銷率`);
@@ -1253,12 +1268,12 @@ function _hlGuideDetails(key, R) {
     return [
       st && st.provisional ? '標「暫定」：這組分數線之後還會再調。' : '',
       `${def.desc}。公式：${def.formula}。`,
-      '「1 個商品」用公司商品算：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一個公司商品只要有一頁、一個規格有賣，就算有動。',
-      '分母＝期末上架的商品，加上這個月有賣但已經下架的商品（避免分子比分母大）。編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個。',
-      '資料來源：商品層資料（蝦皮＝淨利表報表；MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
-      '蝦皮的動銷率現在是「待上傳」：要等洞察表的商品表現按月保存才有上架清單當分母。',
+      'MOMO 動銷率以商品款數計：同一款開成好幾頁（例如單入、多入組、不同版本）合起來算 1 個；淨利表 MOMO 總覽以商品頁計，一頁算 1 個，所以數字會不一樣。分母＝目前上架或這個月有賣的商品，分子＝這個月有賣出的。',
+      '同一款怎麼認（MOMO、PChome）：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一款只要有一頁、一個規格有賣，就算有動。編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個。',
+      '資料來源：商品層資料（MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
+      '蝦皮的動銷率來自洞察表每月上傳的整月商品表現：正常商品裡這個月有賣出的比例。',
       'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
-      `本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
+      `MOMO、PChome 本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
       wait.length ? `${wait.join('、')}的動銷率要等商品資料載好，之前卡片寫「載入中…」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。手機不會自動載入商品資料，要按卡片裡的「載入商品資料」。` : '',
       `沒有標準或這個月沒有資料時，總分＝${pure ? pure.label : '純利率'}分數，卡片寫「只看${pure ? pure.label : '純利率'}」。`,
     ].filter(Boolean);
@@ -1274,7 +1289,7 @@ function _hlGuideFullHtml(rules) {
       <td>${e(how)}</td><td>${stdHtml}</td></tr>
       <tr class="hl-gt-detail" id="${e(id)}" hidden><td colspan="3"><ul class="hl-gt-detail-list">${_hlGuideDetails(key, R).map(x => `<li>${e(x)}</li>`).join('')}</ul></td></tr>`;
   };
-  const HOW = { pureRate: '純利 ÷ 營收，取 KPI 月結。', sellThrough: '這個月有賣出的商品 ÷ 在架商品，取商品層資料。' };
+  const HOW = { pureRate: '純利 ÷ 營收，取 KPI 月結。', sellThrough: '這個月有賣出的商品 ÷ 在架商品，取商品層資料（蝦皮取洞察表每月上傳的整月商品表現）。' };
   const scored = R.score.items.map(it => row(it.key, it.label, `佔總分 ${Math.round(it.w * 100)}%${it.provisional ? '，暫定' : ''}`, HOW[it.key] || '',
     `<ul class="hl-gt-lines">${_hlGuideLineRows(it, R).map(x => `<li>${e(x)}</li>`).join('')}</ul>`)).join('');
   const gross = R.profit.subs.find(x => x.key === 'grossRate');
@@ -1342,7 +1357,57 @@ function _hlCollect() {
   snap.prodState = Object.assign({}, _hlProd.state);
   snap.prodWaitSec = _hlWaitSecs();
   snap.healthRuleVersions = _hlRuleVersionsNow();   // 塊 3：純函式只讀 snap.healthRuleVersions，不碰 window
+  snap.shopeePerf = _hlSp.cache;   // 蝦皮整月商品表現：純函式只讀這份，內容由 _hlSpWant 填
   return snap;
+}
+// ── 蝦皮整月商品表現（shopee_perf_month）：要用才讀，同一個「通路|月份」只讀一次（「↻ 重新計算」清掉重讀）──
+//   _hlSp.cache['好麻吉|2026-10']＝{ state:'loading'|'none'|'ok'|'failed', normal, soldNormal }，不留 items。
+//   只讀 __cloudShopeePerf.getDoc；讀到本機快取當讀取失敗（不能拿快取當雲端現值）。getDoc 是非同步，不會在 render 當下回呼，所以不會遞迴；
+//   這一批全部回來才重畫一次，不會一家重畫一次。模擬模式不碰雲端（全部當沒上傳）。
+const _HL_SP_SHOPS = HEALTH_CHANNELS.filter(_hlStFromPerf).map(ch => ch.shop);
+const _hlSp = { cache: {}, pending: 0, gen: 0, warned: false, bound: false };
+function _hlSpWarn(why) {
+  if (_hlSp.warned) return;
+  _hlSp.warned = true;
+  console.warn('[health] 蝦皮整月商品表現讀取失敗：' + why);
+}
+function _hlSpReset() { _hlSp.cache = {}; _hlSp.pending = 0; _hlSp.gen++; }
+// 洞察表上傳成功（marketing.js insPerfMonthSave 發 shopee-perf-saved）：清掉那一格（state 不管是什麼，尤其是 'none'）。
+//   在健檢頁就重畫，viewHealth 會照 _hlSpWantView 重讀；不在健檢頁只清快取，下次進頁自然重讀。監聽在第一次要讀之前綁、只綁一次（沒讀過就沒有快取要清）。
+function _hlSpOnSaved(e) {
+  const d = e && e.detail;
+  if (!d || !d.shop || !d.month) return;
+  delete _hlSp.cache[d.shop + '|' + d.month];
+  if (App.route === 'health') App.render();
+}
+function _hlSpWant(months, shops) {
+  if (!_hlSp.bound && typeof window.addEventListener === 'function') { _hlSp.bound = true; window.addEventListener('shopee-perf-saved', _hlSpOnSaved); }
+  const today = _hlTodayYm(), be = window.__cloudShopeePerf;
+  (shops || _HL_SP_SHOPS).forEach(shop => months.forEach(m => {
+    const k = shop + '|' + m;
+    if (_hlSp.cache[k]) return;
+    if (_hlMock || m < HEALTH_RULES.firstMonth || m > today) { _hlSp.cache[k] = { state: 'none' }; return; }
+    if (!be || typeof be.getDoc !== 'function') { _hlSpWarn('雲端物件不在'); _hlSp.cache[k] = { state: 'failed' }; return; }
+    const box = _hlSp.cache[k] = { state: 'loading' }, gen = _hlSp.gen;
+    _hlSp.pending++;
+    Promise.resolve().then(() => be.getDoc(shop, m)).then(snap => {
+      if (!snap || typeof snap.exists !== 'function') throw new Error('讀不到文件');
+      if (snap.metadata && snap.metadata.fromCache) throw new Error('連不到伺服器（讀到的是本機快取）');
+      if (!snap.exists()) { box.state = 'none'; return; }
+      const c = (snap.data() || {}).counts || {};
+      box.state = 'ok'; box.normal = _hlFinite(c.normal) ? c.normal : 0; box.soldNormal = _hlFinite(c.soldNormal) ? c.soldNormal : 0;
+    }).catch(e => { box.state = 'failed'; _hlSpWarn(String((e && e.message) || e)); }).then(() => {
+      if (gen !== _hlSp.gen) return;   // 按過重新計算：這一批作廢
+      _hlSp.pending--;
+      if (_hlSp.pending === 0 && App.route === 'health') App.render();
+    });
+  }));
+}
+// 這次畫面要的月份：卡片要選定月份＋上個月（比上月）；展開蝦皮卡片再加逐月表與折線圖的 12 個月（只讀那一家）。
+function _hlSpWantView(month, openId) {
+  _hlSpWant([month, _hlAddMonth(month, -1)]);
+  const ch = HEALTH_CHANNELS.find(c => c.id === openId);
+  if (_hlStFromPerf(ch)) _hlSpWant(Array.from({ length: _HL_TREND_N }, (_, i) => _hlAddMonth(month, -i)), [ch.shop]);
 }
 // ── 評分標準版本（app/health_rules）：進健檢頁才訂閱，只訂一次（比照 inventory.js _invEnsureSub）──
 //   🔴 第一次收到「伺服器來的快照」之前不算分（避免先用 BASE 算一次、再跳成新分數）。
@@ -1600,6 +1665,7 @@ function _hlRunQueue() {
 }
 // 「↻ 重新計算」：已載入平台的快照全部重算（雲端資料可能更新了）；載入狀態不動、不重新訂閱；逾時的回到 idle（桌機會自動再載一次）
 function _hlProdReset() {
+  _hlSpReset();
   _hlProd.cache = {}; _hlProd.queue = []; _hlProd.queued = {};
   Object.keys(_hlProd.state).forEach(p => { if (_hlProd.state[p] === 'timeout') _hlProd.state[p] = 'idle'; });
 }
@@ -1609,7 +1675,7 @@ function _hlProdReset() {
  * ================================================================ */
 
 const _HL_STATUS_TEXT = { na: '不適用', insufficient: '資料不足', pending: '尚未上傳', smallRev: '營收過小', closed: '已關站',
-  notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時', nostd: '標準未設定' };
+  notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時', nostd: '標準未設定', readFail: '讀取失敗' };
 // 總覽列「總分」那一格，商品層還沒好時的字（不顯示分數）
 const _HL_WAIT_SCORE = { prodLoading: '載入中', prodIdle: '未載入', prodTimeout: '逾時' };
 
@@ -1685,7 +1751,7 @@ function _hlUnratedHelpLines(R) {
 // 百分比去掉多餘的 .0（滿分標準用：24%、0.5%、62%）
 function _hlPctTrim(v) { return _hlFinite(v) ? String(Math.round(v * 1000) / 10) + '%' : '—'; }
 // 一格的內容：{ text, sub, cls }。沒資料一律狀態字或「—」，不顯示 0%。
-//   動銷率：沒有商品層的通路「—」；蝦皮（還沒有上架清單）「待上傳」；商品層在載入「載入中」。
+//   動銷率：沒有商品層的通路「—」；蝦皮沒上傳「尚未上傳」（子指標的 stText）；還在讀「載入中」。
 function _hlOverviewCell(r, prev, col) {
   if (r.status === 'closed') return { text: '', sub: '', cls: '' };
   const find = x => { const d = x && (x.dims || []).find(y => y.key === col.pick[0]); return d ? d.subs.find(s => s.key === col.pick[1]) || null : null; };
@@ -1693,9 +1759,9 @@ function _hlOverviewCell(r, prev, col) {
   if (!s) return { text: '—', sub: '', cls: 'hl-ov-off' };
   if (s.status !== 'ok' || !_hlFinite(s.raw)) {
     let t = _HL_STATUS_TEXT[s.status] || '—';
-    if (col.key === 'st') t = s.status === 'na' ? '—' : s.status === 'pending' ? '待上傳' : (s.status === 'loading' ? '載入中' : t);
+    if (col.key === 'st') t = s.stText ? s.stText : s.status === 'na' ? '—' : s.status === 'pending' ? '待上傳' : (s.status === 'loading' ? '載入中' : t);
     else if (s.status === 'na') t = '—';
-    return { text: t, sub: '', cls: 'hl-ov-off' };
+    return { text: t, sub: '', cls: 'hl-ov-off', tip: s.stText ? s.reason : '' };
   }
   // 下方小字（2026-11-03）：不再寫 pp，改成「↓ 上月 50.7%」；方向用顯示的 0.1 位比較（看起來一樣就是 →）；上月沒資料就不顯示
   const p = find(prev);
@@ -1887,6 +1953,18 @@ function _hlTrendText(def, vals, rules) {
   if (def.scored && cur.score != null) txt += `，本月 ${cur.score} 分` + (prev.score != null && prev.score !== cur.score ? `（上月 ${prev.score} 分）` : '');
   return txt;
 }
+// MOMO 動銷率列下面的對照小字：選定月份「以商品頁算」的數字。只顯示、不計分；百分比取商品頁子指標，筆數取算分時同一支 _hlSellThrough 的 page（不另外算）。
+//   筆數跟 MOMO 總覽的 pageCount 一樣才寫「同淨利表 MOMO 總覽整月」，對不上就不講這句。回空字串＝不顯示（蝦皮、PChome、這個月沒有商品頁數字）。
+function _hlMomoPageNote(ch, month, r, snap) {
+  if (!ch.prod || ch.prod.platform !== 'momo') return '';
+  const d = (r.dims || []).find(x => x.key === 'structure'), sP = d && d.subs.find(x => x.key === 'sellThroughPage');
+  const p = _hlProdOf(ch, month, snap);
+  if (!sP || sP.status !== 'ok' || !_hlFinite(sP.raw) || p.state !== 'ready') return '';
+  const st = _hlSellThrough(p.snap.rows), pc = p.snap.pageCount;
+  if (!st || !st.page.den) return '';
+  const same = pc && pc.sold === st.page.num && pc.total === st.page.den;
+  return `以商品頁算：${_hlFmtPct(sP.raw)}（${st.page.num}／${st.page.den}${same ? '，同淨利表 MOMO 總覽整月' : ''}）`;
+}
 // 表格本體（純函式；trend＝舊→新的 computeChannelHealth，至少 HL_MONTH_N + 1 個月才比得到第一欄的前一個月）
 function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
   const shown = trend.slice(-HL_MONTH_N);
@@ -1912,7 +1990,8 @@ function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
       <th scope="row">${escapeHtml(d.label)}<span class="hl-mt-k${d.scored ? ' hl-mt-scored' : ''}">${d.scored ? '計分' : '參考'}</span></th>${cells}<td class="hl-mt-trend">${escapeHtml(_hlTrendText(d, vals))}</td></tr>`;
     // 口徑變更提醒（例：成本更新）：那一列下面一行，點 ⓘ 看完整說明
     const notes = _hlNotices(month, d.key).map(n => `<tr class="hl-mt-note"><td colspan="${shown.length + 2}"><div class="hl-notice">${_hlNoticeHtml(n)}</div></td></tr>`).join('');
-    return row + notes;
+    const pageNote = d.key === 'sellThrough' ? _hlMomoPageNote(ch, month, trend[trend.length - 1], snap) : '';
+    return row + notes + (pageNote ? `<tr class="hl-mt-note"><td colspan="${shown.length + 2}"><div class="hl-mt-page">${escapeHtml(pageNote)}</div></td></tr>` : '');
   }).join('');
   const openDef = defs.find(d => d.key === openKey);
   const chart = openDef ? `<div class="hl-mt-chart"><div class="hl-trend-hd">${escapeHtml(openDef.label)} 近 ${_HL_TREND_N} 個月（再點一次那一列收起）</div>
@@ -1938,7 +2017,7 @@ function _hlTileMetsHtml(r, prev) {
   return HL_OVERVIEW_COLS.map(col => {
     const c = _hlOverviewCell(r, prev, col);
     const p = c.dir ? `<span class="hl-tile-met-p hl-ov-${c.dir}">${escapeHtml(c.sub)}</span>` : '<span class="hl-tile-met-p" aria-hidden="true"></span>';
-    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${escapeHtml(col.label)}</span><span class="hl-tile-met-v">${escapeHtml(c.text)}</span>${p}</span>`;
+    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${escapeHtml(col.label)}</span><span class="hl-tile-met-v"${c.tip ? ` title="${escapeHtml(c.tip)}"` : ''}>${escapeHtml(c.text)}</span>${p}</span>`;
   }).join('');
 }
 // 卡片（卡片改版塊 1）：拿掉「類型第 N」與主要扣分原因句（排名 _hlRank、原因 _hlPlainReason 照算，只是卡片上不顯示；rank 參數留著不用）。
@@ -1963,7 +2042,7 @@ function _hlTileHtml(r, prev, rank, open, snap) {
 function _hlWaitTypeLabels(rules) {
   const R = rules || HEALTH_RULES;
   const types = [...new Set(HEALTH_CHANNELS
-    .filter(ch => ch.prod && R.score.items.some(it => it.key !== 'pureRate' && _hlLinesFor(it, ch)))
+    .filter(ch => ch.prod && !_hlStFromPerf(ch) && R.score.items.some(it => it.key !== 'pureRate' && _hlLinesFor(it, ch)))
     .map(ch => ch.type))];
   return types.sort((a, b) => (R.types[a].order - R.types[b].order)).map(t => R.types[t].label);
 }
@@ -2155,9 +2234,17 @@ function _hlCardHtml(r, snap) {
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
       ${_hlTagListsHtml(ch, r.month, snap)}
+      ${_hlShopeeStNote(ch, r)}
       ${ch ? _hlMonthTableHtml(ch, computeHealthTrend(ch, r.month, HL_MONTH_N + 1, snap), snap, _hlMetCols(), _hlState.metOpen) : ''}
       ${r.next.length ? `<div class="hl-next">之後加入：${escapeHtml(r.next.join('、'))}</div>` : ''}
     </div>`;
+}
+// 蝦皮這個月動銷率沒有數字時，細項裡寫一行原因（尚未上傳、讀取失敗、資料不足）
+function _hlShopeeStNote(ch, r) {
+  if (!_hlStFromPerf(ch)) return '';
+  const d = (r.dims || []).find(x => x.key === 'structure'), st = d && d.subs.find(x => x.key === 'sellThrough');
+  if (!st || st.status === 'ok' || st.status === 'loading' || st.status === 'na') return '';
+  return `<div class="hl-st-note">動銷率：${escapeHtml(st.reason)}</div>`;
 }
 // 總分怎麼來的一句話（v5，權重從規則來）：「純利率 50%＋動銷率 50%」或「只看純利率」
 function _hlScoreHow(r) {
@@ -2552,11 +2639,10 @@ const _hlStdIsOpen = () => {
 // 比例 ↔ 百分比字串：0.25 ↔ '25'；存之前四捨五入到 0.001
 const _hlStdToPct = v => (_hlFinite(v) ? String(Math.round(v * 1000) / 10) : '');
 const _hlStdFromPct = p => Math.round(p * 10) / 1000;
-// 這一格為什麼不能填（動銷率才有）：類型本來就不算、資料還沒接上、這家通路沒有商品層。回字串＝鎖住，內容沿用原值。
+// 這一格為什麼不能填（動銷率才有）：類型本來就不算、這家通路沒有商品層。回字串＝鎖住，內容沿用原值。
 function _hlStdLockType(itemKey, type) {
   if (itemKey !== 'sellThrough') return '';
   if (_hlNoSellThrough(type)) return '不算動銷率';
-  if (HEALTH_CHANNELS.some(ch => ch.type === type && ch.prod && _hlNoListing(ch.prod.platform))) return '資料還沒接上';
   return '';
 }
 function _hlStdLockChannel(itemKey, ch) {
@@ -2916,6 +3002,7 @@ Object.assign(App, {
     const month = _hlIsYm(_hlState.month) ? _hlState.month : healthDefaultMonth(snap, _hlTodayYm());
     if (!_hlState.month) _hlState.month = month;
     _hlWantProd(month, _hlState.open);   // 已載入的平台：補排這次要用到的商品層快照（算完會再重畫一次）
+    _hlSpWantView(month, _hlState.open);   // 蝦皮整月商品表現：要用才讀，全部回來再重畫一次
     _hlLast = { month, snap };
     const monthRules = healthRulesForMonth(month, snap.healthRuleVersions);
     const results = HEALTH_CHANNELS.map(ch => computeChannelHealth(ch, month, snap));
@@ -2980,6 +3067,8 @@ function _hlBacktestSnap(o) {
   const to = _hlIsYm(o.to) ? o.to : _hlAddMonth(_hlTodayYm(), -1);
   const from = _hlIsYm(o.from) ? o.from : HEALTH_RULES.firstMonth;
   const months = _hlMonthRange(from, to);
+  _hlSpWant(months);   // 回測才讀的月份。還沒回來的這次算「載入中」，再跑一次就有
+  if (_HL_SP_SHOPS.some(shop => months.some(m => (_hlSp.cache[shop + '|' + m] || {}).state === 'loading'))) console.warn('[health] 蝦皮整月商品表現還在讀，這次蝦皮動銷率不完整；等一下再跑一次');
   if (!(o.products || o.adsRules)) { delete snap.prod; delete snap.prodState; return { snap, months, from, to, need: [] }; }
   const src = _hlProdSource(), prod = {};
   const ready = _hlMock ? { shopee: 'ready', momo: 'ready', pchome: 'ready' } : Object.assign({}, _hlProd.state);
