@@ -54,8 +54,12 @@ function _hlDeepFreeze(o) {
 //     級距 100／80／60／0（沒有 40 分、不做線性內插）；達到 100 分線＝100，否則達到 80 分線＝80，否則達到 60 分線＝60，否則 0。
 //     下面的 dims／profit／growth／ads／structure／types 是 v4 以前的線性計分設定：舊面向函式照樣讀（之後做商品標籤會用到），
 //     但成長、廣告效率、商品結構、毛利率都不再算進總分。新規則套用到所有月份。
+//   🔴 v6-2026-11（2026-11-05，#416）：MOMO（甲配、乙配、MO+）動銷率改成跟淨利表 MOMO 總覽同一套（所有月份一起換），分數線用新口徑 2026-05～10 重算。
+//     三條線的算法（v5 沒寫下來，由舊線與 v4 的 P10／P50／P75 反推、確認後沿用）：100 分線＝P75 往上取整、80 分線＝P50 往下取整、60 分線＝P10 往下取整（整數 %）。
+//     MO+ 不含 2026-09：下半月幾乎沒有資料（MO+ 麻吉 8 個商品、約 2 千元），未來補齊後可重算。
+//     🔴 這裡只改 BASE（2026-10 以前）。2026-11 起吃雲端 app/health_rules 那一版，要管理員在「⚙ 評分標準」另存。
 const HEALTH_RULES = _hlDeepFreeze({
-  version: 'v5-2026-11',
+  version: 'v6-2026-11',
   from: '2026-01',                     // 這份規則從哪個月起適用（第一版＝firstMonth；之後的版本見 healthRulesForMonth）
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
@@ -64,7 +68,7 @@ const HEALTH_RULES = _hlDeepFreeze({
   pendingLookback: 3,                  // 頁頂「KPI 尚未填完」列：評分月份＋往前幾個月（只影響提示，不影響分數）
   // v5 計分（只有這一段決定總分）。lines＝[100 分線, 80 分線, 60 分線]（比率小數），依通路類型、同類型共用；
   //   沒列到的類型＝「標準未設定」：不給分、不算 0 分。取值口徑沿用畫面上的數字：
-  //   純利率＝獲利面向的「純利 ÷ 實際營收」（KPI）、動銷率＝商品結構面向的動銷率（公司商品口徑）。
+  //   純利率＝獲利面向的「純利 ÷ 實際營收」（KPI）、動銷率＝商品結構面向的動銷率（MOMO＝同淨利表 MOMO 總覽，以商品頁計；PChome＝公司商品口徑；蝦皮＝整月商品表現）。
   //   比較用畫面顯示的 0.1% 精度（_hlTier）：畫面寫 20.0% 就算達到 20% 線，手算核對跟畫面一致。
   //   provisional＝暫定（畫面標「暫定」）。之後做「標準設定頁」時才改成可設定；現在寫死在這裡，改數字要升 version。
   score: {
@@ -73,7 +77,7 @@ const HEALTH_RULES = _hlDeepFreeze({
       { key: 'pureRate', label: '純利率', short: '純利', w: 0.5, dim: 'profit', provisional: false,
         lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20] } },
       { key: 'sellThrough', label: '動銷率', short: '動銷', w: 0.5, dim: 'structure', provisional: true,
-        lines: { momoJia: [0.60, 0.56, 0.50], momoYi: [0.82, 0.78, 0.74], moplus: [0.35, 0.23, 0.15] } },
+        lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14] } },
     ],
   },
   // 面向（權重合計 100）。impl＝這個規則版本已實作；沒實作的不算進「依 N/M」的 M，卡片底部灰字列出。
@@ -122,7 +126,7 @@ const HEALTH_RULES = _hlDeepFreeze({
   //   商品利潤率一律用「商品純利 ÷ 商品營收」：蝦皮＝報表純利（已扣廣告與平台費）、MOMO＝momoAggregatePeriods 淨利、PChome＝日曆月淨利。
   //   成本未知的商品（MOMO 缺成本、MO+ 成本涵蓋未滿、PChome 料號沒成本）不進虧損／低利／長期虧損的分子分母，卡片顯示成本涵蓋率。
   structure: {
-    minSold: 20,          // 本月「有銷售且有成本」的商品少於這個數 ⇒ 面向「資料不足」
+    minSold: 20,          // 本月「有銷售且有成本」的商品少於這個數 ⇒ 面向「資料不足」（MOMO、蝦皮的動銷率不受這條限制）
     lowMinRev: 3000,      // 低利商品只算營收 ≥ 3,000 的（太小的商品不算拖累）
     lowMargin: 0.05,      // 低利＝商品純利率介於 0 到 5%（不含虧損，虧損另算，同一件商品不重複扣分）
     subs: [
@@ -153,12 +157,13 @@ const HEALTH_RULES = _hlDeepFreeze({
   // 依通路類型的門檻（[零分線, 滿分線]）。order＝總覽分組順序。
   //   純利率 v2 校準（真實 KPI 2026-01～10 的 P50 → 滿分線取 P75）：蝦皮自營 P50 20.3%、MOMO 自出貨 37.8%、MOMO 寄倉 24.3%、MO+ 28.1%、酷澎商城 26.8%（樣本 6）。
   //   sellThrough（動銷率）＝v4 校準值（__healthCalibrate 依實測 P10／P50／P75 算的建議值，方案 §2-7-2）；null＝這類型不評動銷率。
+  //     MOMO 三類是 v6 用新口徑 2026-05～10 重算（MO+ 不含 2026-09）。只給舊面向函式用，不影響總分（總分看 score.items 的 lines）。
   //     stFlag：'few'＝樣本少（< HEALTH_CALIB.minN 筆，門檻用最小間距），畫面標「樣本少」；'uncal'＝還沒有實測資料、仍是起始值，標「待校準」。
   types: {
     shopee:  { label: '蝦皮自營',     order: 1, pureRate: [0, 0.24], sellThrough: [0.30, 0.65], stFlag: 'uncal', members: '好麻吉、玩樂、森之旅、維克' },
-    momoJia: { label: 'MOMO 自出貨',  order: 2, pureRate: [0, 0.39], sellThrough: [0.495, 0.595], members: 'MOMO 甲配' },
-    momoYi:  { label: 'MOMO 寄倉',    order: 3, pureRate: [0, 0.26], sellThrough: [0.725, 0.81], members: 'MOMO 乙配（寄倉）' },
-    moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.08, 0.315], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
+    momoJia: { label: 'MOMO 自出貨',  order: 2, pureRate: [0, 0.39], sellThrough: [0.42, 0.50], members: 'MOMO 甲配' },
+    momoYi:  { label: 'MOMO 寄倉',    order: 3, pureRate: [0, 0.26], sellThrough: [0.65, 0.73], members: 'MOMO 乙配（寄倉）' },
+    moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
     coupang: { label: '酷澎商城',     order: 5, pureRate: [0, 0.34], sellThrough: null, members: '酷澎 商城-好麻吉、商城-露營館' },
     small:   { label: '小通路',       order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
     other:   { label: '業外',         order: 7, pureRate: [0, 0.10], sellThrough: null, members: '業外' },
@@ -550,7 +555,7 @@ function _hlShopeeMerge(halves) {
 }
 // 把 __healthProductSnapshot 的原始輸出整理成同一個形狀：
 //   { status:'ok'|'none'|'error', platform, rows:[{ key, name, company, fallback, pages:[], sub?, rev, profit, costKnown, sold, active, qty,
-//     adsFee?, gross?, platFee?, roi?, directROI?, clicks? }], pageCount?:{sold,total}, subTotals?, asOf, latestExport?, recon?, lastAdjust }
+//     adsFee?, gross?, platFee?, roi?, directROI?, clicks? }], st?:{sold,total}（MOMO 動銷率）, subTotals?, asOf, latestExport?, recon?, lastAdjust }
 //   status 'none'＝那個月沒有任何銷售資料（還沒上傳，或通路還沒開始）——不是「全部零動銷」。
 function _hlProdNormalize(raw) {
   const base = { platform: raw && raw.platform, shop: raw && raw.shop, month: raw && raw.month, rows: [], lastAdjust: (raw && raw.lastAdjust) || {} };
@@ -567,8 +572,8 @@ function _hlProdNormalize(raw) {
     rows = (raw.rows || []).map(r => { const ck = _hlCompanyKey(r.origin, r.key);
       return { key: r.key, name: r.name, company: ck.key, fallback: ck.fallback, pages: [r.key], rev: +r.rev || 0, profit: +r.profit || 0,
         costKnown: !!r.costKnown, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0, cost: _hlFinite(+r.cost) && r.cost != null ? +r.cost : null }; });
-    // 商品頁口徑＝momoPeriodTotals 同口徑：分子＝有銷售、分母＝上架 ∪ 有銷售（逐商品編號）
-    base.pageCount = { sold: rows.filter(r => r.sold).length, total: rows.filter(r => r.active || r.sold).length };
+    // 動銷率的分子分母：profit.js 直接取 momoPeriodTotals（同 MOMO 總覽），這裡不另算
+    base.st = raw.st && _hlFinite(+raw.st.sold) && _hlFinite(+raw.st.total) ? { sold: +raw.st.sold, total: +raw.st.total } : null;
   } else if (raw.platform === 'pchome') {
     base.latestExport = raw.latestExport || ''; base.subTotals = raw.subTotals || {};
     rows = (raw.rows || []).map(r => { const pages = (r.pages && r.pages.length) ? r.pages.slice() : ['code:' + r.key];
@@ -629,6 +634,31 @@ function _hlShopeeStApply(subs, ch, m, snap) {
   _hlStCount(sT, e.soldNormal, e.normal);
   sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
   sT.trace = { src: `洞察表整月商品表現 ${ch.shop} ${_hlYmLabel(m)}`, text: `正常商品裡有賣出 ${e.soldNormal} ÷ 正常商品 ${e.normal}` };
+}
+// MOMO（甲配、乙配、MO+）的動銷率口徑（#416）：跟淨利表 MOMO 總覽同一套，畫面說明也用這句。
+const HL_MOMO_ST_FORMULA = '本期有銷售的商品頁 ÷（目前上架 ∪ 本期有銷售）';
+const HL_MOMO_ST_DESC = `同淨利表 MOMO 總覽：${HL_MOMO_ST_FORMULA}。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
+// 把 MOMO 的動銷率子指標換成 momoPeriodTotals 的數字（純函式：只讀 snap.prod 的 st，由 profit.js 帶進來）。跟 minSold 脫鉤：只要這個月有商品層資料就算。
+//   商品層還沒好、這個月沒有銷售資料 ⇒ 不動，沿用 _hlStructureDim 給的狀態（載入中、尚未上傳…）。
+//   sellThroughPage 不再用（主數字本身就以商品頁計）；deadDupPages 保留；公司商品口徑只留在對照小字（_hlMomoPageNote）。
+function _hlMomoStApply(subs, ch, m, snap) {
+  if (!ch.prod || ch.prod.platform !== 'momo') return;
+  const by = k => subs.find(x => x.key === k), sT = by('sellThrough'), sP = by('sellThroughPage'), sD = by('deadDupPages');
+  if (sP) Object.assign(sP, { status: 'na', reason: '不適用：MOMO 動銷率本身就以商品頁計', raw: null, score: null, trace: null });
+  if (!sT) return;
+  Object.assign(sT, { formula: HL_MOMO_ST_FORMULA, note: HL_MOMO_ST_DESC });
+  const p = _hlProdOf(ch, m, snap);
+  if (p.state !== 'ready' || !p.snap || p.snap.status !== 'ok') return;
+  if (_hlProdOf(ch, _hlAddMonth(m, -1), snap).state === 'loading') return;   // 上個月還在算：沿用「載入中」，跟改版前一樣等整批好才給數字
+  const src = `MOMO 商品主檔＋對帳 ${ch.prod.shop} ${_hlYmLabel(m)}`, comp = _hlSellThrough(p.snap.rows);
+  if (sD && comp) Object.assign(sD, { status: 'ok', reason: '', raw: comp.deadDupPages, trace: { src, text: `多頁公司商品裡沒賣出的頁 ${comp.deadDupPages} 頁` } });
+  const st = p.snap.st;
+  if (!st || !(st.total > 0)) return Object.assign(sT, { status: 'insufficient', reason: '資料不足：沒有上架或有銷售的商品', raw: null, score: null, trace: null });
+  sT.status = 'ok'; sT.reason = '';
+  sT.raw = st.sold / st.total;
+  _hlStCount(sT, st.sold, st.total);
+  sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
+  sT.trace = { src, text: `有銷售的商品頁 ${st.sold} ÷ 上架或有銷售的商品頁 ${st.total}（同淨利表 MOMO 總覽）` };
 }
 // 這個通路這個月的商品層快照狀態：{ state:'na'|'notLoaded'|'loading'|'timeout'|'ready', snap? }
 //   snap 完全沒有 prodState（只算 KPI 的呼叫端：舊的回測、node 測試）⇒ 'off'：商品層面向一律「不適用」，分數跟塊 A 一樣只看 KPI。
@@ -730,7 +760,7 @@ function _hlStructureDim(ch, m, snap, R) {
   const lim = s => (s.key === 'sellThrough'
     ? { zero: t.sellThrough ? t.sellThrough[0] : null, full: t.sellThrough ? t.sellThrough[1] : null, flag: (t.sellThrough && t.stFlag) || '', flagN: t.stN || null }
     : { zero: s.zero, full: s.full });
-  const finish = subs => { _hlShopeeStApply(subs, ch, m, snap); return _hlFinishDim(def, subs); };
+  const finish = subs => { _hlShopeeStApply(subs, ch, m, snap); _hlMomoStApply(subs, ch, m, snap); return _hlFinishDim(def, subs); };
   const all = (st, reason) => finish(_hlSubs(S.subs, st, reason, lim));
   if (!ch.prod) return all('na', '不適用：這個通路只有 KPI 月合計，沒有商品層資料');
   const p = _hlProdOf(ch, m, snap), fail = _hlProdFail(p, m);
@@ -776,8 +806,7 @@ function _hlStructureDim(ch, m, snap, R) {
     sP.raw = st.page.den ? st.page.num / st.page.den : null;
     const subT = p.snap.subTotals || {};
     const pcText = Object.keys(subT).length ? '；料號口徑（同 PChome 總覽卡）：' + Object.keys(subT).map(k => `${k} ${subT[k].sold}/${subT[k].total}`).join('、') : '';
-    const pc = p.snap.pageCount;
-    sP.trace = { src, text: `有銷售的商品頁 ${st.page.num} ÷ 上架或有銷售的商品頁 ${st.page.den}` + (pc ? `（同 MOMO 總覽：${pc.sold}/${pc.total}）` : '') + pcText };
+    sP.trace = { src, text: `有銷售的商品頁 ${st.page.num} ÷ 上架或有銷售的商品頁 ${st.page.den}` + pcText };
     sD.raw = st.deadDupPages; sD.trace = { src, text: `多頁公司商品裡沒賣出的頁 ${st.deadDupPages} 頁` };
   }
   return finish(subs);
@@ -1407,13 +1436,13 @@ function _hlGuideDetails(key, R) {
     const wait = _hlWaitTypeLabels(R);
     return [
       st && st.provisional ? '標「暫定」：這組分數線之後還會再調。' : '',
-      `${def.desc}。公式：${def.formula}。`,
-      'MOMO 動銷率以商品款數計：同一款開成好幾頁（例如單入、多入組、不同版本）合起來算 1 個；淨利表 MOMO 總覽以商品頁計，一頁算 1 個，所以數字會不一樣。分母＝目前上架或這個月有賣的商品，分子＝這個月有賣出的。',
-      '同一款怎麼認（MOMO、PChome）：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一款只要有一頁、一個規格有賣，就算有動。編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個。',
+      `MOMO（甲配、乙配、MO+）：${HL_MOMO_ST_DESC}`,
+      `PChome：${def.desc}。公式：${def.formula}。`,
+      '同一款怎麼認（PChome，以及 MOMO 細項的對照小字）：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一款只要有一頁、一個規格有賣，就算有動。編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個。',
       '資料來源：商品層資料（MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
       '蝦皮的動銷率來自洞察表每月上傳的整月商品表現：正常商品裡這個月有賣出的比例。',
       'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
-      `MOMO、PChome 本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
+      `PChome 本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
       wait.length ? `${wait.join('、')}的動銷率要等商品資料載好，之前卡片寫「載入中…」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。手機不會自動載入商品資料，要按卡片裡的「載入商品資料」。` : '',
       `沒有標準或這個月沒有資料時，總分＝${pure ? pure.label : '純利率'}分數，卡片寫「只看${pure ? pure.label : '純利率'}」。`,
     ].filter(Boolean);
@@ -1856,7 +1885,7 @@ const HL_OVERVIEW_COLS = _hlDeepFreeze([
   { key: 'gross', cls: 'hl-c-gross', label: '毛利率', pick: ['profit', 'grossRate'], short: '只扣商品成本，看訂價合不合理',
     info: '毛利率＝只扣商品成本，每 100 元營收剩多少，用來看訂價合不合理（（實際營收 − 商品成本）÷ 實際營收）。只顯示、不計分。' },
   { key: 'st', cls: 'hl-c-st', label: '動銷率', pick: ['structure', 'sellThrough'], short: '在架商品這個月有賣出的比例',
-    info: '動銷率＝這個月有賣出的商品 ÷ 在架商品，以商品數計、不以規格數計（雨衣四色算 1 個商品）。' },
+    info: `動銷率＝這個月有賣出的商品 ÷ 在架商品。MOMO ${HL_MOMO_ST_DESC}PChome 以商品數計、不以規格數計（雨衣四色算 1 個商品）。` },
 ]);
 // ⓘ 的共用樣子（2026-11-03）：展開後第一行只放一句白話（short），公式、來源、提醒收進下一層「看算法」，點了才展開。
 function _hlInfoHtml(short, more, opts) {
@@ -2105,17 +2134,16 @@ function _hlTrendText(def, vals, rules) {
   if (def.scored && cur.score != null) txt += `，本月 ${cur.score} 分` + (prev.score != null && prev.score !== cur.score ? `（上月 ${prev.score} 分）` : '');
   return txt;
 }
-// MOMO 動銷率列下面的對照小字：選定月份「以商品頁算」的數字。只顯示、不計分；百分比取商品頁子指標，筆數取算分時同一支 _hlSellThrough 的 page（不另外算）。
-//   筆數跟 MOMO 總覽的 pageCount 一樣才寫「同淨利表 MOMO 總覽整月」，對不上就不講這句。回空字串＝不顯示（蝦皮、PChome、這個月沒有商品頁數字）。
+// MOMO 動銷率列下面的小字（回一行一個字串的陣列；空陣列＝不顯示：蝦皮、PChome、這個月動銷率沒有數字）。
+//   第一行：口徑說明。第二行：選定月份以公司商品計的對照數字，只顯示、不計分（_hlSellThrough 的 company）。
 function _hlMomoPageNote(ch, month, r, snap) {
-  if (!ch.prod || ch.prod.platform !== 'momo') return '';
-  const d = (r.dims || []).find(x => x.key === 'structure'), sP = d && d.subs.find(x => x.key === 'sellThroughPage');
+  if (!ch.prod || ch.prod.platform !== 'momo') return [];
+  const d = (r.dims || []).find(x => x.key === 'structure'), sT = d && d.subs.find(x => x.key === 'sellThrough');
   const p = _hlProdOf(ch, month, snap);
-  if (!sP || sP.status !== 'ok' || !_hlFinite(sP.raw) || p.state !== 'ready') return '';
-  const st = _hlSellThrough(p.snap.rows), pc = p.snap.pageCount;
-  if (!st || !st.page.den) return '';
-  const same = pc && pc.sold === st.page.num && pc.total === st.page.den;
-  return `以商品頁算：${_hlFmtPct(sP.raw)}（${st.page.num}／${st.page.den}${same ? '，同淨利表 MOMO 總覽整月' : ''}）`;
+  if (!sT || sT.status !== 'ok' || !_hlFinite(sT.raw) || p.state !== 'ready') return [];
+  const st = _hlSellThrough(p.snap.rows);
+  const comp = st && st.company.den ? [`以公司商品計（同款不同規格算 1 個）：${_hlFmtPct(st.company.num / st.company.den)}（${st.company.num}／${st.company.den}），不計分`] : [];
+  return [HL_MOMO_ST_DESC].concat(comp);
 }
 // 表格本體（純函式；trend＝舊→新的 computeChannelHealth，至少 HL_MONTH_N + 1 個月才比得到第一欄的前一個月）
 function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
@@ -2142,8 +2170,8 @@ function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
       <th scope="row">${escapeHtml(d.label)}<span class="hl-mt-k${d.scored ? ' hl-mt-scored' : ''}">${d.scored ? '計分' : '參考'}</span></th>${cells}<td class="hl-mt-trend">${escapeHtml(_hlTrendText(d, vals))}</td></tr>`;
     // 口徑變更提醒（例：成本更新）：那一列下面一行，點 ⓘ 看完整說明
     const notes = _hlNotices(month, d.key).map(n => `<tr class="hl-mt-note"><td colspan="${shown.length + 2}"><div class="hl-notice">${_hlNoticeHtml(n)}</div></td></tr>`).join('');
-    const pageNote = d.key === 'sellThrough' ? _hlMomoPageNote(ch, month, trend[trend.length - 1], snap) : '';
-    return row + notes + (pageNote ? `<tr class="hl-mt-note"><td colspan="${shown.length + 2}"><div class="hl-mt-page">${escapeHtml(pageNote)}</div></td></tr>` : '');
+    const pageNote = d.key === 'sellThrough' ? _hlMomoPageNote(ch, month, trend[trend.length - 1], snap) : [];
+    return row + notes + (pageNote.length ? `<tr class="hl-mt-note"><td colspan="${shown.length + 2}">${pageNote.map(x => `<div class="hl-mt-page">${escapeHtml(x)}</div>`).join('')}</td></tr>` : '');
   }).join('');
   const openDef = defs.find(d => d.key === openKey);
   const chart = openDef ? `<div class="hl-mt-chart"><div class="hl-trend-hd">${escapeHtml(openDef.label)} 近 ${_HL_TREND_N} 個月（再點一次那一列收起）</div>
@@ -3423,6 +3451,7 @@ function _hlMockProdSnapshot(p, s, m) {
         rev, profit: Math.round(rev * (((i % 10) - 2) / 20)), qty: sold ? 1 + (i % 6) : 0, sold, active: i % 13 !== 0, costKnown: i % 17 !== 0,
         cost: Math.round(rev * (0.45 + ((i * 3 + mi) % 8) * 0.01)) };   // 毛利率每月 47%～55% 之間變動（商品標籤的毛利率燈用）
     });
+    out.st = { sold: out.rows.filter(r => r.sold).length, total: out.rows.filter(r => r.active || r.sold).length };
     out.recon = on && m <= '2026-09';
     if (on) out.lastAdjust = { [out.rows[2].key]: m.replace('-', '/') + '/20' };
   } else if (p === 'pchome') {
