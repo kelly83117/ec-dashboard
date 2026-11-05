@@ -21,9 +21,10 @@ const _LS_COMPRESS_MOMO_MIGRATE=true;
 //   回滾＝改 false 再部署：sweep、MOMO 鈕計數、雲端守衛都回到舊行為（localStorage 有就推），也不跑遷移。
 //   lsSave 與推送成功後的清除不受開關影響，登記會繼續維持，之後再打開不用重來。不會丟資料。
 const _REPORT_DIRTY_GATE=true;
-// 蝦皮報表「只即時訂閱近月、舊月要用才讀」（#428 方案 A）的總開關。false＝全量訂閱：所有月份一律視為已載入，所有路徑跟改版前相同。
-//   改 true 之前，firebase.js 的訂閱要先換成近月（切換塊）。計畫與規則見 docs/handoff-428-window.md。
-const _REPORT_WINDOW_GATE=false;
+// 蝦皮報表「只即時訂閱近月、舊月要用才讀」（#428 方案 A）的總開關，要跟 firebase.js 的 __subProfits 一起看：
+//   true＝訂閱只有近 3 個月，舊月份用 _reportEnsure 按需讀。規則見 CLAUDE.md「近月窗口」。
+//   🔴 單獨改 false 不算回滾：firebase.js 只訂近月，舊月份會變成「沒有資料」。要回滾就把這個 commit 整支還原（firebase.js 一起回全量訂閱）。
+const _REPORT_WINDOW_GATE=true;
 const _REPORT_WINDOW_MONTHS=3;          // 今天的月份往前共 3 個月（含當月），上限不封頂
 const _REPORT_ENSURE_TIMEOUT_MS=60000;  // 按需讀取、等窗口資料的上限；逾時算失敗，不算「沒有」
 const _REPORT_PREV_NA='__report_prev_na__';   // 上期讀取失敗：每列上期副標不顯示（跟「上期沒這商品」的「—」不同）
@@ -2249,7 +2250,7 @@ if(!window.__reportCacheFlushInstalled){
 //   只動符合白名單的 key；_lsTidyDenied 是第二道防呆，命中就整個計畫作廢。
 //   🔴 不寫雲端、不動 _profitMem / Store._mem（刪的只是本機副本，畫面與期別清單照讀記憶體）。
 const LS_TIDY_KEEP_MONTHS=3;   // 保留當月起算的 3 個月（上月報表的上期在上上月，刪了會讓重新產生時上期營收靜默變空）
-const LS_TIDY_ARCHIVE_MONTHS=['2026/05'];   // 雲端副本只在 app/profit_2026_05 分片的月份：要等 __profitArchivesReady 才判斷
+const LS_TIDY_ARCHIVE_MONTHS=[];   // 雲端副本只在封存分片的月份（有的話要等 __profitArchivesReady 才判斷）。目前沒有：2026/05 的 app/profit_2026_05 已不載入，報表以 profits 為準（#428）
 const _LS_TIDY_INSIGHT_RE=/^ec\.insight_[^_|.]+_(master|weeks|perf)$/;
 const _LS_TIDY_DENY_PREFIX=['ec_notes','ec_edits','ec_split','ec_momo','momo_','ec_pchome','pchome_','ec_coupang','ec|filemeta|','ec.session',
   'ec.users','ec.employees','ec.departments','ec.platforms','ec.d2.pricing.','ec.dailyProgress','ec.insightLegacyBackup','ec_d3_'];
