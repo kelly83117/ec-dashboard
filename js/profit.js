@@ -16613,6 +16613,62 @@ function momoS1103Sanity(s1103, qtyMap, source){
 // 對帳單「摘要頁 PDF」文字 → 12 項費用 + A/C/E/G + 實際應付。label-based（攤平換行、靠項目名不靠行順序，容忍左右兩欄交錯 + 月份項數不固定）。
 //   自我驗收：Σ12費用==E 且 A含稅+C含稅−E+G==實際應付（A+C-E+G 用含稅欄）。任一不符 valid=false + errors。
 const MOMO_FEE_LABELS=['行銷贊助金','耗材/派工/運費','物流費用-第三方物流','活動贊助金(網路)','分攤包裝材料費','銷售獎勵金','遲延罰款','物流費用-超商取貨','寄倉分攤運費','寄倉倉租費(EC)','平台服務費','付費報表訂閱'];
+// ══════ MOMO 對帳「罰金／非例行費用」警示（只加顯示，不改任何淨利／費用計算）══════
+//   警示項目（金額 > 0 才算；負數＝退回罰款，不警示、只在月對帳頁灰字標「退回」）：
+//     甲乙配（對帳單摘要 summary）：費用名稱含「罰」者（遲延罰款…）｜清單外新費用 unlistedFee（PDF 上的實際名稱請對照）｜其他訂單 other.untax
+//     MO+（月對帳 doc 的 sys.D 逐項）：D 欄名稱含「罰」者（假回壓罰款…）＋ MOMO_ALERT_EXTRA（代收付客訴爭議費）
+//   不警示：物流、行銷贊助、倉租、包材、平台服務費、付費報表訂閱、銷售獎勵金等例行費用。
+//   判斷只在這一組函式；要增減 MO+ 的額外警示項目只改 MOMO_ALERT_EXTRA。
+//   🔴 資料只讀已存的月對帳 doc（momoLoadReconcile），不新增任何雲端欄位。MO+ 對帳 doc 是整月粒度 → 半月期別也只能顯示整月合計。
+const MOMO_ALERT_EXTRA=['代收付客訴爭議費'];
+function momoReconAlertIsWatched(name){ const n=String(name||''); return n.indexOf('罰')>=0 || MOMO_ALERT_EXTRA.indexOf(n)>=0; }
+function momoReconAlertItemsJiaYi(summ){   // → [{name, amt, incl?, hint?}]（只 >0）
+  const out=[]; if(!summ||typeof summ!=='object') return out;
+  const fees=summ.fees||{};
+  Object.keys(fees).forEach(n=>{ if(n==='其他費用(未列)') return; if(n.indexOf('罰')>=0 && Number(fees[n])>0) out.push({name:n, amt:Number(fees[n])}); });
+  if(Number(summ.unlistedFee)>0) out.push({name:'清單外新費用', amt:Number(summ.unlistedFee), hint:'PDF 上的實際名稱請對照'});
+  if(summ.other && Number(summ.other.untax)>0) out.push({name:'其他訂單', amt:Number(summ.other.untax), incl:(summ.other.incl!=null?Number(summ.other.incl):null)});
+  return out;
+}
+function momoReconAlertItemsMoPlus(D){      // D＝sys.D 逐項 {項目:金額} → [{name, amt}]（只 >0）
+  const out=[]; if(!D||typeof D!=='object') return out;
+  Object.keys(D).forEach(n=>{ if(momoReconAlertIsWatched(n) && Number(D[n])>0) out.push({name:n, amt:Number(D[n])}); });
+  return out;
+}
+function momoReconAlertFor(shop, month){   // 該賣場該月已存的對帳 → {items, shared}；沒對帳／沒警示項 → items 空
+  let doc=null; try{ doc=momoLoadReconcile(shop, month); }catch(e){}
+  if(!doc) return {items:[], shared:false};
+  if(shop==='甲配'||shop==='乙配') return {items:momoReconAlertItemsJiaYi(doc.summary), shared:true};
+  if(momoIsMoPlus(shop)) return {items:momoReconAlertItemsMoPlus(doc.sys&&doc.sys.D), shared:false};
+  return {items:[], shared:false};
+}
+function momoReconAlertText(items){   // → 已 escape 的 HTML 文字
+  return items.map(x=>_momoEsc(x.name)+' <b>'+momoMoney(x.amt)+'</b>'+(x.incl!=null?'（含稅 '+momoMoney(x.incl)+'）':'')+(x.hint?'（'+_momoEsc(x.hint)+'）':'')).join('、');
+}
+// 總表狀態橫幅：該月（甲乙配＝整月與兩個半月；MO+＝該半月與整月）有警示項就一行紅字。
+function momoReconAlertBannerHtml(shop, period){
+  const mo=String(period||'').slice(0,7); if(!/^\d{4}-\d{2}$/.test(mo)) return '';
+  const a=momoReconAlertFor(shop, mo); if(!a.items.length) return '';
+  const half=/-(H1|H2)$/.test(String(period||''));
+  const note=a.shared?'（甲乙共用對帳單）':(half?'（整月合計，無法拆半月）':'');
+  return '<div class="mm-banner mm-banner-err" style="line-height:1.8">⚠ <b>本月有罰金／非例行費用</b>：'+momoReconAlertText(a.items)+'（明細見月對帳）'+note+'</div>';
+}
+// 上傳成功當下跳 modal（沿用 App.showAlertModal）。批次上傳會連續呼叫 → 排隊 400ms 合併成一個視窗；沒有警示項就不跳。
+let _momoReconAlertQ=[], _momoReconAlertTimer=null;
+function momoReconAlertNotify(entry){
+  if(!entry||!entry.items||!entry.items.length) return;
+  _momoReconAlertQ.push(entry);
+  if(_momoReconAlertTimer) clearTimeout(_momoReconAlertTimer);
+  _momoReconAlertTimer=setTimeout(()=>{
+    const q=_momoReconAlertQ; _momoReconAlertQ=[]; _momoReconAlertTimer=null; if(!q.length) return;
+    const rows=[]; q.forEach(e=>e.items.forEach((x,i)=>rows.push('<tr><td style="padding:4px 8px;text-align:left">'+(i===0?_momoEsc(e.month):'')+'</td><td style="padding:4px 8px;text-align:left">'+(i===0?_momoEsc(e.shopLabel):'')+'</td><td style="padding:4px 8px;text-align:left">'+_momoEsc(x.name)+(x.hint?'<div style="font-size:11px;color:#9ca3af">'+_momoEsc(x.hint)+'</div>':'')+'</td><td style="padding:4px 8px;text-align:right;color:#b91c1c;font-weight:700">'+momoMoney(x.amt)+(x.incl!=null?'<div style="font-size:11px;color:#9ca3af;font-weight:400">含稅 '+momoMoney(x.incl)+'</div>':'')+'</td></tr>')));
+    const notes=[...new Set(q.map(e=>e.note).filter(Boolean))];
+    const html='<div style="font-size:13px;margin-bottom:8px">這次上傳的對帳資料裡有罰金或非例行費用，請確認原因：</div><table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px"><colgroup><col style="width:68px"><col style="width:96px"><col><col style="width:84px"></colgroup><thead><tr style="text-align:left;color:#6b7280;border-bottom:1px solid #fecaca"><th style="padding:4px 8px;text-align:left">月份</th><th style="padding:4px 8px;text-align:left">賣場</th><th style="padding:4px 8px;text-align:left">項目</th><th style="padding:4px 8px;text-align:right">金額</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>'+notes.map(t=>'<div style="font-size:11px;color:#6b7280;margin-top:6px">'+_momoEsc(t)+'</div>').join('');
+    const key='momo-recon-alert|'+q.map(e=>e.month+e.shopLabel).join(',')+'|'+Date.now();
+    if(window.App && typeof App.showAlertModal==='function') App.showAlertModal({title:'MOMO 對帳有罰金／非例行費用', message:html, kind:'warn', dedupeKey:key});
+    else if(typeof showToast==='function') showToast('MOMO 對帳有罰金／非例行費用：'+q.map(e=>e.month+' '+e.shopLabel).join('、'),'warn',8000);
+  }, 400);
+}
 function momoParseReconcileSummary(rawText){
   const t=String(rawText||'').replace(/\s+/g,' ');
   const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -16713,7 +16769,7 @@ function momoRenderReconReport(shop, detail, summ){
   const aMatch=summ.A&&Math.abs(xlsA+ (detail.meta.otherUntax||0) - summ.A.untax)<=2;
   const monthMatch=summ.period===_momoReconMonth;
   const okColor=b=>b?'#10b981':'#dc2626';
-  const feeRows=MOMO_FEE_LABELS.concat(summ.unlistedFee>0?['其他費用(未列)']:[]).filter(l=>summ.fees[l]!=null).map(l=>`<tr><td class="l">${l}</td><td class="num">${n(summ.fees[l])}</td></tr>`).join('');
+  const feeRows=MOMO_FEE_LABELS.concat(summ.unlistedFee>0?['其他費用(未列)']:[]).filter(l=>summ.fees[l]!=null).map(l=>`<tr><td class="l">${l}</td><td class="num">${n(summ.fees[l])}${(l.indexOf('罰')>=0&&Number(summ.fees[l])<0)?' <span style="color:#9ca3af;font-size:11px;font-weight:400">退回</span>':''}</td></tr>`).join('');
   el.innerHTML=`
     <div class="mm-recon-h">對帳結果 — ${_momoReconMonth}</div>
     <div class="mm-recon-box">
@@ -16792,6 +16848,7 @@ function momoReconDiff(L){
 }
 // mode：full＝整份存（新月份、或使用者選覆蓋）｜retOnly＝已存的 doc 原封不動，只補 retSheet／retSheetV
 function momoReconWrite(L,mode){
+  try{ momoReconAlertNotify({month:L.month, shopLabel:'甲配＋乙配', note:'甲乙配共用同一份對帳單，罰金無法拆店', items:momoReconAlertItemsJiaYi(L.summ)}); }catch(e){ try{ console.warn('[recon alert]',e); }catch{} }   // 罰金／非例行費用警示：按「存本月對帳」就依這次上傳的對帳單跳（不論整份存或只補退貨貨款；只顯示、不影響存檔）
   const rs=L.detail.retSheet;
   if(mode==='retOnly'){
     if(!rs){ if(typeof showToast==='function') showToast('退貨貨款分頁沒讀到，什麼都沒寫（已存的對帳不變）','error',6000); return; }
@@ -19646,7 +19703,8 @@ function momoRenderProfitBody(shop, tableOnly){
         </div>`;
       }
     }
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+kpiNotes+overview+statusBanner;   // kpiNotes（估算/篩選）緊貼 KPI 卡上方＝標示跟著數字走
+    let reconAlertBanner=''; try{ reconAlertBanner=momoReconAlertBannerHtml(shop, period); }catch(e){}   // 罰金／非例行費用（只讀已存對帳 doc，只加顯示）
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=reconAlertBanner+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+kpiNotes+overview+statusBanner;   // kpiNotes（估算/篩選）緊貼 KPI 卡上方＝標示跟著數字走
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -23099,6 +23157,7 @@ function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
       rdoc.shop=shop; rdoc.month=rmonth; rdoc.moPlus=true; rdoc.sys=sys; rdoc.updatedAt=Date.now();
       momoSaveReconcile(shop, rmonth, rdoc);
       _markPending(momoReconcileKey(shop, rmonth));
+      try{ momoReconAlertNotify({month:rmonth, shopLabel:momoShopDisplay(shop), note:'MO+ 對帳明細是整月粒度，金額為整月合計（無法拆半月）', items:momoReconAlertItemsMoPlus(sys.D)}); }catch(e){ try{ console.warn('[recon alert]',e); }catch{} }   // 罰金／非例行費用警示（只顯示）
     }
   }catch(e){ try{ console.error('[MO+ recon] 寫入月對帳 doc 失敗（不影響上傳主流程）', e); }catch{} }
   // 寫後互查（cell qty vs Σorigins）＝全域檢查（讀全部 products+全部 origins docs）。
@@ -23391,7 +23450,10 @@ function momoMoPlusReconGroupHTML(shop, gLabel, gKey, items, groupTot, denomA, s
   const rows=Object.keys(items).map(name=>{
     const v=items[name];
     const pct=(showPct&&denomA>0)?(Math.abs(v)/denomA*100):null;
-    return `<tr class="mm-recon-item"><td>${_momoEsc(name)}</td><td class="mm-recon-amt${v===0?' z':''}">${momoMoney(v)}</td><td class="mm-recon-pct">${pct==null?'':momoPct(pct)}</td></tr>`;
+    const _watch=(gKey==='D' && momoReconAlertIsWatched(name));
+    const _red=_watch && Number(v)>0, _back=_watch && Number(v)<0;   // 警示項（>0）紅字；負數＝退回，灰字標示、不警示
+    const _rs=_red?' style="color:#dc2626;font-weight:700"':'';
+    return `<tr class="mm-recon-item"><td${_rs}>${_momoEsc(name)}${_back?' <span style="color:#9ca3af;font-size:11px;font-weight:400">退回</span>':''}</td><td class="mm-recon-amt${v===0?' z':''}"${_rs}>${momoMoney(v)}</td><td class="mm-recon-pct">${pct==null?'':momoPct(pct)}</td></tr>`;
   }).join('');
   return `<div class="mm-recon-box"><table class="mm-recon-tbl mm-recon-mo"><colgroup><col><col class="c-amt"><col class="c-pct"></colgroup><tbody>
     <tr class="mm-recon-head" onclick="momoMoPlusReconToggle('${shop}','${gKey}')"><td>${e?'▾':'▸'} ${gLabel}</td><td class="mm-recon-amt">${sign}${momoMoney(groupTot)}</td><td></td></tr>
@@ -29024,7 +29086,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoEditSpInput,momoEditPpInput,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
   momoUploadFile,momoUploadF1102InvMonth,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
-  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyStatus,momoSyncApplyNew,momoJumpShop,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyStatus,momoReconAlertFor,momoReconAlertNotify,momoReconAlertItemsJiaYi,momoReconAlertItemsMoPlus,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
