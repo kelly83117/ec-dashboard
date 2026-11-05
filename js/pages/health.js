@@ -607,6 +607,8 @@ function _hlSellThrough(rows) {
 }
 // 蝦皮的動銷率不走商品層，改讀洞察表每月上傳的整月商品表現（shopee_perf_month）。商品層的其他用途（商品標籤、拖累清單）不變。
 function _hlStFromPerf(ch) { return !!(ch && ch.prod && ch.prod.platform === 'shopee'); }
+// 動銷率的分子分母（評分標準視窗「近 6 月」Σ÷Σ 用）。🔴 刻意不可列舉：只給 _hlStdSellMonth 讀，不進 JSON、不影響分數與回歸指紋。
+function _hlStCount(s, num, den) { Object.defineProperty(s, 'stCount', { value: { num, den }, enumerable: false, configurable: true }); }
 // 把蝦皮的動銷率子指標換成整月資料（純函式：只讀 snap.shopeePerf，內容由 _hlSpWant 填）。商品層在載入、資料不足都不影響這一項。
 //   snap 沒有 shopeePerf（只算 KPI 的呼叫端、node 測試）⇒ 不適用；有 shopeePerf 但還沒有這個 key ⇒ 載入中。
 function _hlShopeeStApply(subs, ch, m, snap) {
@@ -624,6 +626,7 @@ function _hlShopeeStApply(subs, ch, m, snap) {
   if (!(e.normal > 0)) return set('insufficient', `資料不足：${_hlYmLabel(m)} 整月商品表現沒有正常商品`);
   set('ok', '');
   sT.raw = e.soldNormal / e.normal;
+  _hlStCount(sT, e.soldNormal, e.normal);
   sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
   sT.trace = { src: `洞察表整月商品表現 ${ch.shop} ${_hlYmLabel(m)}`, text: `正常商品裡有賣出 ${e.soldNormal} ÷ 正常商品 ${e.normal}` };
 }
@@ -768,6 +771,7 @@ function _hlStructureDim(ch, m, snap, R) {
   else if (!st.company.den) [sT, sP, sD].forEach(s => set(s, 'insufficient', '資料不足：沒有上架或有銷售的商品'));
   else {
     sT.raw = st.company.num / st.company.den; sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
+    _hlStCount(sT, st.company.num, st.company.den);
     sT.trace = { src, text: `有銷售的公司商品 ${st.company.num} ÷ 上架或有銷售的公司商品 ${st.company.den}` + (st.fallback ? `（其中 ${st.fallback} 個編號格式不符，改用商品頁計）` : '') };
     sP.raw = st.page.den ? st.page.num / st.page.den : null;
     const subT = p.snap.subTotals || {};
@@ -1063,6 +1067,126 @@ function computeHealthTrend(ch, month, n, snap, rules) {
     out.push(computeChannelHealth(ch, m, snap, rules));
   }
   return out;
+}
+
+/* ---------- 評分標準視窗的「近 6 月」參考值（#426）：只給人看，不參與分數、不寫任何資料 ----------
+ *   期間＝已結束的最近 6 個月（固定，不隨「從哪個月開始適用」變動）。
+ *   平均＝Σ分子 ÷ Σ分母（純利 ÷ 營收、有賣出 ÷ 在架；個別通路列、類型列同一個公式）；最低～最高＝逐月的值。
+ *   數字走 computeChannelHealth，跟卡片同一套：KPI 未填完、資料不足、關站的月份不算進去，原因沿用畫面文字。
+ *   營收未滿 minRev 的月份不計分：一列裡有計分月份就只用計分月份；一個都沒有才改用這些月份，整格灰字標「僅供參考」（只影響這一欄，分數不變）。
+ *   動銷率有自己的資料來源：KPI 未填完不影響它；只有 KPI 填完且營收未滿 minRev 才算「不計分」。 */
+const HL_STD_HIST_N = 6;
+const _HL_STD_WAIT = ['loading', 'timeout', 'notLoaded'];   // 動銷率還在等資料的狀態（前面的優先顯示）
+function _hlStdHistMonths(todayYm, n) {
+  const N = n || HL_STD_HIST_N, end = _hlAddMonth(todayYm, -1), out = [];
+  for (let i = N - 1; i >= 0; i--) {
+    const m = _hlAddMonth(end, -i);
+    if (m >= HEALTH_RULES.firstMonth) out.push(m);
+  }
+  return out;
+}
+const _hlStdSub = (r, dim, key) => { const d = (r.dims || []).find(x => x.key === dim); return d ? d.subs.find(x => x.key === key) : null; };
+// 一個通路一個月的純利率。r＝computeChannelHealth 的結果。回 { month, ok, ref, closed, na, wait, num?, den?, reason? }：
+//   ok＝計分月份；ref＝營收未滿 minRev（有數字、不計分）；closed／na＝這個月跟這家通路無關，不算「缺」。
+function _hlStdPureMonth(ch, month, snap, r) {
+  const base = { month, ok: false, ref: false, closed: false, na: false, wait: null };
+  if (r.status === 'closed') return Object.assign(base, { closed: true, reason: r.reason });
+  const s = _hlStdSub(r, 'profit', 'pureRate'), t = s && s.trace;
+  if (s && s.status === 'ok' && t && _hlFinite(t.num) && _hlFinite(t.den) && t.den > 0) return Object.assign(base, { ok: true, num: t.num, den: t.den });
+  const c = s && s.status === 'smallRev' ? _hlCell(snap, month, ch) : null;
+  if (c && _hlFinite(c.pure) && _hlFinite(c.rev) && c.rev > 0) return Object.assign(base, { ref: true, num: c.pure, den: c.rev, reason: s.reason });
+  return Object.assign(base, { reason: (s && s.reason) || '沒有資料' });
+}
+// 一個通路一個月的動銷率。分子分母是 _hlStructureDim／_hlShopeeStApply 算分時留下的 stCount（_hlStCount）。
+function _hlStdSellMonth(ch, month, snap, r) {
+  const base = { month, ok: false, ref: false, closed: false, na: false, wait: null };
+  if (r.status === 'closed') return Object.assign(base, { closed: true, reason: r.reason });
+  const s = _hlStdSub(r, 'structure', 'sellThrough');
+  if (!s || s.status === 'na') return Object.assign(base, { na: true, reason: (s && s.reason) || '不適用' });
+  const n = s.stCount;
+  if (s.status === 'ok' && n && _hlFinite(n.num) && _hlFinite(n.den) && n.den > 0) {
+    const p = _hlStdSub(r, 'profit', 'pureRate');
+    return p && p.status === 'smallRev' ? Object.assign(base, { ref: true, num: n.num, den: n.den, reason: p.reason }) : Object.assign(base, { ok: true, num: n.num, den: n.den });
+  }
+  if (_HL_STD_WAIT.indexOf(s.status) >= 0) return Object.assign(base, { wait: s.status, reason: s.reason });
+  return Object.assign(base, { reason: s.reason || '沒有資料' });
+}
+// 合計一組通路（一家＝個別通路列；多家＝類型列）。perCh＝[{ label, rows:[_hlStdPureMonth／_hlStdSellMonth 的結果，順序同 months] }]。
+//   一個月至少一家有數字才算進去；有數字的家數不足時 monthly 帶 missing。全部沒數字 ⇒ 進 excluded。關站、不適用的通路不算「缺」。
+//   整列都沒有計分月份、但有營收未滿 minRev 的月份 ⇒ 改用那些月份，refOnly:true。有任何一家還在等資料 ⇒ wait（畫面不先算部分平均）。
+function _hlStdHistAgg(perCh, months) {
+  const monthly = [], excluded = [];
+  let num = 0, den = 0;
+  const all = perCh.reduce((a, p) => a.concat(p.rows), []);
+  const refOnly = !all.some(r => r.ok) && all.some(r => r.ref);
+  const wait = _HL_STD_WAIT.find(w => all.some(r => r.wait === w)) || null;
+  const waitRow = wait ? all.find(r => r.wait === wait) : null;
+  const use = r => r.ok || (refOnly && r.ref);
+  months.forEach((m, i) => {
+    const rs = perCh.map(p => Object.assign({ label: p.label }, p.rows[i]));
+    const ok = rs.filter(use), missing = rs.filter(r => !use(r) && !r.closed && !r.na);
+    if (!ok.length) {
+      const reason = missing.length === 0 ? ((rs[0] && rs[0].reason) || '沒有資料')
+        : perCh.length === 1 ? missing[0].reason : missing.map(r => `${r.label}：${r.reason}`).join('；');
+      excluded.push({ month: m, reason });
+      return;
+    }
+    const n = ok.reduce((a, r) => a + r.num, 0), d = ok.reduce((a, r) => a + r.den, 0);
+    num += n; den += d;
+    monthly.push({ month: m, rate: n / d, num: n, den: d, chN: ok.length, chTotal: ok.length + missing.length,
+      missing: missing.map(r => ({ label: r.label, reason: r.reason })) });
+  });
+  const rates = monthly.map(x => x.rate);
+  return { months: months.slice(), monthly, excluded, n: monthly.length, num, den, rate: den > 0 ? num / den : null,
+    min: rates.length ? Math.min(...rates) : null, max: rates.length ? Math.max(...rates) : null,
+    refOnly, wait, waitReason: waitRow ? waitRow.reason : '' };
+}
+// 全部列的歷史。回 { pureRate:{ 'c|通路 id':歷史, 't|類型':歷史 }, sellThrough:{…} }（每個通路每個月只算一次 computeChannelHealth）。
+function healthStdHistoryAll(months, snap, channels) {
+  const chs = channels || HEALTH_CHANNELS;
+  const per = chs.map(ch => ({ ch, label: ch.label, results: months.map(m => computeChannelHealth(ch, m, snap)) }));
+  const build = fn => {
+    const rows = per.map(p => ({ ch: p.ch, label: p.label, rows: p.results.map((r, i) => fn(p.ch, months[i], snap, r)) }));
+    const out = {};
+    rows.forEach(p => { out['c|' + p.ch.id] = _hlStdHistAgg([p], months); });
+    Object.keys(HEALTH_RULES.types).forEach(t => { out['t|' + t] = _hlStdHistAgg(rows.filter(p => p.ch.type === t), months); });
+    return out;
+  };
+  return { pureRate: build(_hlStdPureMonth), sellThrough: build(_hlStdSellMonth) };
+}
+// 歷史 → 畫面文字。沒傳（資料還沒就緒）或還在等資料 ⇒ 不先算部分平均；全缺 ⇒ 「—」。回 { line1, line2, tip, ref }。itemKey＝'pureRate'（預設）或 'sellThrough'。
+function _hlStdHistText(h, itemKey) {
+  if (!h || h.wait === 'loading') return { line1: '載入中', line2: '', tip: '', ref: false };
+  if (h.wait === 'notLoaded') return { line1: '未載入', line2: '商品資料尚未載入', tip: h.waitReason || '', ref: false };
+  if (h.wait === 'timeout') return { line1: '載入逾時', line2: '', tip: h.waitReason || '', ref: false };
+  const sell = itemKey === 'sellThrough';
+  const pct1 = v => (v * 100).toFixed(1);
+  const range = h.months.length ? `${_hlYmLabel(h.months[0])}～${_hlYmLabel(h.months[h.months.length - 1])}` : '';
+  const small = `營收未滿 ${HEALTH_RULES.minRev / 10000} 萬，不計分`;
+  const lines = [`近 6 月（${range}）：${sell ? '有賣出合計 ÷ 在架合計' : '純利合計 ÷ 營收合計'}`];
+  if (h.refOnly) lines.push(`僅供參考：這幾個月${small}`);
+  h.monthly.forEach(x => {
+    const part = x.chN < x.chTotal ? `，${x.chN}／${x.chTotal} 家；${x.missing.map(r => `${r.label}：${r.reason}`).join('；')}` : '';
+    const nd = sell ? `有賣出 ${x.num} ÷ 在架 ${x.den}` : `純利 ${_hlFmtMoney(x.num)} ÷ 營收 ${_hlFmtMoney(x.den)}`;
+    lines.push(`${_hlYmLabel(x.month)}　${_hlFmtPct(x.rate)}（${nd}${part}）`);
+  });
+  if (h.excluded.length) {
+    lines.push('沒算進去：');
+    h.excluded.forEach(x => lines.push(`${_hlYmLabel(x.month)}　${x.reason}`));
+  }
+  const tip = lines.join('\n');
+  if (!h.n) return { line1: '—', line2: '0 個月', tip, ref: false };
+  if (h.refOnly) return { line1: `平均 ${_hlFmtPct(h.rate)}`, line2: `僅供參考・${small}・${h.n} 個月`, tip, ref: true };
+  return { line1: `平均 ${_hlFmtPct(h.rate)}`, line2: h.n === 1 ? '1 個月' : `${pct1(h.min)}～${pct1(h.max)}・${h.n} 個月`, tip, ref: false };
+}
+// 動銷率「近 6 月」的 ⓘ 文案（依這一列的資料來源）。'c|通路 id' 或 't|類型'；這一列沒有商品資料 ⇒ ''。
+const HL_STD_BIAS_SHOPEE = '蝦皮的商品狀態是報表匯出當下的狀態，不是當月的。補傳的舊月份，在架數可能跟當時實際不同，月份越舊越不準，只當參考。';
+const HL_STD_BIAS_STATE = '只有目前的上下架狀態，舊月份的分母也是今天的上架狀態，月份越舊越不準。';
+function _hlStdBiasText(histKey) {
+  const [kind, id] = String(histKey).split('|');
+  const chs = HEALTH_CHANNELS.filter(ch => ch.prod && (kind === 'c' ? ch.id === id : ch.type === id));
+  if (!chs.length) return '';
+  return chs.some(ch => ch.prod.platform === 'shopee') ? HL_STD_BIAS_SHOPEE : HL_STD_BIAS_STATE;
 }
 
 // 同類型內排名（只排 ranked 的）。回 { 通路 id: 名次 }；同分用 id 排序，結果穩定。
@@ -1623,14 +1747,26 @@ function _hlRefreshPlatform(platform) {
 function _hlProdKey(p, s, m) { return p + '|' + s + '|' + m; }
 //   商品標籤（塊 4）要再往前一個月（毛利率比前 3 個月平均）：分數用得到的月份全部算完、畫面重畫之後才排（第二批），
 //   分數出現的時間不會因為標籤變慢；第二批算完再重畫一次，細項的商品清單才補上。
+function _hlWantProdOne(ch, m, today) {
+  const k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
+  if (_hlProd.cache[k] || _hlProd.queued[k]) return;
+  if (m < HEALTH_RULES.firstMonth || m > today) { _hlProd.cache[k] = { status: 'none', rows: [], lastAdjust: {} }; return; }
+  _hlProd.queued[k] = true; _hlProd.queue.push([ch.prod.platform, ch.prod.shop, m]);
+}
+// 評分標準視窗「近 6 月」要的資料：商品層多排最前面一個月（_hlStructureDim 的長期虧損要看上個月，沒排會一直是「載入中」）；蝦皮讀整月商品表現。
+//   只補缺的，重複呼叫沒有成本；平台還沒載好的這次不排，載好重畫時（viewHealth → _hlStdHistRefresh）會再叫一次。
+function _hlStdHistWant() {
+  const today = _hlTodayYm(), months = _hlStdHistMonths(today);
+  if (!months.length) return;
+  const need = [_hlAddMonth(months[0], -1)].concat(months);
+  HEALTH_CHANNELS.filter(ch => ch.prod && !_hlStFromPerf(ch) && _hlProd.state[ch.prod.platform] === 'ready')
+    .forEach(ch => need.forEach(m => _hlWantProdOne(ch, m, today)));
+  if (_hlProd.queue.length && !_hlProd.running) _hlRunQueue();
+  _hlSpWant(months);
+}
 function _hlWantProd(month, openId) {
   const today = _hlTodayYm();
-  const want = (ch, m) => {
-    const k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
-    if (_hlProd.cache[k] || _hlProd.queued[k]) return;
-    if (m < HEALTH_RULES.firstMonth || m > today) { _hlProd.cache[k] = { status: 'none', rows: [], lastAdjust: {} }; return; }
-    _hlProd.queued[k] = true; _hlProd.queue.push([ch.prod.platform, ch.prod.shop, m]);
-  };
+  const want = (ch, m) => _hlWantProdOne(ch, m, today);
   const ready = HEALTH_CHANNELS.filter(ch => ch.prod && _hlProd.state[ch.prod.platform] === 'ready');
   ready.forEach(ch => {
     const ms = [month, _hlAddMonth(month, -1), _hlAddMonth(month, -2)];
@@ -2640,7 +2776,7 @@ function _hlOnChange(e) {
  *   存之前再把整份版本丟進 _hlBuildRuleChain 驗（跟 healthRulesForMonth 同一套）。
  *   🔴 確認內容放在同一個視窗裡切換（不另開 modal）：App.openModal 只有一個 #modal，另開會把表單整個換掉，失敗時填好的內容就回不來了。
  *   事件全部走 data-hl-std-act ＋ 開窗時綁在視窗內容上（彈窗不在 #main-content 裡），不寫 inline handler。 */
-const _hlStd = { from: '', open: {}, baseline: '', versions: [], root: null, busy: false, pending: null, formSig: '', askThen: null, askPrev: '', guardBound: false };
+const _hlStd = { from: '', open: {}, baseline: '', versions: [], root: null, busy: false, pending: null, formSig: '', askThen: null, askPrev: '', guardBound: false, hist: null, histTimer: null };
 const _hlStdIsAdmin = () => !!(App.currentUser && App.currentUser.role === 'admin');
 const _hlStdIsRO = () => typeof App.isReadOnly === 'function' && !!App.isReadOnly();
 const _hlStdCanEdit = () => _hlStdIsAdmin() && !_hlStdIsRO();
@@ -2670,12 +2806,58 @@ function _hlStdMonths() {
 }
 // 三格一組：一個輸入框一格（對齊表頭的 100／80／60 分），或跨三欄的鎖住文字。hints＝淺灰提示（個別通路傳共用那列的數字，類型列傳 null）。
 function _hlStdGroupHtml(key, lines, lock, disabled, hints, label) {
-  if (lock) return `<td class="hl-std-lock hl-std-gs" colspan="3">${escapeHtml(lock)}</td>`;
-  return [0, 1, 2].map(i => `<td${i === 0 ? ' class="hl-std-gs"' : ''}><input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${hints ? _hlStdToPct(hints[i]) : ''}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}></td>`).join('');
+  if (lock) return `<td class="hl-std-lock hl-std-gs" colspan="4">${escapeHtml(lock)}</td>`;
+  return [0, 1, 2].map(i => `<td${i === 0 ? ' class="hl-std-gs"' : ''}><input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${hints ? _hlStdToPct(hints[i]) : ''}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}></td>`).join('') + _hlStdHistCellHtml(key);
 }
-// 一列的紅字放在下面一列（跨三欄）。沒有紅字時這一列高度是 0。
+// 「近 6 月」欄：只有文字，刻意不帶 data-hl-std-cell（存檔、_hlStdFormSig 都讀不到）。key＝'項目|t|類型' 或 '項目|c|通路 id'。
+function _hlStdHistView(key) {
+  const i = key.indexOf('|'), itemKey = key.slice(0, i), histKey = key.slice(i + 1);
+  const h = _hlStd.hist && _hlStd.hist[itemKey] && _hlStd.hist[itemKey][histKey], t = _hlStdHistText(h, itemKey);
+  const bias = itemKey === 'sellThrough' && h && !h.wait ? _hlStdBiasText(histKey) : '';   // 還在等資料時沒有數字，不掛 ⓘ
+  const info = bias ? ` <span class="hl-std-hist-info" title="${escapeHtml(bias)}" aria-label="${escapeHtml(bias)}">ⓘ</span>` : '';
+  return { t, html: `<div class="hl-std-hist-avg">${escapeHtml(t.line1)}</div><div class="hl-std-hist-sub">${escapeHtml(t.line2)}${info}</div>` };
+}
+function _hlStdHistCellHtml(key) {
+  const { t, html } = _hlStdHistView(key);
+  return `<td class="hl-std-hist${t.ref ? ' hl-std-hist-ref' : ''}" data-hl-std-hist="${escapeHtml(key)}"${t.tip ? ` title="${escapeHtml(t.tip)}"` : ''}>${html}</td>`;
+}
+// 重算「近 6 月」並只更新這一欄的文字（不重畫表單）。snap＝呼叫端已有的快照（viewHealth）；沒傳就自己收。
+//   資料還沒就緒 ⇒ 維持「載入中」，每秒再試，直到有數字或視窗關掉。已有數字時若這次拿不到，就留著舊的。
+const HL_STD_HIST_RETRY_MS = 1000;
+function _hlStdHistCompute(snap) {
+  try {
+    _hlStdHistWant();
+    const s = snap || _hlCollect();
+    if (!s || s.error || !s.ready) return null;
+    return healthStdHistoryAll(_hlStdHistMonths(_hlTodayYm()), s);
+  } catch (e) {
+    console.warn('[health] 近 6 月計算失敗', e);
+    return null;
+  }
+}
+function _hlStdHistPaint() {
+  if (!_hlStd.root) return;
+  _hlStd.root.querySelectorAll('[data-hl-std-hist]').forEach(td => {
+    const { t, html } = _hlStdHistView(td.getAttribute('data-hl-std-hist'));
+    if (td.dataset.hlStdHistHtml !== html) { td.innerHTML = html; td.dataset.hlStdHistHtml = html; }   // 內容一樣就不動（滑鼠正停在 ⓘ 上時提示不會被洗掉）
+    td.classList.toggle('hl-std-hist-ref', !!t.ref);
+    if (td.title !== t.tip) td.title = t.tip;
+  });
+}
+function _hlStdHistRefresh(snap) {
+  if (!_hlStdIsOpen()) return;
+  const hist = _hlStdHistCompute(snap);
+  if (hist) _hlStd.hist = hist;
+  _hlStdHistPaint();
+  if (!_hlStd.hist) _hlStdHistRetry();
+}
+function _hlStdHistRetry() {
+  if (_hlStd.histTimer) return;
+  _hlStd.histTimer = setTimeout(() => { _hlStd.histTimer = null; _hlStdHistRefresh(); }, HL_STD_HIST_RETRY_MS);
+}
+// 一列的紅字放在下面一列（跨四欄，含「近 6 月」）。沒有紅字時這一列高度是 0。
 function _hlStdErrRowHtml(cols, attrs) {
-  return `<tr class="hl-std-errrow"${attrs}><td></td>${cols.map(c => `<td colspan="3">${c.lock ? '' : `<div class="hl-std-err" data-hl-std-err="${escapeHtml(c.key)}"></div>`}</td>`).join('')}</tr>`;
+  return `<tr class="hl-std-errrow"${attrs}><td></td>${cols.map(c => `<td colspan="4">${c.lock ? '' : `<div class="hl-std-err" data-hl-std-err="${escapeHtml(c.key)}"></div>`}</td>`).join('')}</tr>`;
 }
 function _hlStdBodyHtml() {
   const from = _hlStd.from, list = _hlStdList(), R = healthRulesForMonth(from, _hlStd.versions);
@@ -2696,7 +2878,7 @@ function _hlStdBodyHtml() {
         items.map(it => _hlStdGroupHtml(`${it.key}|c|${ch.id}`, it.linesByChannel && it.linesByChannel[ch.id], _hlStdLockChannel(it.key, ch), off, it.lines && it.lines[t], `${ch.label} ${it.label}`)).join('')}</tr>${
         _hlStdErrRowHtml(items.map(it => ({ key: `${it.key}|c|${ch.id}`, lock: _hlStdLockChannel(it.key, ch) })), attrs)}`;
     }).join('');
-    return `<tr class="hl-std-trow"><td class="hl-std-tname">${escapeHtml(label)}（共用）<button type="button" class="hl-std-toggle" data-hl-std-act="chs" data-hl-std-type="${escapeHtml(t)}" aria-expanded="${open ? 'true' : 'false'}">${open ? '▾' : '▸'} 個別通路</button></td>${
+    return `<tr class="hl-std-trow"><td class="hl-std-tname">${escapeHtml(label)}<button type="button" class="hl-std-toggle" data-hl-std-act="chs" data-hl-std-type="${escapeHtml(t)}" aria-expanded="${open ? 'true' : 'false'}">${open ? '▾' : '▸'} 個別通路</button></td>${
       items.map(it => _hlStdGroupHtml(`${it.key}|t|${t}`, it.lines && it.lines[t], _hlStdLockType(it.key, t), off, null, `${label} ${it.label}`)).join('')}</tr>${
       _hlStdErrRowHtml(items.map(it => ({ key: `${it.key}|t|${t}`, lock: _hlStdLockType(it.key, t) })), '')}${chRows}`;
   }).join('');
@@ -2707,9 +2889,9 @@ function _hlStdBodyHtml() {
       <label class="hl-std-field">從哪個月開始適用
         <select data-hl-std-from>${_hlStdMonths().map(m => `<option value="${m}"${m === from ? ' selected' : ''}>${escapeHtml(_hlYmLabel(m))}</option>`).join('')}</select></label>
       <div data-hl-std-notes>${notes.map(n => `<div class="hl-std-note">${escapeHtml(n)}</div>`).join('')}</div>
-      <div class="hl-std-lead">共用那一列是這類通路的標準；下面個別通路沒填就照用，填了只改那一家。</div>
-      <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1" rowspan="2">通路類型</th>${items.map(it => `<th class="hl-std-gs" colspan="3">${escapeHtml(it.label)}（%）</th>`).join('')}</tr>
-        <tr>${items.map(() => [100, 80, 60].map((n, i) => `<th${i === 0 ? ' class="hl-std-gs"' : ''}>${n} 分</th>`).join('')).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="hl-std-lead">每類第一列是這類通路的標準；展開「個別通路」沒填就照用，填了只改那一家。</div>
+      <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1" rowspan="2">通路類型</th>${items.map(it => `<th class="hl-std-gs" colspan="4">${escapeHtml(it.label)}（%）</th>`).join('')}</tr>
+        <tr>${items.map(() => [100, 80, 60].map((n, i) => `<th${i === 0 ? ' class="hl-std-gs"' : ''}>${n} 分</th>`).join('') + '<th>近 6 月</th>').join('')}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="hl-std-tip">整組留空＝標準未設定；三格要全填或全空。</div>
       <div class="hl-std-row">權重
         ${items.map(it => `<label class="hl-std-w">${escapeHtml(it.label)} <input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-w="${escapeHtml(it.key)}" value="${_hlStdToPct(it.w)}" aria-label="${escapeHtml(it.label)}權重（%）"${dis}> %<span class="hl-std-err" data-hl-std-err="w|${escapeHtml(it.key)}"></span></label>`).join('')}
@@ -2783,7 +2965,8 @@ function _hlStdOpen() {
   _hlStd.baseline = _hlStableJson(_hlStd.versions);
   _hlStd.from = _hlTaipeiYm(Date.now());
   _hlStd.open = {}; _hlStd.busy = false; _hlStd.pending = null; _hlStd.root = null; _hlStd.askThen = null; _hlStd.askPrev = '';
-  App.openModal({ title: '⚙ 評分標準', width: '860px', hideFooter: true, bodyHtml: `<div class="hl-std">${_hlStdBodyHtml()}</div>`, onMount: _hlStdBind });
+  _hlStd.hist = _hlStdHistCompute();
+  App.openModal({ title: '⚙ 評分標準', width: '960px', hideFooter: true, bodyHtml: `<div class="hl-std">${_hlStdBodyHtml()}</div>`, onMount: _hlStdBind });
 }
 function _hlStdBind() {
   const root = document.querySelector('.hl-std');
@@ -2793,6 +2976,7 @@ function _hlStdBind() {
   root.addEventListener('change', _hlStdOnChange);
   root.addEventListener('input', _hlStdOnInput);
   _hlStd.formSig = _hlStdFormSig();
+  if (!_hlStd.hist) _hlStdHistRetry();
   if (!_hlStd.guardBound) { _hlStd.guardBound = true; document.addEventListener('click', _hlStdCloseGuard, true); }
 }
 // 共用那列改了，下面個別通路的淺灰數字跟著變。只改 placeholder、不碰 value：存檔（_hlStdSubmit）與「有沒有改過」（_hlStdFormSig）都只讀 value，提示不會被當成已填。
@@ -3020,6 +3204,7 @@ Object.assign(App, {
     _hlWantProd(month, _hlState.open);   // 已載入的平台：補排這次要用到的商品層快照（算完會再重畫一次）
     _hlSpWantView(month, _hlState.open);   // 蝦皮整月商品表現：要用才讀，全部回來再重畫一次
     _hlLast = { month, snap };
+    _hlStdHistRefresh(snap);   // 評分標準視窗開著：資料晚到只更新「近 6 月」那一欄
     const monthRules = healthRulesForMonth(month, snap.healthRuleVersions);
     const results = HEALTH_CHANNELS.map(ch => computeChannelHealth(ch, month, snap));
     const prevM = _hlAddMonth(month, -1);
