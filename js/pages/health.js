@@ -2074,8 +2074,17 @@ function _hlSetMetCol(key, on) {
   _hlState.metCols = HL_MONTH_METRICS.map(m => m.key).filter(k => cur.indexOf(k) >= 0);   // 照指標順序
   try { localStorage.setItem(HL_METCOLS_KEY, JSON.stringify(_hlState.metCols)); } catch {}
 }
-// 某指標某月的值（r＝那個月的 computeChannelHealth）。回 { v, score, status }（score／status 只有計分項目才有）
+// 某指標某月的值（r＝那個月的 computeChannelHealth）。回 { v, score, status, ref? }（score／status 只有計分項目才有）
+//   ref＝營收未滿 minRev 的月份（純利率、毛利率）給格子灰字顯示的參考數字；🔴 v 照舊（趨勢欄、折線圖只讀 v，判斷完全不變）。
 function _hlMetricVal(ch, r, key, snap) {
+  const out = _hlMetricValRaw(ch, r, key, snap);
+  if (key === 'pureRate' || key === 'grossRate') {
+    const s = _hlStdSub(r, 'profit', key);
+    if (s && s.status === 'smallRev' && _hlFinite(s.refRaw)) out.ref = s.refRaw;
+  }
+  return out;
+}
+function _hlMetricValRaw(ch, r, key, snap) {
   if (key === 'pureRate' || key === 'sellThrough') {
     const it = (r.items || []).find(x => x.key === key);
     return { v: it && _hlFinite(it.raw) ? it.raw : null, score: it && it.status === 'ok' ? it.score : null, status: it ? it.status : 'na' };
@@ -2172,6 +2181,11 @@ function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
     // 每格只寫一個短數字；顏色規則不變，分數、比上月的變化放在格子的 title
     const cells = shown.map((r, i) => {
       const x = vals[off + i], px = off + i > 0 ? vals[off + i - 1] : null, pv = px ? px.v : null;
+      // 營收未滿 minRev：灰字參考數字（同卡片），不上色；趨勢欄照舊只看 x.v
+      if (x.ref != null) {
+        const refTip = `${d.label} ${_hlYmLabel(r.month)}：${_hlFmtPct(x.ref)}｜營收未滿 ${_hlFmtMoney(HEALTH_RULES.minRev)}，不計分，僅供參考`;
+        return `<td class="hl-num hl-mc hl-mc-ref" title="${escapeHtml(refTip)}">${escapeHtml(_hlFmtPct(x.ref))}</td>`;
+      }
       const light = d.scored ? _hlScoreLight(x.score) : _hlMetricLight(d, x.v, pv);
       const full = x.v == null ? '沒有資料' : d.unit === 'pct' ? _hlFmtPct(x.v) : _hlFmtMoney(x.v);
       const sc = d.scored ? (x.score != null ? `得分 ${x.score} 分｜` : `沒有分數（${_HL_STATUS_TEXT[x.status] || '沒有資料'}）｜`) : '';

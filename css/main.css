@@ -2778,8 +2778,8 @@
 .hl-std-hist-sub { font-size: 11px; color: var(--text-muted); }
 .hl-std-hist-info { cursor: help; }
 .hl-std-tbl .hl-std-hist-ref { min-width: 118px; }
-/* 營收未滿 3 萬的灰字參考數字：評分標準視窗「近 6 月」與卡片底部三欄（.hl-tile-met-ref，下面一行「僅供參考」）共用 */
-.hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v { font-weight: 400; color: var(--text-muted); }
+/* 營收未滿 3 萬的灰字參考數字：評分標準視窗「近 6 月」、卡片底部三欄（.hl-tile-met-ref，下面一行「僅供參考」）、指標逐月變化表（.hl-mc-ref）共用 */
+.hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v, .hl-mt-tbl .hl-mc-ref { font-weight: 400; color: var(--text-muted); }
 .hl-std-hist-ref .hl-std-hist-sub { white-space: normal; }
 .hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
 .hl-std-err:empty { display: none; }
