@@ -29024,7 +29024,7 @@ window.__healthKpiSnapshot=function(months){
 // ══════ 通路健檢塊 B：商品層唯讀轉接（docs/plan-channel-health.md §1-2）══════
 //  全部只讀：不寫雲端、不寫 Store；名稱不以 __cloud 開頭（不影響本機防寫的 27 / 45）。
 //  口徑一律沿用各頁現有函式：蝦皮＝淨利表報表（lsLoad：雲端記憶體 → 本機快取，LZ1 也解得開）；
-//    MOMO＝momoAggregatePeriods（lean，同 momoPeriodTotals 的動銷判定：grossQty>0 或 |營收|>0.5；分母＝上架 ∪ 有銷售）；
+//    MOMO＝momoAggregatePeriods（lean，逐商品）＋ momoPeriodTotals（動銷率 out.st，同 MOMO 總覽：grossQty>0 或 |營收|>0.5；分母＝上架 ∪ 有銷售）；
 //    PChome＝pchomeCalendarCalc（日曆月，轉單＋寄倉；hasBiz＝淨值為正）。
 //  「已調整」只回日期（不回人名、不回內文）：蝦皮＝淨利表備註 ec_notes＋洞察表調整紀錄；MOMO／PChome＝優化紀錄。
 
@@ -29128,6 +29128,8 @@ window.__healthProductSnapshot=function(platform,shop,month){
         return {key:String(p.sku||''),origin:String(p.origin||'').trim(),name:String(p.name||''),rev:+r.revenue||0,profit:+r.profit||0,qty:+r.qty||0,
           sold,active:p.discontinued!==true,costKnown:isMoPlus?r._covered:Number(p.cost)>0,cost:+r.cost||0};   // cost：健檢商品標籤算毛利率用（momoAggregatePeriods 的成本）
       });
+      // 動銷率（#416）：直接取 MOMO 總覽同一支 momoPeriodTotals，不另算（健檢的 MOMO 動銷率讀這個，js/pages/health.js _hlMomoStApply）
+      try{ const t=momoPeriodTotals(shop,period); out.st={sold:t.soldActive,total:t.activeTotal}; }catch(e){ out.st=null; console.warn('[health] MOMO 動銷率讀取失敗',shop,month,e); }
       try{ out.recon=!!momoLoadReconcile(shop,month); }catch{ out.recon=null; }
       if(!cached){ try{ const ol=momoLoadOptlog(shop)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(x=>bump(s,x&&x.date))); }catch{} }
     }else if(platform==='pchome'){
