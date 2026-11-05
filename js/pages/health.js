@@ -3430,7 +3430,7 @@ const _HL_MOCK_GROUPS = [
   { key: 'momo', title: 'MOMO', shops: ['MOMO-甲配', 'MOMO-寄倉', 'mo+0號店(好麻吉)', 'mo+1號店(森之旅)', 'mo+2號店(玩樂)'], since: null, shopSince: { 'mo+2號店(玩樂)': '2026-10' }, closedFrom: null },
   { key: 'pchome', title: 'PChome', shops: ['PChome'], since: '2026-09', shopSince: {}, closedFrom: null },
   { key: 'friday', title: 'FriDay', shops: ['FriDay-主站', 'FriDay-i站'], since: '2026-08', shopSince: {}, closedFrom: null },
-  { key: 'books', title: '博客來', shops: ['博客來-寄倉', '博客來-轉單'], since: '2026-08', shopSince: {}, closedFrom: null },
+  { key: 'books', title: '博客來', shops: ['博客來-寄倉', '博客來-轉單'], since: '2026-09', shopSince: {}, closedFrom: null },
 ];
 function _hlMakeMock(kind) {
   return function (months) {
