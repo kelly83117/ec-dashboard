@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction, query, where, documentId, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -587,6 +587,29 @@ try {
   // setReport 立刻建好（寫入用），讀取（getDoc / onSnapshot）才延後
   try {
     const toDocId = k => k.replace(/\//g, '__');
+    const fromDocId = id => id.replace(/__/g, '/');
+    // 全部報表的目錄（key → ts）：REST 投影查詢，只拿 ts，不載報表內容（111 份約 4 萬字元）。
+    //   ts 不是數字（filemeta 等）回 null。查詢失敗一律丟錯：呼叫端不能把「讀不到」當成「雲端沒有」。
+    const profitsTsIndex = async () => {
+      const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
+        + '/databases/(default)/documents:runQuery?key=' + firebaseConfig.apiKey;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'profits' }], select: { fields: [{ fieldPath: 'ts' }] } } })
+      });
+      if (!resp.ok) throw new Error('報表目錄讀取失敗：' + resp.status);
+      const rows = await resp.json();
+      const out = {};
+      rows.forEach(r => {
+        if (!r || !r.document) return;
+        const id = decodeURIComponent(String(r.document.name).split('/').pop());
+        const v = r.document.fields && r.document.fields.ts;
+        const ts = v && (v.integerValue !== undefined ? Number(v.integerValue) : v.doubleValue);
+        out[fromDocId(id)] = typeof ts === 'number' && !isNaN(ts) ? ts : null;
+      });
+      return out;
+    };
     window.__cloudProfitCol = {
       // 最後一道網：頂層非物件（陣列 / null / 損毀）→ 不 throw、不寫，回 reject 讓上層收進 failed 浮上來
       setReport: (key, value) => {
@@ -605,6 +628,32 @@ try {
       //   自動放行，本機一按「清除重傳」就會真的刪掉公司正式 Firestore 的報表。remove* 不在白名單
       //   → 會被換成 no-op，本機測試安全。
       removeReport: (key) => deleteDoc(doc(db, 'profits', toDocId(key))),
+      // ── 舊月份按需讀取（#428 方案 A 第 2 塊）──
+      //   🔴 兩個名字都必須在讀取白名單（READ_OK：getDoc / subscribe / getDocForShop / subscribeShop / forKey）內，
+      //     本機防護與唯讀守衛才會放行；換成其他名字會被換成 no-op，呼叫端會把「沒讀」當成「沒有資料」。
+      //   🔴 一律讀伺服器（FromServer）：這個專案沒開 persistence，離線時一般讀法可能回空快取，會被誤判成「雲端沒有」。
+      //     讀不到就丟錯，由呼叫端顯示失敗，不回空結果。
+      // 讀一份報表，回 Firestore 的 DocumentSnapshot（同其他 __cloud*.getDoc）。
+      getDoc: (key) => getDocFromServer(doc(db, 'profits', toDocId(key))),
+      // 讀一個通路的一段月份，回 { 報表 key: 資料 }。opts：
+      //   from／to：'YYYY/MM'，都含；沒給 from＝這個通路全部，沒給 to＝不封頂。
+      //   prefix：key 第一段，預設 'ec'；測試通路用 'ectest'（它的期別是日期，不看 from／to）。
+      //   tsOnly：true＝全部報表的目錄（見 profitsTsIndex），shop 傳 null。
+      //   ⚠ 上限用 \uf8ff，不能用 ~：通路名是中文，排序在 ~ 之後，'ectest|～ectest|~' 會查到 0 份。
+      getDocForShop: async (shop, opts) => {
+        const o = opts || {};
+        if (o.tsOnly) return profitsTsIndex();
+        if (!shop) throw new Error('getDocForShop：缺通路');
+        const badMonth = m => m !== undefined && !/^\d{4}\/\d{2}$/.test(m);
+        if (badMonth(o.from) || badMonth(o.to)) throw new Error('getDocForShop：月份格式不對');
+        const head = (o.prefix || 'ec') + '|' + shop + '|';
+        const lower = o.from ? head + toDocId(o.from) : head;
+        const upper = (o.to ? head + toDocId(o.to) : head) + '\uf8ff';
+        const snap = await getDocsFromServer(query(collection(db, 'profits'), where(documentId(), '>=', lower), where(documentId(), '<', upper)));
+        const out = {};
+        snap.forEach(d => { out[fromDocId(d.id)] = d.data(); });
+        return out;
+      },
     };
   } catch {}
 
