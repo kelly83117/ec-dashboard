@@ -16984,11 +16984,92 @@ async function momoReadPdfText(file){
 // ── 階段二：月對帳 UI（獨立子分頁）。上傳 對帳單明細.xls(營收) + 摘要.pdf(12費用)，交叉核對對帳號碼，重現驗收值 ──
 let _momoReconMonth='';           // 選中的對帳月（YYYY-MM）
 let _momoReconStage={xls:null, pdf:null, xlsName:'', pdfName:''};
+let _momoReconMonthUser=false;       // 使用者自己選過月份（之後不再自動換成最新存檔月）
+const _momoReconExpand={};           // 已存明細各組展開狀態：gKey → false＝收合（未設＝展開）
+// ══════ 月對帳（甲乙配）：已存對帳明細＋逐月比較 ══════
+//   只讀已存的月對帳 doc（ec_momo_reconcile|甲配|月、ec_momo_reconcile|乙配|月，summary 兩份相同；任一份有就行）；不寫任何東西、不新增欄位、不動任何淨利／費用計算。
+//   警示標示（紅字加粗／灰字「退回」）與總表橫幅／上傳 modal 共用同一個判斷函式 momoReconAlertItemsJiaYi。
+function momoReconSavedDoc(month){ for(const sh of ['甲配','乙配']){ let d=null; try{ d=momoLoadReconcile(sh,month); }catch(e){} if(d&&d.summary&&typeof d.summary==='object') return d; } return null; }
+function momoReconSavedMonths(){   // 有存檔（有 summary）的月份，舊→新
+  const set=new Set();
+  try{ ['甲配','乙配'].forEach(sh=>{ const pfx='ec_momo_reconcile|'+sh+'|';
+    const scan=o=>{ if(o) Object.keys(o).forEach(k=>{ if(k.indexOf(pfx)===0) set.add(k.slice(pfx.length)); }); };
+    scan(typeof Store!=='undefined'&&Store._profitMem); scan(typeof Store!=='undefined'&&Store._mem);
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.indexOf(pfx)===0) set.add(k.slice(pfx.length)); }
+  }); }catch(e){}
+  return [...set].filter(m=>/^\d{4}-\d{2}$/.test(m) && momoReconSavedDoc(m)).sort();
+}
+// 一個月的已存對帳 → 顯示用資料（明細與逐月比較共用，數字一致）。缺欄位的格子是 null（畫面顯示「—」），missing 記有哪些缺。
+function momoReconSavedModel(month){
+  const doc=momoReconSavedDoc(month); if(!doc) return null;
+  const sm=doc.summary||{}, fees=sm.fees||{};
+  const num=v=>(v==null||v===''||isNaN(Number(v)))?null:Number(v);
+  const shopRev=sh=>{ let d=null; try{ d=momoLoadReconcile(sh,month); }catch(e){} const sk=d&&d.skus; if(!sk||typeof sk!=='object') return null; return Math.round(Object.keys(sk).reduce((t,k)=>t+(Number(sk[k]&&sk[k].revUntax)||0),0)); };
+  const missing=[];
+  const need=(ok,label)=>{ if(!ok) missing.push(label); };
+  const A=sm.A&&typeof sm.A==='object'?sm.A:null, C=sm.C&&typeof sm.C==='object'?sm.C:null, hold=sm.hold&&typeof sm.hold==='object'?sm.hold:null, oth=sm.other&&typeof sm.other==='object'?sm.other:null;
+  const jia=shopRev('甲配'), yi=shopRev('乙配');
+  need(A&&num(A.untax)!=null,'A'); need(C&&num(C.untax)!=null,'C'); need(num(sm.E)!=null,'E'); need(hold&&num(hold.prev)!=null&&num(hold.cur)!=null,'保留款'); need(num(sm.payable)!=null,'實際應付'); need(jia!=null&&yi!=null,'逐店營收');
+  const feeV={}; MOMO_FEE_LABELS.forEach(l=>{ feeV[l]=num(fees[l]); });
+  if(MOMO_FEE_LABELS.some(l=>feeV[l]==null)) missing.push('部分費用項目');
+  const alertNames=new Set(momoReconAlertItemsJiaYi(sm).map(x=>x.name));   // 觸發警示的項目名稱（同警示那支的判斷）
+  const gap=(A&&oth&&sm.E!=null&&sm.payable!=null&&hold&&hold.G!=null)?Math.abs((num(A.incl)+num(oth.incl)+(C?num(C.incl):0)-num(sm.E)+num(hold.G))-num(sm.payable)):null;
+  const check=(A&&sm.E!=null&&sm.payable!=null&&hold&&hold.G!=null)?(Math.abs((num(A.incl)+(oth?num(oth.incl)||0:0)+(C?num(C.incl)||0:0)-num(sm.E)+num(hold.G))-num(sm.payable))<=1):null;
+  return { month, doc, reconNo:sm.reconNo||null, A:A?num(A.untax):null, Aincl:A?num(A.incl):null, jia, yi, otherUntax:oth?num(oth.untax):null, otherIncl:oth?num(oth.incl):null,
+    C:C?num(C.untax):null, Cincl:C?num(C.incl):null, fees:feeV, unlisted:num(sm.unlistedFee)||0, E:num(sm.E), holdPrev:hold?num(hold.prev):null, holdCur:hold?num(hold.cur):null, G:hold?num(hold.G):null,
+    payable:num(sm.payable), alertNames, check, missing, gap };
+}
+function _momoReconGroupHtml(shop, gKey, gLabel, rows, totalTxt, denomA, pctHead){
+  const e=_momoReconExpand[gKey]!==false;
+  const body=rows.map(r=>{
+    const v=r.v, pct=(pctHead&&denomA>0&&v!=null)?(Math.abs(v)/denomA*100):null;
+    const rs=r.red?' style="color:#dc2626;font-weight:700"':'';
+    return `<tr class="mm-recon-item"><td${rs}>${_momoEsc(r.name)}${r.back?' <span style="color:#9ca3af;font-size:11px;font-weight:400">退回</span>':''}${r.hint?` <span style="color:#9ca3af;font-size:11px;font-weight:400">（${_momoEsc(r.hint)}）</span>`:''}</td><td class="mm-recon-amt${v===0?' z':''}"${rs}>${v==null?'—':momoMoney(v)}</td><td class="mm-recon-pct">${pct==null?'':momoPct(pct)}</td></tr>`;
+  }).join('');
+  return `<div class="mm-recon-box"><table class="mm-recon-tbl mm-recon-mo"><colgroup><col><col class="c-amt"><col class="c-pct"></colgroup><tbody>
+    <tr class="mm-recon-head" onclick="momoReconToggle('${shop}','${gKey}')"><td>${e?'▾':'▸'} ${gLabel}</td><td class="mm-recon-amt">${totalTxt}</td><td></td></tr>
+    ${e?`<tr class="mm-recon-colhead"><td>項目</td><td class="mm-recon-amt">金額</td><td class="mm-recon-pct">${pctHead||''}</td></tr>${body}`:''}
+  </tbody></table></div>`;
+}
+function momoReconToggle(shop,g){ _momoReconExpand[g]=!(_momoReconExpand[g]!==false); const el=document.getElementById('momo-recon-saved'); if(el) el.innerHTML=momoReconSavedHtml(shop,_momoReconMonth); }
+function momoReconSavedHtml(shop, month){
+  const M=momoReconSavedModel(month);
+  if(!M) return `<div style="font-size:12px;color:#9ca3af;border:1px dashed #e5e7eb;border-radius:8px;padding:10px 12px">${_momoEsc(month)} 還沒有已存的對帳。上傳兩個檔並按「產生對帳」、確認後存檔，之後切到這個月就會直接看到明細。${momoReconCompareHtml(month)}</div>`;
+  const n=v=>v==null?'—':momoMoney(v), alert=M.alertNames;
+  const gA=_momoReconGroupHtml(shop,'A','A 開發票金額（未稅）',
+    [{name:'甲配一般販售',v:M.jia},{name:'乙配寄倉販售',v:M.yi}].concat((M.otherUntax!=null&&M.otherUntax!==0)?[{name:'其他訂單',v:M.otherUntax,red:alert.has('其他訂單'),hint:M.otherIncl!=null?('含稅 '+momoMoney(M.otherIncl)):''}]:[]),
+    n(M.A==null?null:M.A+(M.otherUntax||0)), M.A==null?null:M.A+(M.otherUntax||0), '');   // A 組合計＝甲配＋乙配＋其他訂單（跟列加總一致）
+  const gC=_momoReconGroupHtml(shop,'C','C 折讓（未稅）',[{name:'折讓單金額',v:M.C}], n(M.C), M.A, '');
+  const feeRows=MOMO_FEE_LABELS.map(l=>({name:l, v:M.fees[l], red:alert.has(l), back:(l.indexOf('罰')>=0&&M.fees[l]!=null&&M.fees[l]<0)})).concat(M.unlisted>0?[{name:'清單外新費用',v:M.unlisted,red:alert.has('清單外新費用'),hint:'PDF 上的實際名稱請對照'}]:[]);
+  const gE=_momoReconGroupHtml(shop,'E','E 各項費用及罰則',feeRows,'−'+n(M.E), M.A, '本月佔 A %');
+  const gG=_momoReconGroupHtml(shop,'G','G 保留款',[{name:'前期保留款（+）',v:M.holdPrev},{name:'本期保留款（−）',v:M.holdCur}], n(M.G), M.A, '');
+  const chk=M.check==null?'<span style="color:#9ca3af">— 欄位不全，無法自驗</span>':(M.check?'<span style="color:#065f46;font-weight:700">✓ 相符</span>':'<span style="color:#991b1b;font-weight:700">✗ 不符</span>');
+  const pay=`<div class="mm-recon-box" style="line-height:1.9"><b>實際應付 ${n(M.payable)}</b>　<span style="color:#6b7280">自驗 A＋C−E＋G＝實際應付：</span>${chk}${M.check!=null?`<div style="font-size:11px;color:#9ca3af">A 含稅 ${n(M.Aincl)}${M.otherIncl?'＋其他 '+n(M.otherIncl):''}＋C 含稅 ${n(M.Cincl)}−E ${n(M.E)}＋G ${n(M.G)}</div>`:''}</div>`;
+  const old=M.missing.length?`<div style="font-size:11px;color:#9ca3af;margin-top:4px">此月份存檔較舊，部分欄位需重新上傳對帳單才有（目前缺：${_momoEsc(M.missing.join('、'))}）</div>`:'';
+  return `<div class="mm-recon-h" style="margin-bottom:6px">已存對帳明細 — ${_momoEsc(month)}<span style="font-weight:400;font-size:12px;color:#6b7280">　對帳號碼 ${_momoEsc(M.reconNo||'?')}　（甲配、乙配共用同一份對帳單）</span></div>
+    ${gA}${gC}${gE}${gG}${pay}${old}${momoReconCompareHtml(month)}`;
+}
+// 逐月比較（預設收合）：列＝E 的 12 項＋清單外＋其他訂單＋E 合計＋實際應付；欄＝有存檔的各月（舊→新）。金額 0 淡灰；觸發警示的格子紅字。
+function momoReconCompareHtml(curMonth){
+  const months=momoReconSavedMonths(); if(!months.length) return '';
+  const Ms=months.map(m=>momoReconSavedModel(m));
+  const cell=(v,red)=>{ if(v==null) return '<td style="padding:3px 8px;text-align:right;color:#c7cad1">—</td>'; const z=(v===0); return '<td style="padding:3px 8px;text-align:right;white-space:nowrap;'+(red?'color:#dc2626;font-weight:700':(z?'color:#d1d5db':''))+'">'+momoMoney(v)+'</td>'; };
+  const row=(label,fn,bold)=>'<tr style="border-top:1px solid #f3f4f6'+(bold?';font-weight:700':'')+'"><td style="padding:3px 8px;white-space:nowrap;position:sticky;left:0;background:#fff">'+_momoEsc(label)+'</td>'+Ms.map(fn).join('')+'</tr>';
+  const head='<tr style="color:#6b7280"><th style="padding:3px 8px;text-align:left;position:sticky;left:0;background:#fff">項目</th>'+months.map(m=>'<th style="padding:3px 8px;text-align:right;white-space:nowrap'+(m===curMonth?';color:#4f46e5':'')+'">'+_momoEsc(m)+'</th>').join('')+'</tr>';
+  const rows=MOMO_FEE_LABELS.map(l=>row(l,M=>cell(M.fees[l],M.alertNames.has(l)&&M.fees[l]>0)))
+    .concat([row('清單外新費用',M=>cell(M.unlisted,M.alertNames.has('清單外新費用'))), row('其他訂單（未稅）',M=>cell(M.otherUntax==null?0:M.otherUntax,M.alertNames.has('其他訂單'))), row('E 合計',M=>cell(M.E),true), row('實際應付',M=>cell(M.payable),true)]).join('');
+  return `<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:#6b7280;font-weight:600;user-select:none">▸ 逐月比較（${months.length} 個月；紅字＝觸發罰金／非例行警示）</summary><div style="overflow:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums"><thead>${head}</thead><tbody>${rows}</tbody></table></div></details>`;
+}
 function momoReconMonthOptions(){ const out=[]; for(let y=2026,m=1;(y<2026)||(m<=12);m++){ out.push(`2026-${String(m).padStart(2,'0')}`); } return out; }
 function momoRenderRecon(shop){
   const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
-  if(!_momoReconMonth) _momoReconMonth='2026-06';
-  const opts=[...momoReconMonthOptions()].reverse().map(m=>`<option value="${m}"${m===_momoReconMonth?' selected':''}>${m}</option>`).join('');   // 新在上（reverse 只翻顯示；預設用值 m===_momoReconMonth 選、不動、不用位置）
+  const _savedMonths=momoReconSavedMonths(), _savedSet=new Set(_savedMonths), _optMonths=momoReconMonthOptions();
+  // 預設月份＝有存檔的最新月份（沒有就當月，不在選單範圍就 2026-06）；使用者自己選過之後就不再自動換
+  if(!_momoReconMonthUser || !_momoReconMonth){
+    const _now=new Date(), _cur=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0');
+    _momoReconMonth=_savedMonths.length?_savedMonths[_savedMonths.length-1]:(_optMonths.indexOf(_cur)>=0?_cur:'2026-06');
+  }
+  const opts=[..._optMonths].reverse().map(m=>`<option value="${m}"${m===_momoReconMonth?' selected':''}>${m}${_savedSet.has(m)?' ✓':''}</option>`).join('');   // ✓＝這個月已有存檔   // 新在上（reverse 只翻顯示；預設用值 m===_momoReconMonth 選、不動、不用位置）
   const stat=f=>f?'<span class="mm-ok">✓ '+_momoEsc(f)+'</span>':'<span class="mm-muted">未選</span>';
   const ready=_momoReconStage.xls&&_momoReconStage.pdf;
   c.innerHTML=`
@@ -16997,16 +17078,18 @@ function momoRenderRecon(shop){
       Excel 提供逐 SKU 營收，PDF 提供 12 項費用
     </div>
     <div style="margin-bottom:12px">
-      <div class="mm-uprow"><div class="mm-uplbl">對帳年月</div><div class="mm-upctl"><select class="mm-sel" onchange="momoReconSetMonth(this.value)">${opts}</select></div></div>
+      <div class="mm-uprow"><div class="mm-uplbl">對帳年月</div><div class="mm-upctl"><select class="mm-sel" onchange="momoReconSetMonth('${shop}',this.value)">${opts}</select></div></div>
       <div class="mm-uprow"><div class="mm-uplbl">供應商對帳單-Excel <span class="mm-code">C1101</span><span class="req">*必要</span><div class="mm-hint">逐 SKU 營收、對帳數量、客退、保留款 · 上傳時程：每月 11 號</div></div><div class="mm-upctl"><input type="file" accept=".xls,.xlsx" onchange="momoReconPick(event,'xls','${shop}')">${stat(_momoReconStage.xlsName)}</div></div>
       <div class="mm-uprow"><div class="mm-uplbl">供應商對帳單-PDF <span class="mm-code">C1101</span><span class="req">*必要</span><div class="mm-hint">12 項費用、A/C/E/G、實際應付</div></div><div class="mm-upctl"><input type="file" accept=".pdf" onchange="momoReconPick(event,'pdf','${shop}')">${stat(_momoReconStage.pdfName)}</div></div>
     </div>
     <button class="mm-btn-primary" onclick="momoReconGenerate('${shop}')" ${ready?'':'disabled'}>▶ 產生對帳</button>
     <div id="momo-recon-report" style="margin-top:12px"></div>
+    <div id="momo-recon-saved" style="margin-top:16px">${momoReconSavedHtml(shop,_momoReconMonth)}</div>
     <details style="margin-top:16px"><summary style="cursor:pointer;font-size:12px;color:#6b7280;font-weight:600;user-select:none">▸ 費用組成說明（點開）</summary>${momoFeeExplainerHTML()}</details>`;
 }
 // 階段四：甲配運費上傳區塊（月對帳頁底部；C1105 + C1202第三方/超商 → 逐SKU出貨形狀）
-function momoReconSetMonth(m){ _momoReconMonth=m; }
+// 切月份 → 重繪（該月已有存檔就直接顯示已存明細）。相容舊呼叫 momoReconSetMonth(月)（沒給賣場＝只設值不重繪）。
+function momoReconSetMonth(a,b){ const shop=(b===undefined)?null:a, m=(b===undefined)?a:b; _momoReconMonth=m; _momoReconMonthUser=true; if(shop) momoRenderRecon(shop); }
 function momoReconPick(e,kind,shop){ const f=(e.target.files||[])[0]; if(f){ _momoReconStage[kind]=f; _momoReconStage[kind+'Name']=f.name; } e.target.value=''; momoRenderRecon(shop); }
 async function momoReconGenerate(shop){
   const el=document.getElementById('momo-recon-report'); if(el) el.innerHTML='<div style="color:#9ca3af;font-size:13px">解析中…</div>';
@@ -29375,7 +29458,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoEditSpInput,momoEditPpInput,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
   momoUploadFile,momoUploadF1102InvMonth,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
-  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyStatus,momoReconAlertFor,momoReconAlertNotify,momoReconAlertItemsJiaYi,momoReconAlertItemsMoPlus,momoSyncApplyNew,momoJumpShop,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyStatus,momoReconToggle,momoReconSavedModel,momoReconSavedMonths,momoReconAlertFor,momoReconAlertNotify,momoReconAlertItemsJiaYi,momoReconAlertItemsMoPlus,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
