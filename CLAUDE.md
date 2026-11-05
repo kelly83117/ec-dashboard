@@ -370,6 +370,27 @@ ESM 有個致命陷阱必須牢記：
   - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
     console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
   - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
+- 蝦皮報表持久 dirty 登記（#428 方案 A；開關 profit.js 開頭 `_REPORT_DIRTY_GATE`）：
+  - **同步只推登記過的報表**：localStorage 有 ≠ 待推。登記是 `ec_report_dirty`＝`{ 報表 key: 存檔當下的 ts }`（沒有 ts 的舊報表記 0）；key 名含 dirty，一鍵釋出空間會自動保護。
+  - **寫入**：只有 `lsSave` 登記，而且先登記再寫報表（報表寫不進去時登記還在）。
+  - **清除**：`syncToCloud` 推成功，而且推出去的 ts 等於記憶體與登記的 ts 才清；推送途中又改過就 dirty、pending 都留著。
+    🔴 唯讀帳號不清：唯讀防護把寫入換成空函式、一樣回成功，分不出來，所以 `_reportPushedClean` 一律回 false。
+    🔴 `outbound.ts` 仍必須等於 `payload.ts`（見上方一鍵釋出空間），不可改成推送當下的時間。
+  - **讀取**：profit.js 載入時（檔尾 `_reportDirtyBoot`）把 dirty 報表補進 `_profitMem` 並撿回 pending。profit.js 是動態載入，雲端快照可能先到，所以不能只靠守衛。
+    `__profitShouldSkipCloudOverwrite` 再擋掉雲端覆蓋。sweep 只撿登記過的（`_reportDirtyCollect`），`_momoSyncPendingCount` 用同一個判準，**改一邊就要改另一邊**。
+  - **本機那份不能代表登記的版本**（`_reportDirtyHold`，放開守衛、不推）：
+    `bad`＝解不開，不刪不改，同步列為「本機讀不到」，重新產生才會好。
+    `lost`＝本機沒有或比登記舊（最後一次修改沒存穩），等雲端資料到了處理（`_reportLostSettle`）：本機比雲端新就重新登記再推；否則移除登記並紅字通知。
+  - **遷移（部署前留下、沒有登記的本機報表）**：比對一次（旗標 `ec_report_dirty_migrated_v1`），全部判完才設。
+    本機解不開＝不登記、寫進報告。封存月份（`LS_TIDY_ARCHIVE_MONTHS`）封存沒到、快照被 5 秒守衛跳過＝這次不判。
+    雲端沒有＝登記。兩邊都有 ts＝本機較新才登記。雲端沒 ts、本機有＝登記。本機沒 ts、雲端有＝不登記、寫進報告。兩邊都沒 ts＝內容相同不用推、不同寫進報告（判斷表是純函式 `_reportMigrateDecide`）。
+    **遷移完成前，未登記的報表不推也不進 pending**：進了 pending 守衛就會擋快照，記憶體一直是本機版，比 ts 永遠相等，沒推的報表會被判成「已推過」。同步會提示「還在比對雲端資料」（`__lastSyncReport.reportMigrateWaiting`），本機資料不動。
+    雲端現值只看 `_profitMem`，不新增雲端讀取方法。沒有本機報表的裝置開頁就設旗標，不多載資料。按同步或開預覽且有東西在等時，才呼叫 `__loadShopeeSubs`（封存月份再加 `__loadArchiveSubs`）。
+    登記內容損毀＝清空並拿掉旗標，重新比對一次。
+  - **回滾**：`_REPORT_DIRTY_GATE` 改 false 再部署（要 bump 版號）＝sweep、MOMO 鈕計數、雲端守衛回到舊行為（localStorage 有就推），也不跑遷移。`lsSave` 與推送後清除照舊，登記繼續維持。
+  - **已知限制**：兩台同改同一期是後推者贏。`ec_split` 與多類 MOMO／酷澎 key 仍是 localStorage 有就推。`setShop` 的全域同步鈕只看有沒有資料就亮，不代表有待推（實際數字看 `__profitPendingCount()`）。
+    部署時要請大家關掉舊分頁重開：舊分頁存的報表不會登記。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭、不影響本機防寫物件數）：`__reportDirtyState()`、`window.__reportDirtyMigrateReport`。
 - MOMO 商品主檔本機壓縮（docs/plan-momo-compress.md §8 第 1 塊＝讀取端相容 LZ1、§9 第 2 塊＝寫入壓縮＋就地壓縮；firebase.js 的 hook 是可選的第 3 塊，還沒做）：
   - 範圍只有 `ec_momo_products|<通路>` 與 `ec_momo_products_lastpushed|<通路>`；`ec_momo_cost_by_origin`（含 `_meta`）不壓（#175，firebase.js 直接 `JSON.parse` 它）。
   - 讀：一律走 `_momoLsRead(k, 'array'|'sigmap')` / `_momoLsReadNote`（回 `{state:'absent'|'ok'|'bad'}`；舊 JSON 不檢查形狀＝跟改版前逐字相同）。
