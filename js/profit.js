@@ -10050,23 +10050,29 @@ const KPI_GROUPS=[
   //   手續費只改顯示名稱「平台費」（存的 key 還是 fee）。欄位型別照 MOMO：訂單數／營收／商品成本／平台費／耗材＝一般手填格，
   //   由「從對帳單帶入」寫入（pchomeKpiFromRecon，見下方「PChome 自動帶入」），寫了才算已填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）；物流運費手填。
   //   雲端 2026-01～07 存的 0（含 ret）不動。
-  {key:'pchome',since:'2026-09',title:'PChome',color:'#d97706',shops:['PChome'],
-    // fee 的 desc：表頭 ⓘ 說明（手填欄位有 desc 才顯示 ⓘ；目前只有這一格）
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'平台費 = 對帳單 (B)+(C)+(D)，含退貨物流費、罰金、固定費（含稅原值）'},{k:'material',l:'耗材'}],
+  // 2026-11-06 加寄倉列：轉單＝既有店 key 'PChome'（不改名、雲端資料不搬，KPI_SHOP_LABELS 顯示「轉單」）；寄倉＝'PChome-寄倉'（顯示「寄倉」）。
+  //   新增寄倉運費（手填，轉單不適用）；寄倉列的物流運費、耗材不適用；寄倉列這個月一格都沒填就不列入填寫進度（shopOptional）。
+  //   物流運費（row.pchomeCommon，淨利表 pchomeKpiShipByMonth 讀它）只掛在轉單列（commonShop），只從轉單列的純利扣。
+  {key:'pchome',since:'2026-09',title:'PChome',color:'#d97706',shops:['PChome','PChome-寄倉'],
+    shopOptional:['PChome-寄倉'],
+    commonShop:'PChome',
+    fieldMerge:{ship:{notApplicable:['PChome']},material:{notApplicable:['PChome-寄倉']}},
+    // fee、material 的 desc：表頭 ⓘ 說明（手填欄位有 desc 才顯示 ⓘ）。material 用 getter：PCHOME_PACKAGING_COST 宣告在後面
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'平台費 = 對帳單 (B)+(C)+(D)，含退貨物流費、罰金、固定費（含稅原值）'},
+      {k:'ship',l:'寄倉運費'},
+      {k:'material',l:'耗材',get desc(){return '轉單：件數 × $'+PCHOME_PACKAGING_COST+'（對帳單段0 出貨件數，同淨利表包材）；寄倉：不適用';}}],
     commonCostLabel:'宅配通運費（我方自付的出貨運費；整組一個數字）',
     commonCostShortLabel:'物流運費',
     // commonAsColumn（2026-10-15）：填寫模式不另切「共同費用」列，直接當一欄（order 裡 '_common' 的位置）。
-    //   資料照舊存 row.pchomeCommon（pchomeKpiShipByMonth 讀它）；只有一家店，那一列的純利／純利率改用整組數字（已扣運費）。
+    //   資料照舊存 row.pchomeCommon（pchomeKpiShipByMonth 讀它）；只有 commonShop（轉單）那一列有這格、純利扣它（_kpiShopPureAdj）。
     commonAsColumn:true,
-    // 只有一家店，小計列跟那一列重複 → 填寫模式與月結表 Excel 都不出小計列
-    noSubtotal:true,
-    order:['qty','rev','cost','fee','tax','_common','material','pure','pureRate'],
+    order:['qty','rev','cost','fee','tax','ship','_common','material','pure','pureRate'],
     formula:[
-      // 物流運費是共同費用（row.pchomeCommon），在 _kpiGroupTotals 扣；單店列的純利用整組數字（_kpiCommonColTotals）。
+      // 物流運費是共同費用（row.pchomeCommon），在 _kpiGroupTotals 扣；轉單列的純利另外扣它（_kpiShopPureAdj）。空白以 0 計（Number()||0）。
       // 稅金照 MOMO：公式欄（填寫模式灰底、placeholder＝公式值、可手動覆蓋、不算填寫格數）。⚠ 要排在 pure 前面（_kpiCalcAll 依序算）
       {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 營收 × 5/105（含稅金額內含的營業稅，可手動覆蓋）'},
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 物流運費 − 耗材'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>{const n=k=>Number(d[k])||0;return n('rev')-n('cost')-n('fee')-n('tax')-n('ship')-n('material');},desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 寄倉運費 − 物流運費 − 耗材'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>{const n=k=>Number(d[k])||0;return n('rev')>0?(n('rev')-n('cost')-n('fee')-n('tax')-n('ship')-n('material'))/n('rev'):0;},desc:'純利率 = 純利 ÷ 營收'},
     ],
     fillFormula:['tax'],
   },
@@ -10149,6 +10155,8 @@ const KPI_SHOP_LABELS={
   'MOMO-甲配':'甲配',
   'MOMO-寄倉':'乙配',
   '博客來-寄倉':'寄倉',
+  'PChome':'轉單',
+  'PChome-寄倉':'寄倉',
   '博客來-轉單':'轉單',
   'FriDay-主站':'主站',
   'FriDay-i站':'i站',
@@ -10692,9 +10700,8 @@ function _kpiChannelTableHtml(row,prevRow){
     ]);
     if(open){
       // 各店明細也照本月營收由高到低（穩定排序，營收相同維持原順序）
-      const gt=_kpiCommonColTotals(row,g);
       g.shops.map(s=>{const d=_kpiShopCalc(row,g,s);return{s,d,rev:_kpiRealRev(d)};}).sort((a,b)=>b.rev-a.rev).forEach(({s,d,rev},i)=>{
-        const pure=gt?gt.totalPure:(Number(d[cur.pureKey])||0);   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
+        const pure=_kpiShopPureAdj(row,g,s,d).pure;   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
@@ -10746,7 +10753,7 @@ function _kpiFxDefault(row,group,shop,k){
 }
 // 一格的種類：cell 一般｜merge 合併欄位領頭店（存總額）｜share 合併欄位其他店（唯讀份額）｜na 不適用｜common 共同費用
 function _kpiFillCell(group,shop,f,month){
-  if(f.common)return{kind:'common',segs:[group.key+'Common']};
+  if(f.common)return shop===_kpiCommonShop(group)?{kind:'common',segs:[group.key+'Common']}:{kind:'na'};   // 物流運費只在轉單列（PChome 寄倉列不適用）
   const st=_kpiFieldMergeStatus(group,f.k,shop,month);
   if(st&&st.type==='na')return{kind:'na'};
   if(st&&st.type==='merged'){
@@ -10913,7 +10920,20 @@ function _kpiShortSub(full,short){
   return [...full].length<=4?`<div class="km-sublabel">${_kpiEscAttr(full)}</div>`:`<div class="km-sublabel" title="${_kpiEscAttr(full)}">${_kpiEscAttr(short)}</div>`;
 }
 // 共同費用當欄位、而且整組只有一家店（PChome）：那一列的純利／純利率用整組數字（已扣共同費用），否則回 null。
-function _kpiCommonColTotals(row,group){return group.commonAsColumn&&group.commonCostLabel&&group.shops.length===1?_kpiGroupTotals(row,group):null;}
+// 共同費用當欄位的組（PChome）：共同費用（row.{key}Common，物流運費）只掛在 commonShop（預設第一家）那一列。
+//   那一列的純利／純利率扣掉它；其他店照原本。整組小計（_kpiGroupTotals）本來就扣一次，所以「各列純利加總＝小計」。
+//   回 {pure, rate, adj}：rate＝純利 ÷ 實際營收（營收 0 → null）；adj＝這一列有扣共同費用。（2026-11-06 取代單店專用的 _kpiCommonColTotals）
+function _kpiCommonShop(group){return group.commonShop||group.shops[0];}
+function _kpiShopPureAdj(row,group,shop,d){
+  d=d||_kpiShopCalc(row,group,shop);
+  const pureKey=(group.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))||{}).k;
+  let pure=Number(d[pureKey])||0;const rev=_kpiRealRev(d);
+  if(group.commonAsColumn&&group.commonCostLabel&&shop===_kpiCommonShop(group)){
+    pure-=Number(row&&row[group.key+'Common'])||0;
+    return{pure,rate:rev>0?pure/rev:null,adj:true};
+  }
+  return{pure,rate:d.pureRate!=null?Number(d.pureRate):(rev>0?pure/rev:null),adj:false};
+}
 // ══ 填寫模式異常警示（2026-10-28，方案 docs/plan-kpi-anomaly.md）══
 //   只提醒、不擋存檔、不寫任何東西：只讀 getKpiRows()，算法一律走 _kpiShopCalc／_kpiRealRev／_kpiFillCell（不另寫公式）。
 //   每次整頁重畫重算一次（存一格就重畫 ⇒ 警示即時跟著變）。空白格不檢查。
@@ -10958,8 +10978,8 @@ function _kpiAnomSigned(v,suf){return (v>=0?'+':'−')+Math.abs(v).toFixed(suf==
 // 這家店這個月還有欄位沒填嗎（同「暫」）：純利率類規則要等填完才檢查。
 function _kpiAnomShopOpen(row,group,shop){return _kpiFillSlots(row,group).some(s=>!s.filled&&s.shops.includes(shop));}
 function _kpiAnomShopRate(row,group,shop){
-  const d=_kpiShopCalc(row,group,shop),gt=_kpiCommonColTotals(row,group);
-  if(gt)return gt.totalRev>0?gt.pureRateAgg:null;
+  const d=_kpiShopCalc(row,group,shop),pa=_kpiShopPureAdj(row,group,shop,d);
+  if(pa.adj)return pa.rate;
   const rev=_kpiRealRev(d);return rev>0?Number(d.pureRate)||0:null;
 }
 // 一個月所有群組的警示。回傳 [{group, groupTitle, shop, field, label, key, rule, short, full}]。
@@ -11203,9 +11223,9 @@ function _kpiFillHtml(row){
         +_kpiCostMissTagHtml(group,shop,f.k,month);
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
-    const gt=_kpiCommonColTotals(row,group);
-    const pure=gt?gt.totalPure:(Number(d[pureKey])||0);
-    const rate=gt?gt.pureRateAgg:(d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0));
+    const pa=_kpiShopPureAdj(row,group,shop,d);
+    const pure=pa.pure;
+    const rate=pa.adj?(pa.rate||0):(d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0));
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     const aov=_kpiAovOf(d,group);
     const roK=k=>'ro:'+group.key+':'+shop+':'+k;
@@ -13750,9 +13770,9 @@ function kpiFillDownloadExcel(){
         const v=_kpiFillCur(row,cell).v;
         return v==null?'':Number(v);
       });
-      const gt=_kpiCommonColTotals(row,g);
-      const pure=gt?gt.totalPure:(Number(d[pureKey])||0);
-      const rate=gt?gt.pureRateAgg:(d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):''));
+      const pa=_kpiShopPureAdj(row,g,shop,d);
+      const pure=pa.pure;
+      const rate=pa.adj?(pa.rate==null?'':pa.rate):(d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):''));
       aoa.push([_kpiShopLabel(shop),aov==null?'':aov].concat(vals,[pure,Number(d.rev)>0?rate:'']));
       fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
     });
@@ -13774,7 +13794,7 @@ function kpiFillDownloadExcel(){
       });
       return any?sum:'';
     });
-    if(!g.noSubtotal){   // 只有一家店的通路（PChome）：小計跟那一列重複，不出
+    if(!g.noSubtotal){   // noSubtotal 的通路不出小計（PChome 2026-11-06 加寄倉列後已拿掉，目前沒有通路用）
       aoa.push(['小計',ap.aov!=null?ap.aov:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
       fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
     }
@@ -29508,9 +29528,9 @@ Object.assign(window, {
 // ══════ 通路健檢（js/pages/health.js）唯讀轉接：KPI 月結 → 純資料（docs/plan-channel-health.md §1-1）══════
 //  health.js 碰不到本檔模組內的 _kpi* 私有函式，由這支把指定月份算好交出去。口徑＝KPI 頁：
 //    每店數字＝_kpiShopCalc（已套 _kpiRawForCalc：合併欄、不適用欄、autoFill、關站歸 0）；營收＝_kpiRealRev（MOMO＝實際營收）；
-//    PChome 這種 commonAsColumn 單店組，純利用 _kpiCommonColTotals（已扣物流運費，同 KPI 頁單店列）；
+//    PChome 這種 commonAsColumn 組，轉單（commonShop）的純利用 _kpiShopPureAdj（已扣物流運費，同 KPI 頁）；
 //    蝦皮各店純利【不含】整組共同運費 shopeeCommon（同 KPI 頁，ⓘ 由 health.js 說明）。
-//  填寫進度＝_kpiFillSlots 裡含這家店的格子（單店 commonAsColumn 組另含 _common 那一格）。
+//  填寫進度＝_kpiFillSlots 裡含這家店的格子（commonAsColumn 組的 commonShop 另含 _common 那一格）。
 //  資料時間只回 _kpiLastEdit 的時間，不回 by（健檢不顯示人名）。
 //  只讀：不寫入、不訂閱、不碰 DOM。名稱刻意不以 __cloud 開頭（本機防寫不掃它、不影響 27 / 45）。失敗回 {ready:false, error}。
 window.__healthKpiSnapshot=function(months){
@@ -29526,7 +29546,6 @@ window.__healthKpiSnapshot=function(months){
       const mo={exists:!!byMonth[m],asOf:null,groups:{}};
       KPI_GROUPS.forEach(g=>{
         const slots=_kpiFillSlots(row,g);
-        const colT=_kpiCommonColTotals(row,g);
         const pureKey=(g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))||{}).k;
         const last=_kpiLastEdit(m,g.key);
         if(last&&(mo.asOf==null||last.t>mo.asOf))mo.asOf=last.t;
@@ -29534,10 +29553,10 @@ window.__healthKpiSnapshot=function(months){
         g.shops.forEach(shop=>{
           const raw=((row[g.key]||{})[shop])||{};
           const d=_kpiShopCalc(row,g,shop);
-          const mine=slots.filter(s=>s.shops.includes(shop)||(colT&&s.field==='_common'));
+          const mine=slots.filter(s=>s.shops.includes(shop)||(g.commonAsColumn&&g.commonCostLabel&&shop===_kpiCommonShop(g)&&s.field==='_common'));
           box[shop]={
             rev:_kpiRealRev(d),cost:Number(d.cost)||0,ads:d.ads!=null?(Number(d.ads)||0):null,
-            pure:colT?colT.totalPure:(Number(d[pureKey])||0),qty:Number(d.qty)||0,
+            pure:_kpiShopPureAdj(row,g,shop,d).pure,qty:Number(d.qty)||0,
             revFilled:raw.rev!=null&&raw.rev!=='',
             fill:{filled:mine.filter(s=>s.filled).length,total:mine.length},
             closed:_kpiGroupClosed(g,m),
