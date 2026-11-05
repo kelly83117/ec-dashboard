@@ -9933,6 +9933,8 @@ async function __kpiSmokeTest(){
 // 蝦皮「從對帳單帶入」各項費用的包裝費單價（含稅，每筆）。⚠ 必須宣告在 KPI_GROUPS 前面：蝦皮組的 desc 引用它（放後面會撞 TDZ）。
 const KPI_SHOPEE_PACK_PLAIN=2.5;   // 一般訂單。廠商調價時改這裡
 const KPI_SHOPEE_PACK_NOPACK=2;    // 無包裝訂單。廠商調價時改這裡
+// 耗材自動計算單價（每筆訂單）：FriDay $3、博客來 $2.5（照 MOMO 甲配耗材 autoFill 的寫法）。改這裡、不要散寫在公式裡。
+const KPI_MATERIAL_PER_ORDER={friday:3,books:2.5};
 const KPI_GROUPS=[
   {key:'shopee',title:'蝦皮',color:'#ee4d2d',shops:['好麻吉','玩樂','維克','森之旅'],
     // manual 的 desc＝填寫模式表頭 ⓘ：來源、算法、是否除 1.05（「從對帳單帶入」見 _kpiShopeeCalc；改算法要同步改這裡）。
@@ -10071,11 +10073,13 @@ const KPI_GROUPS=[
   //   兩列都照一般規則計入填寫進度、有小計列。正式站拆店前 FriDay 沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
   {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay-主站','FriDay-i站'],
     // 2026-11-04 主站「從報表帶入」（app/friday_recon，見下方「FriDay 主站對帳資料」）：訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
-    //   物流運費（宅配運費，我們自付）、耗材手填（耗材 2026-11-04 改手填：不從 SCM 出貨件數推算）；稅金＝公式欄（同 MOMO）。手續費只改顯示名稱「平台費」（key 還是 fee）。拿掉退貨運費（雲端既有值不刪；查過正式站沒有存值）。
-    //   i站本次全部手填，欄位同上。
+    //   物流運費（宅配運費，我們自付）手填；稅金＝公式欄（同 MOMO）。手續費只改顯示名稱「平台費」（key 還是 fee）。拿掉退貨運費（雲端既有值不刪；查過正式站沒有存值）。
+    //   2026-11-05 耗材改自動計算（autoFill＝訂單數 × $3，照 MOMO 甲配耗材；灰底、即時算、可手動覆蓋、不計入填寫格數）；i站同。
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},
       {k:'fee',l:'平台費',get desc(){return '平台費 = 活動贊助費＋銷售獎勵金（Σ總貨款 × 2% × 2）＋ 超商物流費（有物流包裹號的超商訂單 × $'+FRIDAY_CVS_FEE+'）＋ 系統使用費 $'+FRIDAY_SYS_FEE+' ＋ 訂單處理費（訂單數 × $'+FRIDAY_ORDER_FEE+'）＋ 促銷折扣負擔（結帳單明細加總）';}},
       {k:'ship',l:'物流運費'},{k:'material',l:'耗材'}],
+    // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。
+    autoFill:{material:{shops:['FriDay-主站','FriDay-i站'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*KPI_MATERIAL_PER_ORDER.friday,desc:'耗材 = 訂單數 × $'+KPI_MATERIAL_PER_ORDER.friday+'（可手動覆蓋）'}},
     order:['qty','rev','cost','fee','tax','ship','material','pure','pureRate'],
     formula:[
       // ⚠ tax 要排在 pure 前面（_kpiCalcAll 依序算）
@@ -10085,14 +10089,16 @@ const KPI_GROUPS=[
     ],
     fillFormula:['tax']},
   // 2026-11-04：博客來寄倉「從報表帶入」（app/books_recon，見下方「博客來對帳資料」）。訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
-  //   寄倉運費、物流運費、耗材手填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
-  //   2026-11-05 加物流運費（key freight）、耗材（key material）兩欄手填、計入格數、放寄倉運費後面、純利扣掉這兩項（上傳／解析／帶入／補成本／快照／還原全不變）。KPI 月份 M＝結算帳月 M。
+  //   寄倉運費、物流運費手填；耗材自動計算（autoFill＝訂單數 × $2.5）；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
+  //   2026-11-05 加物流運費（key freight）手填＋耗材（key material）自動計算（照 MOMO 甲配耗材 autoFill：灰底、即時算、可手動覆蓋、不計入填寫格數），放寄倉運費後面、純利扣掉這兩項（上傳／解析／帶入／補成本／快照／還原全不變）。KPI 月份 M＝結算帳月 M。
   //   2026-11-04 拆兩店：博客來-寄倉（在上）／博客來-轉單，名稱欄顯示「寄倉」「轉單」（KPI_SHOP_LABELS）。從報表帶入只寫寄倉。
   //   轉單：寄倉運費不適用（fieldMerge notApplicable）；目前沒銷量 → shopOptional：這個月一格都沒填就不列入填寫進度（填了任何一格就照一般規則算）。
   //   正式站拆店前博客來沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
   {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
     shopOptional:['博客來-轉單'],
     fieldMerge:{ship:{notApplicable:['博客來-轉單']}},
+    // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。寄倉／轉單都適用。
+    autoFill:{material:{shops:['博客來-寄倉','博客來-轉單'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*KPI_MATERIAL_PER_ORDER.books,desc:'耗材 = 訂單數 × $'+KPI_MATERIAL_PER_ORDER.books+'（可手動覆蓋）'}},
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'},{k:'freight',l:'物流運費'},{k:'material',l:'耗材'}],
     order:['qty','rev','cost','fee','tax','ship','freight','material','pure','pureRate'],
     formula:[
@@ -12214,7 +12220,7 @@ async function __kpiPchomeRestore(month){
 //   KPI 月份 M ＝ 結算帳月 M。
 const BOOKS_RECON_KEY='ec_books_recon';
 // 填寫模式「上傳博客來報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；做法同 FRIDAY_HOWTO_LINES）
-const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費、物流運費、耗材請手填。'];
+const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費、物流運費請手填。'];
 const _booksNum=v=>{if(v==null||v==='')return 0;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:0;};
 const _booksYM=s=>{const m=String(s==null?'':s).match(/(\d{4})\D?(\d{2})/);return m?m[1]+'-'+m[2]:'';};
 const _booksTrim=v=>String(v==null?'':v).trim();
@@ -12768,7 +12774,7 @@ function _friParsePayable(a,hi,type,amtCol,file){
 }
 const FRIDAY_RECON_KEY='ec_friday_recon';
 // 填寫模式「上傳 FriDay 報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；開頭空白是縮排，靠 .km-info-pre 保留）
-const FRIDAY_HOWTO_LINES=['① 訂單匯出｜每月 1 次','   訂單管理 → 匯出，日期選整個月','② 促銷折扣負擔｜每張結帳單 1 次','   撥款作業 → 點結帳單 → 促銷折扣負擔「詳」→ 匯出Excel','重傳不會重複計算。','物流運費、耗材請手填。'];
+const FRIDAY_HOWTO_LINES=['① 訂單匯出｜每月 1 次','   訂單管理 → 匯出，日期選整個月','② 促銷折扣負擔｜每張結帳單 1 次','   撥款作業 → 點結帳單 → 促銷折扣負擔「詳」→ 匯出Excel','重傳不會重複計算。','物流運費請手填。'];
 // 雲端 → 記憶體（照博客來：firebase.js boot 就訂閱、先緩存在 window.__fridayReconCloudLatest；這裡定義後立刻 drain）
 window.__fridayApplyCloudRecon=function(data){
   try{
