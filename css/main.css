@@ -2766,7 +2766,7 @@
 .hl-std-tbl .hl-std-gs { border-left: 1px solid var(--border); }
 .hl-std-tbl .hl-std-errrow td { padding-top: 0; padding-bottom: 0; border-bottom: 0; }
 .hl-std-c1 { width: 130px; }
-.hl-std-tname { font-weight: 600; }
+.hl-std-tname { font-weight: 600; word-break: keep-all; }   /* 「MOMO 乙配（寄倉）」只在空白處換行，不拆成「寄／倉」 */
 .hl-std-tbl .hl-std-chname { padding-left: 24px; color: var(--text-muted); }
 .hl-std-toggle { display: block; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--info); font: inherit; font-size: 11px; font-weight: 400; cursor: pointer; }
 .hl-std-in { box-sizing: border-box; width: 56px; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
@@ -2778,7 +2778,8 @@
 .hl-std-hist-sub { font-size: 11px; color: var(--text-muted); }
 .hl-std-hist-info { cursor: help; }
 .hl-std-tbl .hl-std-hist-ref { min-width: 118px; }
-.hl-std-hist-ref .hl-std-hist-avg { font-weight: 400; color: var(--text-muted); }
+/* 營收未滿 3 萬的灰字參考數字：評分標準視窗「近 6 月」與卡片底部三欄（.hl-tile-met-ref，下面一行「僅供參考」）共用 */
+.hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v { font-weight: 400; color: var(--text-muted); }
 .hl-std-hist-ref .hl-std-hist-sub { white-space: normal; }
 .hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
 .hl-std-err:empty { display: none; }
@@ -2869,6 +2870,9 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-todo-wait { color: var(--text-muted); }
 /* v5：分數下面一行「純利 80 · 動銷 60」／「純利 80 · 只看純利率」（沒有總分的卡片也留這一行的高度，卡片才一樣高） */
 .hl-tile-parts { min-height: 16px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+/* 只看純利率時寫出原因（「純利 80・動銷率標準未設定，暫時只看純利率」）：字比較長，允許換行 */
+.hl-tile-parts.hl-tile-parts-why { white-space: normal; }
+.hl-tile-parts-why > span { white-space: nowrap; }
 /* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
 .hl-score-tbl { margin-top: 8px; }
 .hl-score-tbl .hl-tiers { white-space: normal; }
