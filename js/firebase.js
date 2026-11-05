@@ -75,7 +75,7 @@ try {
   //   舊月份報表         → app/profit_YYYY_MM  （例 app/profit_2026_05）
   //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
-  const PROFIT_ARCHIVE_DOCS = ['profit_2026_05', 'profit_notes_2026'];
+  const PROFIT_ARCHIVE_DOCS = ['profit_2026_05', 'profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
     + '/databases/(default)/documents/app/profit';
@@ -186,6 +186,7 @@ try {
     //   app/profit_2026_05     2026/05 的報表封存。那批資料【只有這一份副本】，不能刪。
     //   app/profit_notes_2026  2026 年舊月份的廣告調整（ec_notes|通路|月|半月）封存。
     //                          doc 名刻意帶 notes 是護欄：這片只放 ec_notes，不要把報表塞進來。
+    //   app/profit_notes_2026_2 同上的第二片（2026-11-05 起）。第一片已撞 40,000 索引上限，不能再寫入；之後新封存的期別放這片。key 不可與第一片重複。
     // ⚠ 各分片的 key 命名空間【必須互不相交】。這是正確性要求，不是分類習慣——
     //   mergeAndNotify 合併 archive 用的 Object.values(profitParts.archives)，順序等於哪個
     //   onSnapshot 先回來，是【非決定性】的。兩片若出現同名 key，誰蓋掉誰每次載入都可能不同，
