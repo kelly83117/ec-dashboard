@@ -10085,21 +10085,23 @@ const KPI_GROUPS=[
     ],
     fillFormula:['tax']},
   // 2026-11-04：博客來寄倉「從報表帶入」（app/books_recon，見下方「博客來對帳資料」）。訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
-  //   寄倉運費手填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
-  //   拿掉退貨運費、耗材（雲端既有值不刪；查過正式站博客來各月都沒有存值）。KPI 月份 M＝結算帳月 M。
+  //   寄倉運費、物流運費、耗材手填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
+  //   2026-11-05 加物流運費（key freight）、耗材（key material）兩欄手填、計入格數、放寄倉運費後面、純利扣掉這兩項（上傳／解析／帶入／補成本／快照／還原全不變）。KPI 月份 M＝結算帳月 M。
   //   2026-11-04 拆兩店：博客來-寄倉（在上）／博客來-轉單，名稱欄顯示「寄倉」「轉單」（KPI_SHOP_LABELS）。從報表帶入只寫寄倉。
   //   轉單：寄倉運費不適用（fieldMerge notApplicable）；目前沒銷量 → shopOptional：這個月一格都沒填就不列入填寫進度（填了任何一格就照一般規則算）。
   //   正式站拆店前博客來沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
   {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
     shopOptional:['博客來-轉單'],
     fieldMerge:{ship:{notApplicable:['博客來-轉單']}},
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'}],
-    order:['qty','rev','cost','fee','tax','ship','pure','pureRate'],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'},{k:'freight',l:'物流運費'},{k:'material',l:'耗材'}],
+    order:['qty','rev','cost','fee','tax','ship','freight','material','pure','pureRate'],
     formula:[
       // ⚠ tax 要排在 pure 前面（_kpiCalcAll 依序算）
+      // 物流運費（freight）、耗材（material）2026-11-05 新增手填欄：用 (Number()||0) 包起來＝空白當 0，不會把整條純利 NaN→0
+      //   （寄倉既有月份只填到寄倉運費，若裸減兩個空欄就會讓 pure 歸零）。既有 rev/cost/fee/ship 維持原本裸算、行為不變。
       {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 營收 × 5/105（含稅金額內含的營業稅，可手動覆蓋）'},
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.ship,desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 寄倉運費'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.ship-(Number(d.freight)||0)-(Number(d.material)||0),desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 寄倉運費 − 物流運費 − 耗材'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.ship-(Number(d.freight)||0)-(Number(d.material)||0))/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ],
     fillFormula:['tax']},
 ];
@@ -12210,7 +12212,7 @@ async function __kpiPchomeRestore(month){
 //   KPI 月份 M ＝ 結算帳月 M。
 const BOOKS_RECON_KEY='ec_books_recon';
 // 填寫模式「上傳博客來報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；做法同 FRIDAY_HOWTO_LINES）
-const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費請手填。'];
+const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費、物流運費、耗材請手填。'];
 const _booksNum=v=>{if(v==null||v==='')return 0;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:0;};
 const _booksYM=s=>{const m=String(s==null?'':s).match(/(\d{4})\D?(\d{2})/);return m?m[1]+'-'+m[2]:'';};
 const _booksTrim=v=>String(v==null?'':v).trim();
