@@ -555,6 +555,7 @@ function _hlShopeeMerge(halves) {
 function _hlProdNormalize(raw) {
   const base = { platform: raw && raw.platform, shop: raw && raw.shop, month: raw && raw.month, rows: [], lastAdjust: (raw && raw.lastAdjust) || {} };
   if (!raw || raw.error) return Object.assign(base, { status: 'error', error: (raw && raw.error) || 'no data' });
+  if (raw.pending) return Object.assign(base, { status: 'error', error: '舊月份報表還在讀，再跑一次就有' });   // Console 回測等同步呼叫才走到這裡：不能算成沒資料
   let rows = [];
   if (raw.platform === 'shopee') {
     const m = _hlShopeeMerge(raw.halves);
@@ -1619,7 +1620,7 @@ function _hlWaitSecs() {
  * 排隊：每次 render 呼叫 _hlWantProd(月, 展開的通路) 補上缺的快照 → setTimeout 一筆一筆算（不卡畫面）→ 全部算完重畫一次。
  *   要的月份：評分月份、上個月、上上個月（上個月的「長期虧損」要再往前一個月）；展開的那個通路再加走勢的 12 個月。
  *   firstMonth 之前、本月之後的月份直接記成 status:'none'（不去要資料，也不會卡在「載入中」）。 */
-const _hlProd = { state: {}, cache: {}, queue: [], queued: {}, running: false };
+const _hlProd = { state: {}, cache: {}, queue: [], queued: {}, running: false, pending: {} };   // pending：舊月份報表還在讀，不能快取成「沒資料」，資料事件到了再排
 function _hlIsNarrow() {
   try { return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches); } catch { return false; }
 }
@@ -1749,7 +1750,7 @@ function _hlProdKey(p, s, m) { return p + '|' + s + '|' + m; }
 //   分數出現的時間不會因為標籤變慢；第二批算完再重畫一次，細項的商品清單才補上。
 function _hlWantProdOne(ch, m, today) {
   const k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
-  if (_hlProd.cache[k] || _hlProd.queued[k]) return;
+  if (_hlProd.cache[k] || _hlProd.queued[k] || _hlProd.pending[k]) return;
   if (m < HEALTH_RULES.firstMonth || m > today) { _hlProd.cache[k] = { status: 'none', rows: [], lastAdjust: {} }; return; }
   _hlProd.queued[k] = true; _hlProd.queue.push([ch.prod.platform, ch.prod.shop, m]);
 }
@@ -1771,6 +1772,8 @@ function _hlWantProd(month, openId) {
   ready.forEach(ch => {
     const ms = [month, _hlAddMonth(month, -1), _hlAddMonth(month, -2)];
     if (ch.id === openId) for (let i = 3; i <= _HL_TREND_N; i++) ms.push(_hlAddMonth(month, -i));
+    // 窗口模式：蝦皮舊月先併成一次範圍查詢，比一個月一個月讀省（開關關閉時是空函式）
+    if (ch.prod.platform === 'shopee' && typeof window.__reportEnsureIdle === 'function') window.__reportEnsureIdle(ch.prod.shop, ms.filter(m => m >= HEALTH_RULES.firstMonth && m <= today));
     ms.forEach(m => want(ch, m));
   });
   if (!_hlProd.queue.length && !_hlProd.running) {
@@ -1805,8 +1808,10 @@ function _hlRunQueue() {
     const t = _hlNow();
     let raw;
     try { raw = _hlProdSource().snapshot(p, s, m); } catch (e) { raw = { platform: p, shop: s, month: m, error: String((e && e.message) || e) }; }
-    _hlProd.cache[k] = _hlProdNormalize(raw);
     delete _hlProd.queued[k];
+    // 🔴 還沒讀到：不快取（畫面維持載入中），資料事件到了再排（_hlPendingFlush）
+    if (raw && raw.pending) { _hlProd.pending[k] = true; _hlNextTick(step); return; }
+    _hlProd.cache[k] = _hlProdNormalize(raw);
     const ms = _hlNow() - t;
     batch.n++; batch.ms += ms;
     if (!batch.slow || ms > batch.slow.ms) batch.slow = { k, ms };
@@ -1815,10 +1820,19 @@ function _hlRunQueue() {
   };
   _hlNextTick(step);
 }
+// 舊月份報表到了（或讀取失敗）：等待中的重新排隊。事件短時間內可能來好幾個，收斂成一次重畫（重畫時 _hlWantProd 會排）。
+let _hlPendingTimer = null;
+function _hlPendingFlush() {
+  if (!Object.keys(_hlProd.pending).length) return;
+  clearTimeout(_hlPendingTimer);
+  _hlPendingTimer = setTimeout(() => { _hlProd.pending = {}; if (App.route === 'health') App.render(); }, 300);
+}
+if (typeof window.addEventListener === 'function') window.addEventListener('profitDataReady', _hlPendingFlush);
 // 「↻ 重新計算」：已載入平台的快照全部重算（雲端資料可能更新了）；載入狀態不動、不重新訂閱；逾時的回到 idle（桌機會自動再載一次）
 function _hlProdReset() {
   _hlSpReset();
-  _hlProd.cache = {}; _hlProd.queue = []; _hlProd.queued = {};
+  _hlProd.cache = {}; _hlProd.queue = []; _hlProd.queued = {}; _hlProd.pending = {};
+  if (typeof window.__reportClearFailed === 'function') window.__reportClearFailed();   // 舊月份讀取失敗的再試一次
   Object.keys(_hlProd.state).forEach(p => { if (_hlProd.state[p] === 'timeout') _hlProd.state[p] = 'idle'; });
 }
 

@@ -21,6 +21,21 @@ const _LS_COMPRESS_MOMO_MIGRATE=true;
 //   回滾＝改 false 再部署：sweep、MOMO 鈕計數、雲端守衛都回到舊行為（localStorage 有就推），也不跑遷移。
 //   lsSave 與推送成功後的清除不受開關影響，登記會繼續維持，之後再打開不用重來。不會丟資料。
 const _REPORT_DIRTY_GATE=true;
+// 蝦皮報表「只即時訂閱近月、舊月要用才讀」（#428 方案 A）的總開關。false＝全量訂閱：所有月份一律視為已載入，所有路徑跟改版前相同。
+//   改 true 之前，firebase.js 的訂閱要先換成近月（切換塊）。計畫與規則見 docs/handoff-428-window.md。
+const _REPORT_WINDOW_GATE=false;
+const _REPORT_WINDOW_MONTHS=3;          // 今天的月份往前共 3 個月（含當月），上限不封頂
+const _REPORT_ENSURE_TIMEOUT_MS=60000;  // 按需讀取、等窗口資料的上限；逾時算失敗，不算「沒有」
+const _REPORT_PREV_NA='__report_prev_na__';   // 上期讀取失敗：每列上期副標不顯示（跟「上期沒這商品」的「—」不同）
+const _reportMonths=new Map();          // '通路|YYYY/MM' → {state:'loading'|'loaded'|'failed',p,at,err}。窗口內的月份不記在這裡
+const _reportPlaceholder=new Set();     // 目前畫面顯示「載入中」的通路：資料到了一定要重畫（事件可能被 5 秒存檔守衛擋掉）
+const _reportIdx={state:'idle',map:null,at:0,p:null,err:null};   // ts 目錄 {報表 key: ts 或 null}
+// 報表列的 r.note（2026/04 前的舊制紀錄）只存在這幾個月、也沒有寫入端了。不為它載整段歷史：抽出來存本機，靠 ts 目錄判斷要不要重讀。
+const _LEGACY_NOTE_MONTHS=['2026/03','2026/04','2026/05'];
+const _LEGACY_NOTE_TOKEN_LAST='2026/06';   // r.note 文字裡的日期最晚到 6 月：工作日誌看到這個月（含）以前才要載這幾個月的報表
+const _REPORT_LEGACY_LS='ec_report_legacy_notes_v1';   // {通路:{'YYYY/MM|half':{ts,rows:[[品號,文字,是否該品號第一列]…]}}}，只在本機、不上雲
+const _reportLegacy={store:null,st:{},warned:new Set()};
+const _reportTest={state:'idle',err:null};   // 測試通路（ectest|…）不在近月訂閱裡：進通路選了期間才讀一次
 const _REPORT_CACHE_DEFER_MS=1500;
 const _reportCacheDeferred=new Map();   // key → { json, meta:{shop,month,half}, timer }
 
@@ -677,6 +692,28 @@ function _reportCollectionsReady(){ try{ return !!(window.__profitsCollectionRea
 function _reportArchivesReady(){ try{ return !!(window.__profitArchivesReady&&window.__profitArchivesReady()); }catch(e){ return false; } }
 function _reportIsArchiveMonth(k){ return LS_TIDY_ARCHIVE_MONTHS.indexOf(String(k).split('|')[2])>=0; }
 function _reportMigrateFlagged(){ try{ return localStorage.getItem(_REPORT_DIRTY_MIGRATED_LS)==='1'; }catch(e){ return false; } }
+// 窗口開關打開時，這份報表雲端現在是什麼（遷移、沒存穩共用）。{known:false}＝還不知道，🔴 絕不能當成雲端沒有（會把舊版推上雲蓋掉新版）。
+//   窗口內：等訂閱資料到，看記憶體。窗口外：記憶體有（讀過）就用；否則看 ts 目錄，目錄沒到就等。
+//   目錄只有 ts：回 {built:[],ts} 這個替身，只夠比時間。雲端沒有 ts 要比內容，才去讀整份。
+function _reportCloudOf(k){
+  const p=String(k).split('|'),shop=p[1],ym=p[2];
+  const mem=Store._profitMem&&Store._profitMem[k];
+  if(_reportInWindow(ym)) return _reportWindowReady(shop)?{known:true,cloud:mem}:{known:false};
+  if(mem&&_reportMonthState(shop,ym)==='loaded') return {known:true,cloud:mem};
+  const idx=_reportCloudIndex();
+  if(idx.state!=='ok') return {known:false};
+  if(!Object.prototype.hasOwnProperty.call(idx.map,k)) return {known:true,cloud:null};
+  const ts=idx.map[k];
+  if(typeof ts==='number') return {known:true,cloud:{built:[],ts}};
+  const e=_reportMonths.get(shop+'|'+ym);
+  if(!e||(e.state==='failed'&&Date.now()-e.at>30000)) _reportEnsure(shop,[ym]);
+  return {known:false};
+}
+// 5 秒存檔守衛跳過的快照：窗口內要等下一次快照。窗口外不會有下一次快照，也不靠它（看 ts 目錄），不用等。
+function _reportSkippedBySave(k){
+  if(!_reportSkipByJustSaved.has(k)) return false;
+  return !(_REPORT_WINDOW_GATE&&!_reportInWindow(String(k).split('|')[2]));
+}
 // 還沒判斷的本機報表。列舉失敗回 null（不能當成「沒有」而設旗標）。
 function _reportMigrateCandidates(){
   const r=_reportDirtyRead();
@@ -717,7 +754,7 @@ function _reportMigrateDecide(x){
 }
 function _reportMigrateRunnable(){
   const ar=_reportArchivesReady();
-  return (_reportMigrateCandidates()||[]).filter(k=>!(_reportIsArchiveMonth(k)&&!ar)&&!_reportSkipByJustSaved.has(k));
+  return (_reportMigrateCandidates()||[]).filter(k=>!(_reportIsArchiveMonth(k)&&!ar)&&!_reportSkippedBySave(k)&&(!_REPORT_WINDOW_GATE||_reportCloudOf(k).known));
 }
 function _reportMigrateOne(k,shops){
   if(_reportDirtyHas(k)){ _reportMigrateDecided.add(k); return; }
@@ -725,9 +762,11 @@ function _reportMigrateOne(k,shops){
   try{ raw=localStorage.getItem(k); }catch(e){ return; }
   if(raw===null){ _reportMigrateDecided.add(k); return; }
   const local=_reportCacheParse(raw);
-  const cloud=Store._profitMem&&Store._profitMem[k];
+  const co=_REPORT_WINDOW_GATE?_reportCloudOf(k):null;
+  if(co&&!co.known) return;   // 目錄沒到就等，下一輪再判
+  const cloud=co?co.cloud:(Store._profitMem&&Store._profitMem[k]);
   const stable=v=>_momoStableStr(_stripDerived(v.built));
-  const d=_reportMigrateDecide({local,cloud,archiveMonth:_reportIsArchiveMonth(k),archivesReady:_reportArchivesReady(),skipped:_reportSkipByJustSaved.has(k),same:()=>stable(local)===stable(cloud)});
+  const d=_reportMigrateDecide({local,cloud,archiveMonth:_reportIsArchiveMonth(k),archivesReady:_reportArchivesReady(),skipped:_reportSkippedBySave(k),same:()=>stable(local)===stable(cloud)});
   if(d.act==='wait') return;
   if(d.act==='register'){
     if(!_reportDirtyAdd(k,_repTs(local))) return;   // 登記寫不進去：下次開頁再判，旗標不設
@@ -749,7 +788,7 @@ function _reportMigrateOne(k,shops){
 function _reportMigrateRun(opts){
   if(!_REPORT_DIRTY_GATE||_reportMigrateFlagged()) return Promise.resolve(null);
   if(_reportMigrateRunP) return _reportMigrateRunP;
-  if(!_reportCollectionsReady()) return Promise.resolve(null);
+  if(!_REPORT_WINDOW_GATE&&!_reportCollectionsReady()) return Promise.resolve(null);   // 窗口開關打開：逐把看 _reportCloudOf，窗口外不用等訂閱
   const gap=(opts&&opts.gapMs!=null)?opts.gapMs:50;
   const keys=_reportMigrateRunnable();
   const shops=new Set();
@@ -780,7 +819,7 @@ function _reportMigrateRun(opts){
 }
 // 'lost'（本機沒有或比登記舊）：雲端到了才知道本機那份還有沒有用。本機較新＝重新登記再推；否則那次修改已經救不回來，移除登記並通知。
 function _reportLostSettle(){
-  if(!_REPORT_DIRTY_GATE||!_reportDirtyHold.size||!_reportCollectionsReady()) return;
+  if(!_REPORT_DIRTY_GATE||!_reportDirtyHold.size||(!_REPORT_WINDOW_GATE&&!_reportCollectionsReady())) return;
   const r=_reportDirtyRead();
   if(r.state!=='ok') return;
   const isRep=v=>v!==null&&v!==undefined&&typeof v==='object'&&!Array.isArray(v)&&Array.isArray(v.built);
@@ -788,11 +827,13 @@ function _reportLostSettle(){
   _reportDirtyHold.forEach((why,k)=>{
     if(why!=='lost') return;
     if(_reportIsArchiveMonth(k)&&!_reportArchivesReady()) return;
-    if(_reportSkipByJustSaved.has(k)) return;
+    if(_reportSkippedBySave(k)) return;
     if(!Object.prototype.hasOwnProperty.call(r.map,k)){ _reportDirtyHold.delete(k); return; }
     let local=null;
     try{ local=_reportCacheParse(localStorage.getItem(k)); }catch(e){ return; }
-    const cloud=Store._profitMem&&Store._profitMem[k];
+    const co=_REPORT_WINDOW_GATE?_reportCloudOf(k):null;
+    if(co&&!co.known) return;   // 不知道雲端是什麼就不判：這裡判錯會移除登記、丟掉修改
+    const cloud=co?co.cloud:(Store._profitMem&&Store._profitMem[k]);
     if(isRep(local)&&(!isRep(cloud)||_repTs(local)>_repTs(cloud))){
       if(!_reportDirtyAdd(k,_repTs(local))) return;
       Store._profitMem=Store._profitMem||{};
@@ -828,7 +869,8 @@ function _reportMigratePollStart(){
   const tick=()=>{
     try{
       _reportLostSettle();
-      if(!_reportMigrateFlagged()&&!_reportMigrateRunP&&_reportCollectionsReady()&&_reportMigrateRunnable().length) _reportMigrateRun();
+      if(_REPORT_WINDOW_GATE) _reportCloudIndex();   // 目錄讀失敗時隔一段時間再試
+      if(!_reportMigrateFlagged()&&!_reportMigrateRunP&&(_REPORT_WINDOW_GATE||_reportCollectionsReady())&&_reportMigrateRunnable().length) _reportMigrateRun();
     }catch(e){ console.error('[報表登記] 比對排程失敗',e); }
     if(_reportMigrateNeedsPoll()) setTimeout(tick,2000);
     else _reportMigratePollOn=false;
@@ -839,6 +881,13 @@ function _reportMigratePollStart(){
 function _reportMigrateKick(){
   const wait=_reportMigrateWaitingKeys();
   if(!wait.length) return;
+  if(_REPORT_WINDOW_GATE){
+    // 窗口外只要 ts 目錄；只有在等窗口內的才載蝦皮近月（只開 MOMO 頁不要多載）
+    _reportCloudIndex();
+    try{ if(wait.some(k=>_reportInWindow(String(k).split('|')[2]))&&window.__loadShopeeSubs) window.__loadShopeeSubs(); }catch(e){}
+    _reportMigratePollStart();
+    return;
+  }
   try{ if(window.__loadShopeeSubs) window.__loadShopeeSubs(); }catch(e){}
   try{ if(wait.some(_reportIsArchiveMonth)&&window.__loadArchiveSubs) window.__loadArchiveSubs(); }catch(e){}
   _reportMigratePollStart();
@@ -848,6 +897,341 @@ window.__reportDirtyState=function(){
   const r=_reportDirtyRead();
   let migrated=null; try{ migrated=localStorage.getItem(_REPORT_DIRTY_MIGRATED_LS); }catch(e){}
   return {gate:_REPORT_DIRTY_GATE,state:r.state,dirty:Object.assign({},r.map),migrated,localFail:[..._reportDirtyLocalFail],hold:Object.fromEntries(_reportDirtyHold),skipped:[..._reportSkipByJustSaved]};
+};
+// ══════ 近月窗口：舊月份要用才讀（開關 _REPORT_WINDOW_GATE）══════
+//  🔴 月份狀態要看 _reportMonthState，不看記憶體或 localStorage 裡有沒有：loaded 才能相信「沒有這份」。
+//  🔴 讀不到不等於沒有：失敗一律記 failed，不能讓呼叫端算成空資料。
+function _reportWindowFrom(){
+  if(typeof window.__profitsWindowFrom==='string') return window.__profitsWindowFrom;   // 訂閱實際用的起點（切換塊才會有）
+  return _lsMonthMinus(_lsTaipeiMonth(Date.now()),_REPORT_WINDOW_MONTHS-1);
+}
+function _reportInWindow(ym){ return String(ym)>=_reportWindowFrom(); }
+function _reportWindowReady(shop){ return _reportCollectionsReady(); }   // 先留 shop 參數：之後只訂目前通路時才分得開
+// 回 'loaded'｜'loading'｜'failed'｜'idle'。開關關閉（全量訂閱）一律 loaded。測試通路另外讀，不走這裡。
+function _reportMonthState(shop,ym){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return 'loaded';
+  if(_reportInWindow(ym)) return _reportWindowReady(shop)?'loaded':'loading';
+  const e=_reportMonths.get(shop+'|'+ym);
+  return e?e.state:'idle';
+}
+// 窗口外、還沒讀到：這時本機那份可能是舊版，不能當真資料。
+function _reportMonthOutMissing(shop,ym){
+  return _REPORT_WINDOW_GATE&&shop!==TEST_SHOP_ID&&!_reportInWindow(ym)&&_reportMonthState(shop,ym)!=='loaded';
+}
+function _reportWaitUntil(fn,ms){
+  return new Promise(resolve=>{
+    let left=Math.ceil(ms/300);
+    const tick=()=>{
+      let ok=false; try{ ok=!!fn(); }catch(e){}
+      if(ok) return resolve(true);
+      if(--left<=0) return resolve(false);
+      setTimeout(tick,300);
+    };
+    tick();
+  });
+}
+function _reportColReady(){ const c=window.__cloudProfitCol; return !!(c&&typeof c.getDocForShop==='function'); }
+function _reportWithTimeout(p,label){
+  let timer=null;
+  const t=new Promise((_,rej)=>{ timer=setTimeout(()=>rej(new Error(label+' 逾時')),_REPORT_ENSURE_TIMEOUT_MS); });
+  return Promise.race([p,t]).then(v=>{ clearTimeout(timer); return v; },e=>{ clearTimeout(timer); throw e; });
+}
+// 按需讀回的報表：逐 key 過守衛，dirty／剛存過的不蓋。回傳內容有沒有變。
+function _reportEnsureApply(incoming){
+  Store._profitMem=Store._profitMem||{};
+  let changed=false;
+  Object.keys(incoming||{}).forEach(k=>{
+    if(window.__profitShouldSkipCloudOverwrite&&window.__profitShouldSkipCloudOverwrite(k)) return;
+    const cur=Store._profitMem[k];
+    if(cur!==undefined&&_repTs(cur)>=_repTs(incoming[k])) return;   // 推送途中讀到的舊版、或同一版：不蓋（記憶體裡的列有衍生欄位）
+    Store._profitMem[k]=incoming[k];
+    changed=true;
+    const ym=String(k).split('|')[2];
+    if(_LEGACY_NOTE_MONTHS.indexOf(ym)<0&&!_reportLegacy.warned.has(k)&&Array.isArray(incoming[k]&&incoming[k].built)&&incoming[k].built.some(r=>r&&r.note&&String(r.note).trim())){
+      _reportLegacy.warned.add(k);
+      console.warn('[報表窗口] '+k+' 有 r.note，但舊紀錄快取只涵蓋 '+_LEGACY_NOTE_MONTHS.join('、')+'：這些紀錄在其他期間的計數會少算，請回報');
+    }
+  });
+  return changed;
+}
+function _reportEnsureNotify(shop,dispatch){
+  if(dispatch){ try{ window.dispatchEvent(new CustomEvent('profitDataReady',{detail:{changedShops:[shop]}})); }catch(e){ console.warn('[報表窗口] 通知失敗',e); } }
+  if(_reportPlaceholder.has(shop)){ try{ tryLoadSaved(shop); }catch(e){ console.warn('[報表窗口] 重畫失敗',e); } }
+}
+// 讀一段相鄰的月份（一次範圍查詢）。refresh＝這幾個月已載入，只是背景更新：失敗照舊可看，不改狀態。
+function _reportFetchRange(shop,yms,refresh){
+  const from=yms[0],to=yms[yms.length-1];
+  const read=_reportWaitUntil(_reportColReady,_REPORT_ENSURE_TIMEOUT_MS).then(ok=>{
+    if(!ok) throw new Error('雲端讀取還沒就緒');
+    return window.__cloudProfitCol.getDocForShop(shop,{from,to});
+  });
+  const p=_reportWithTimeout(read,'讀取 '+shop+' '+from+'～'+to).then(obj=>{
+    const changed=_reportEnsureApply(obj);
+    yms.forEach(ym=>_reportMonths.set(shop+'|'+ym,{state:'loaded',at:Date.now()}));
+    _reportEnsureNotify(shop,!refresh||changed);
+  },err=>{
+    console.warn('[報表窗口] 讀取失敗 '+shop+' '+from+'～'+to,err);
+    yms.forEach(ym=>{
+      const e=_reportMonths.get(shop+'|'+ym);
+      if(refresh&&e) delete e.p;
+      else _reportMonths.set(shop+'|'+ym,{state:'failed',at:Date.now(),err:String((err&&err.message)||err)});
+    });
+    _reportEnsureNotify(shop,!refresh);
+  });
+  yms.forEach(ym=>{
+    const e=_reportMonths.get(shop+'|'+ym);
+    if(refresh&&e) e.p=p; else _reportMonths.set(shop+'|'+ym,{state:'loading',p});
+  });
+  return p;
+}
+// 確保這幾個月可以相信（窗口內：等訂閱資料到；窗口外：讀雲端）。同一批只發一次。絕不 reject，回 {ok,failed:[月份…]}。
+function _reportEnsure(shop,yms,opts){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return Promise.resolve({ok:true,failed:[]});
+  const refresh=!!(opts&&opts.refresh);
+  const uniq=[...new Set((yms||[]).filter(Boolean))].sort();
+  const waits=[],need=[];
+  let needWindow=false;
+  uniq.forEach(ym=>{
+    if(_reportInWindow(ym)){ if(!_reportWindowReady(shop)) needWindow=true; return; }
+    const e=_reportMonths.get(shop+'|'+ym);
+    if(e&&e.p) waits.push(e.p);
+    else if(!e||e.state!=='loaded'||refresh) need.push(ym);
+  });
+  let run=[];
+  need.forEach((ym,i)=>{
+    if(i&&_lsMonthMinus(ym,1)!==need[i-1]){ waits.push(_reportFetchRange(shop,run,refresh)); run=[]; }
+    run.push(ym);
+  });
+  if(run.length) waits.push(_reportFetchRange(shop,run,refresh));
+  if(needWindow){
+    try{ if(window.__loadShopeeSubs) window.__loadShopeeSubs(); }catch(e){}
+    waits.push(_reportWaitUntil(()=>_reportWindowReady(shop),_REPORT_ENSURE_TIMEOUT_MS));
+  }
+  return Promise.all(waits).then(()=>{
+    const failed=uniq.filter(ym=>_reportMonthState(shop,ym)!=='loaded');
+    return {ok:!failed.length,failed};
+  });
+}
+// ts 目錄：回 _reportIdx（{state:'idle'|'loading'|'ok'|'failed',map,at}）。沒有就發一次，不等它。
+//   🔴 state 不是 'ok' 時什麼都不能推論（絕不當成雲端沒有）。
+function _reportCloudIndex(opts){
+  if(!_REPORT_WINDOW_GATE) return _reportIdx;
+  const staleFail=_reportIdx.state==='failed'&&Date.now()-_reportIdx.at>30000;
+  if((_reportIdx.state==='idle'||staleFail||(opts&&opts.refresh))&&!_reportIdx.p){
+    if(_reportIdx.state!=='ok') _reportIdx.state='loading';
+    const read=_reportWaitUntil(_reportColReady,_REPORT_ENSURE_TIMEOUT_MS).then(ok=>{
+      if(!ok) throw new Error('雲端讀取還沒就緒');
+      return window.__cloudProfitCol.getDocForShop(null,{tsOnly:true});
+    });
+    _reportIdx.p=_reportWithTimeout(read,'讀取報表目錄').then(m=>{
+      _reportIdx.map=m||{}; _reportIdx.state='ok'; _reportIdx.at=Date.now(); _reportIdx.p=null; _reportIdx.err=null;
+      try{ _reportIdxArrived(); }catch(e){ console.warn('[報表窗口] 目錄處理失敗',e); }
+    },err=>{
+      console.warn('[報表窗口] 讀取目錄失敗',err);
+      if(_reportIdx.state!=='ok') _reportIdx.state='failed';
+      _reportIdx.at=Date.now(); _reportIdx.p=null; _reportIdx.err=String((err&&err.message)||err);
+    });
+  }
+  return _reportIdx;
+}
+// 目錄到了：舊期別、通路小圓點才不會消失；還沒介入的通路重跑「跳最新」（期別沒變就不重畫）。
+function _reportIdxArrived(){
+  SHOPS.forEach(s=>{
+    if(s.id===TEST_SHOP_ID) return;
+    if(lsHasAny(s.id)){ const d=document.getElementById('dot-'+s.id); if(d) d.classList.add('on'); }
+    const p=_findLatestPeriod(s.id), st=state[s.id];
+    if(p&&st&&!_userPickedPeriod[s.id]&&(p.month!==st.curMonth||p.half!==st.curHalf)) _applyLatestPeriod(s.id);
+  });
+  // 「其他期間」計數靠期別清單：目前看的通路重畫、其他監聽者（工作日誌索引）失效
+  window.dispatchEvent(new CustomEvent('profitDataReady',{detail:{changedShops:SHOPS.some(s=>s.id===curShop)?[curShop]:[]}}));
+}
+// tryLoadSaved 用：選定月＋前 1 月還不能顯示時回畫面文字（同時發讀取）；可以顯示回 null。
+function _reportPeriodGateHtml(shop,month){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return null;
+  _reportCloudIndex();
+  const p=_lmSamePeriodParts(month,'full');
+  const out=[month].concat(p?[p.month]:[]).filter(m=>!_reportInWindow(m));
+  const idle=out.filter(m=>_reportMonthState(shop,m)==='idle');
+  if(idle.length) _reportEnsure(shop,idle);
+  _reportPlaceholder.delete(shop);
+  if(_reportMonthState(shop,month)==='failed'){
+    return `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-hint">${month} 的報表讀取失敗，這不代表沒有資料。<br><button onclick="__reportRetry('${shop}')" style="margin-top:8px;padding:4px 14px;cursor:pointer">重試</button></div></div>`;
+  }
+  if(out.some(m=>_reportMonthState(shop,m)==='loading')){
+    _reportPlaceholder.add(shop);
+    return `<div class="empty"><div class="empty-icon">⏳</div><div class="empty-hint">${month} 的報表載入中…</div></div>`;
+  }
+  return null;
+}
+// 前 1 月讀取失敗：報表照常顯示，上期副標和較上月同期不顯示，加橫幅可重試。
+function _reportPrevFailBanner(shop,month){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return;
+  document.getElementById('report-prev-fail-'+shop)?.remove();
+  const p=_lmSamePeriodParts(month,'full');
+  if(!p||_reportInWindow(p.month)||_reportMonthState(shop,p.month)!=='failed') return;
+  const tbl=document.getElementById('tbl-'+shop);
+  if(tbl) tbl.insertAdjacentHTML('beforebegin',`<div id="report-prev-fail-${shop}" style="margin:6px 0;padding:6px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;font-size:13px;color:#92400e">${p.month} 的報表讀取失敗，上期副標和較上月同期暫不顯示。 <button onclick="__reportRetry('${shop}')" style="margin-left:8px;cursor:pointer">重試</button></div>`);
+}
+// 使用者親手選期別：失敗的可以再試；舊月已載入超過 1 分鐘就背景更新一次（舊月不是即時訂閱，別人重產要重新選才看得到）。
+function _reportOnUserPick(shop,month){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return;
+  const p=_lmSamePeriodParts(month,'full');
+  const again=[];
+  [month].concat(p?[p.month]:[]).forEach(m=>{
+    if(_reportInWindow(m)) return;
+    const e=_reportMonths.get(shop+'|'+m);
+    if(!e) return;
+    if(e.state==='failed') _reportMonths.delete(shop+'|'+m);
+    else if(e.state==='loaded'&&!e.p&&Date.now()-e.at>60000) again.push(m);
+  });
+  if(again.length) _reportEnsure(shop,again,{refresh:true});
+}
+// ══════ 舊 r.note 快取（每台電腦每通路第一次讀 03～05 月，之後 ts 沒變就不再讀）══════
+function _legacyStore(){
+  if(_reportLegacy.store) return _reportLegacy.store;
+  let v=null;
+  try{ v=JSON.parse(localStorage.getItem(_REPORT_LEGACY_LS)); }catch(e){}
+  _reportLegacy.store=(v&&typeof v==='object'&&!Array.isArray(v))?v:{};   // 損毀當成沒有：重讀就好，雲端才是正本
+  return _reportLegacy.store;
+}
+function _legacySave(){
+  try{ localStorage.setItem(_REPORT_LEGACY_LS,JSON.stringify(_reportLegacy.store||{})); }
+  catch(e){ console.warn('[報表窗口] 舊紀錄快取存不進本機（這次開頁照常顯示，下次會再讀一次）',e); }
+}
+function _legacyIsMonth(ym){ return _REPORT_WINDOW_GATE&&_LEGACY_NOTE_MONTHS.indexOf(ym)>=0; }
+function _legacyPairs(shop,month,half){
+  const s=_legacyStore()[shop], e=s&&s[month+'|'+half];
+  return (e&&Array.isArray(e.rows))?e.rows:[];
+}
+// 回 'ok'｜'loading'｜'failed'。kick＝順便發讀取（還沒讀才發）。不是 ok 時畫面要說「還在載入」，不能顯示看似完整的數字。
+function _reportLegacyStatus(shop,kick){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return 'ok';
+  const idx=kick?_reportCloudIndex():_reportIdx;
+  const st=_reportLegacy.st[shop]||(_reportLegacy.st[shop]={});
+  if(st.p) return 'loading';
+  if(idx.state!=='ok') return idx.state==='failed'?'failed':'loading';
+  if(st.okAt===idx.at) return 'ok';
+  const store=_legacyStore(), cached=store[shop]||{}, want={}, pre='ec|'+shop+'|';
+  Object.keys(idx.map).forEach(k=>{
+    if(k.indexOf(pre)!==0) return;
+    const p=k.split('|');
+    if(_LEGACY_NOTE_MONTHS.indexOf(p[2])>=0&&p[3]) want[p[2]+'|'+p[3]]=idx.map[k];
+  });
+  if(!Object.keys(want).some(p=>!cached[p]||cached[p].ts!==want[p])){
+    const extra=Object.keys(cached).filter(p=>!(p in want));
+    if(extra.length){ extra.forEach(p=>delete cached[p]); _legacySave(); }
+    st.okAt=idx.at;
+    return 'ok';
+  }
+  if(!kick) return st.failAt?'failed':'loading';
+  if(st.failAt&&Date.now()-st.failAt<30000) return 'failed';
+  const read=_reportWaitUntil(_reportColReady,_REPORT_ENSURE_TIMEOUT_MS).then(ok=>{
+    if(!ok) throw new Error('雲端讀取還沒就緒');
+    return window.__cloudProfitCol.getDocForShop(shop,{from:_LEGACY_NOTE_MONTHS[0],to:_LEGACY_NOTE_MONTHS[_LEGACY_NOTE_MONTHS.length-1]});
+  });
+  st.p=_reportWithTimeout(read,'讀取 '+shop+' 舊紀錄').then(obj=>{
+    const next={};
+    Object.keys(obj||{}).forEach(k=>{
+      const p=k.split('|'), built=obj[k]&&obj[k].built, rows=[], seen=new Set();
+      // 第三欄＝是不是這個品號在報表裡的第一列：同品號可能多列，歷史紀錄（_noteHistory）只看第一列、計數（_crossPeriodIndexFor）每列都算，兩邊都要跟全量逐字相同
+      if(Array.isArray(built)) built.forEach(r=>{ if(!r||r.code==null) return; const first=!seen.has(r.code); seen.add(r.code); const t=r.note; if(t&&String(t).trim()) rows.push([r.code,String(t),first?1:0]); });
+      next[p[2]+'|'+p[3]]={ts:typeof obj[k].ts==='number'?obj[k].ts:null,rows};
+    });
+    _legacyStore()[shop]=next;
+    _legacySave();
+    st.p=null; st.failAt=0; st.okAt=_reportIdx.at;
+    try{ window.dispatchEvent(new CustomEvent('profitDataReady',{detail:{changedShops:[shop]}})); }catch(e){}
+  },err=>{
+    console.warn('[報表窗口] 讀取舊紀錄失敗 '+shop,err);
+    st.p=null; st.failAt=Date.now()||1;
+  });
+  return 'loading';
+}
+// 品名往外找：紀錄的品號在已載入的報表都查不到品名時，由近到遠多讀幾個月（一次 3 個）。回 'loading'｜'failed'｜'done'（全部讀完了）。
+function _reportNameWalk(shop,ym){
+  const pre='ec|'+shop+'|', all=new Set();
+  Object.keys(_reportIdx.map||{}).forEach(k=>{ if(k.indexOf(pre)===0){ const m=k.split('|')[2]; if(/^\d{4}\/\d{2}$/.test(m)&&!_reportInWindow(m)) all.add(m); } });
+  const n=m=>(+m.slice(0,4))*12+(+m.slice(5,7));
+  const months=[...all];
+  if(months.some(m=>_reportMonthState(shop,m)==='loading')) return 'loading';
+  const idle=months.filter(m=>_reportMonthState(shop,m)==='idle').sort((a,b)=>Math.abs(n(a)-n(ym))-Math.abs(n(b)-n(ym)));
+  if(idle.length){ _reportEnsure(shop,idle.slice(0,3)); return 'loading'; }
+  return months.some(m=>_reportMonthState(shop,m)==='failed')?'failed':'done';
+}
+// 工作日誌月曆：看 calMonth（YYYY-MM）要哪些月份。extra＝[[通路,'YYYY/MM']…]（這個月的紀錄引用到的期別）。
+//   blankShops＝這個月有紀錄查不到品名的通路：只在看窗口外的月份時才往外找（預設畫面不會因此多讀）。
+//   回 {loading,failed,nameLoading,nameFailed}；開關關閉回 null。
+window.__dailyReportNeed=function(calMonth,extra,blankShops){
+  if(!_REPORT_WINDOW_GATE) return null;
+  const ym=String(calMonth||'').replace('-','/');
+  const p=_lmSamePeriodParts(ym,'full');
+  const months=[ym].concat(p?[p.month]:[]).concat(ym<=_LEGACY_NOTE_TOKEN_LAST?_LEGACY_NOTE_MONTHS:[]);
+  const need={};
+  SUMMARY_SHOPS.forEach(s=>{ need[s.id]=months.slice(); });
+  (extra||[]).forEach(x=>{ if(x&&x[0]&&x[1]&&x[0]!==TEST_SHOP_ID) (need[x[0]]=need[x[0]]||[]).push(x[1]); });
+  let loading=false; const failed=[], settled={};
+  Object.keys(need).forEach(shop=>{
+    const out=[...new Set(need[shop])].filter(m=>/^\d{4}\/\d{2}$/.test(m)&&!_reportInWindow(m));
+    const idle=out.filter(m=>_reportMonthState(shop,m)==='idle');
+    if(idle.length) _reportEnsure(shop,idle);
+    settled[shop]=true;
+    out.forEach(m=>{ const st=_reportMonthState(shop,m); if(st!=='loaded') settled[shop]=false; if(st==='loading') loading=true; else if(st==='failed') failed.push(shop+' '+m); });
+  });
+  let nameLoading=false,nameFailed=false;
+  if((blankShops||[]).length&&!_reportInWindow(ym)){
+    const idx=_reportCloudIndex();
+    (blankShops||[]).forEach(shop=>{
+      if(idx.state==='failed'){ nameFailed=true; return; }
+      if(idx.state!=='ok'||settled[shop]===false){ nameLoading=true; return; }   // 這個月該有的還沒到，現在查不到品名不算數
+      const r=_reportNameWalk(shop,ym);
+      if(r==='loading') nameLoading=true; else if(r==='failed') nameFailed=true;
+    });
+  }
+  return {loading:loading||nameLoading,failed,nameLoading,nameFailed};
+};
+window.__reportWindowOn=function(){ return _REPORT_WINDOW_GATE; };
+window.__reportClearFailed=function(){ [..._reportMonths].forEach(([k,e])=>{ if(e.state==='failed') _reportMonths.delete(k); }); };
+window.__reportRetryFailed=function(){
+  window.__reportClearFailed();
+  if(window.App&&typeof App.render==='function') App.render();
+};
+// 健檢：先把一批月份併成範圍查詢（只發還沒讀過的；失敗的要按「↻ 重新計算」才再讀，不會一直重試）。months＝['YYYY-MM'…]
+window.__reportEnsureIdle=function(shop,months){
+  if(!_REPORT_WINDOW_GATE||shop===TEST_SHOP_ID) return;
+  const idle=(months||[]).map(m=>String(m).replace('-','/')).filter(m=>!_reportInWindow(m)&&_reportMonthState(shop,m)==='idle');
+  if(idle.length) _reportEnsure(shop,idle);
+};
+// 測試通路：回 'loaded'｜'loading'｜'failed'。讀到的只放記憶體（testLoad 只看記憶體），本機產生的比較新就不蓋。
+function _reportTestEnsure(shop){
+  if(_reportTest.state!=='idle') return _reportTest.state;
+  _reportTest.state='loading';
+  const redraw=()=>{ try{ testTryLoadSaved(shop); }catch(e){ console.warn('[報表窗口] 測試通路重畫失敗',e); } };
+  const read=_reportWaitUntil(_reportColReady,_REPORT_ENSURE_TIMEOUT_MS).then(ok=>{
+    if(!ok) throw new Error('雲端讀取還沒就緒');
+    return window.__cloudProfitCol.getDocForShop(shop,{prefix:'ectest'});
+  });
+  _reportWithTimeout(read,'讀取測試通路').then(obj=>{
+    Store._profitMem=Store._profitMem||{};
+    Object.keys(obj||{}).forEach(k=>{ const cur=Store._profitMem[k]; if(cur===undefined||_repTs(cur)<_repTs(obj[k])) Store._profitMem[k]=obj[k]; });
+    _reportTest.state='loaded';
+    redraw();
+  },err=>{
+    console.warn('[報表窗口] 讀取測試通路失敗',err);
+    _reportTest.state='failed'; _reportTest.err=String((err&&err.message)||err);
+    redraw();
+  });
+  return 'loading';
+}
+window.__reportTestRetry=function(shop){ _reportTest.state='idle'; testTryLoadSaved(shop); };
+window.__reportRetry=function(shop){
+  const m=state[shop]&&state[shop].curMonth; if(!m) return;
+  const p=_lmSamePeriodParts(m,'full');
+  [m].concat(p?[p.month]:[]).forEach(x=>{ const e=_reportMonths.get(shop+'|'+x); if(e&&e.state==='failed') _reportMonths.delete(shop+'|'+x); });
+  tryLoadSaved(shop);
+};
+// Console 唯讀觀測（不以 __cloud 開頭）
+window.__reportWindowState=function(){
+  return {gate:_REPORT_WINDOW_GATE,from:_REPORT_WINDOW_GATE?_reportWindowFrom():null,months:[..._reportMonths].map(([k,e])=>[k,e.state,e.err||'']),index:{state:_reportIdx.state,n:_reportIdx.map?Object.keys(_reportIdx.map).length:0,err:_reportIdx.err}};
 };
 // ══════ 編輯覆蓋值（ec_edits）的「真正本機編輯」註冊表（persisted，跨重整）══════
 //  形狀完全比照上方 _NOTES_DIRTY_LS 三支（本檔搜 `const _NOTES_DIRTY_LS`），三種狀態的
@@ -1957,6 +2341,29 @@ async function __lsTidy(opts){
   try{ return await _lsTidyRun(opts,dryRun,waitMs,pollMs,phase); }
   finally{ phase('done'); }
 }
+// 窗口模式：給 _lsTidyPlan 用的雲端資料。回 {ready,profitMem}；讀到的只放這份拷貝，不進 _profitMem。
+//   🔴 目錄不是最後判斷：通過目錄的再讀整份，_lsTidyPlan 用真正的雲端內容比列數和 ts。讀不到＝計畫裡「雲端沒有這份」＝保留。
+async function _lsTidyWindowCloud(waitMs,phase){
+  const idx=_reportCloudIndex({refresh:true});
+  if(idx.p){ phase('wait-cloud'); await _reportWaitUntil(()=>!_reportIdx.p,waitMs); }
+  if(_reportIdx.state!=='ok') return {ready:false,profitMem:{}};
+  const profitMem=Object.assign({},Store._profitMem||{});
+  const cutoff=_lsMonthMinus(_lsTaipeiMonth(Date.now()),LS_TIDY_KEEP_MONTHS-1);
+  const keys=[];
+  for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&_REPORT_CACHE_KEY_RE.test(k)&&String(k.split('|')[2])<cutoff) keys.push(k); }
+  for(const k of keys){
+    try{
+      if(_pendingSyncKeys.has(k)||_reportDirtyHas(k)||profitMem[k]) continue;
+      const ts=_reportIdx.map[k];
+      if(typeof ts!=='number') continue;
+      const local=_reportCacheParse(localStorage.getItem(k));
+      if(!local||typeof local.ts!=='number'||local.ts>ts) continue;   // 本機較新：不用讀，一定保留
+      const snap=await _reportWithTimeout(window.__cloudProfitCol.getDoc(k),'讀取 '+k);
+      if(snap&&snap.exists()) profitMem[k]=snap.data();
+    }catch(e){ console.warn('[釋出空間] 讀不到雲端，這把保留：',k,e); }
+  }
+  return {ready:true,profitMem};
+}
 async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
   const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},pricing:{deleted:[]},planError:''};
   try{
@@ -1966,7 +2373,11 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
     if(!dryRun){ try{ res.momoCompressed=await _momoLsMigrate({gapMs:0}); }catch(e){ res.momoCompressed={error:String(e&&e.message||e)}; } }
     // 等雲端報表（不在淨利表頁時先訂閱，跟工作日誌頁同一組唯讀訂閱）
     const ready=()=>{ try{ return !!(window.__profitsCollectionReady&&window.__profitsCollectionReady()); }catch(e){ return false; } };
-    if(!ready()){
+    let winCloud=null;
+    if(_REPORT_WINDOW_GATE){
+      // 只會刪保留期以前的報表（都在窗口外），所以不等訂閱：先看 ts 目錄，通過的再讀整份比列數，讀不到就保留。
+      winCloud=await _lsTidyWindowCloud(waitMs,phase);
+    }else if(!ready()){
       phase('wait-cloud');
       try{ window.__loadShopeeSubs&&window.__loadShopeeSubs(); window.__loadArchiveSubs&&window.__loadArchiveSubs(); }catch(e){}
       const t0=Date.now();
@@ -1978,8 +2389,9 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
       const entries=[];
       for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k!=null) entries.push([k,localStorage.getItem(k)]); }
       let archivesReady=false; try{ archivesReady=!!(window.__profitArchivesReady&&window.__profitArchivesReady()); }catch(e){}
-      plan=_lsTidyPlan({entries,profitMem:Store._profitMem||{},mem:Store._mem||{},pending:_pendingSyncKeys,deferred:_reportCacheDeferred,
-        justSavedAt:window._shopJustSaved,now:Date.now(),collectionsReady:ready(),archivesReady,insightReady:window.__insightCloudReady===true,parse:_reportCacheParse});
+      if(winCloud) archivesReady=true;   // 窗口模式直接讀 profits，不靠封存分片
+      plan=_lsTidyPlan({entries,profitMem:winCloud?winCloud.profitMem:(Store._profitMem||{}),mem:Store._mem||{},pending:_pendingSyncKeys,deferred:_reportCacheDeferred,
+        justSavedAt:window._shopJustSaved,now:Date.now(),collectionsReady:winCloud?winCloud.ready:ready(),archivesReady,insightReady:window.__insightCloudReady===true,parse:_reportCacheParse});
     }catch(e){
       res.planError=String(e&&e.message||e); res.skippedAll='計畫失敗：'+res.planError; res.insight.skippedAll=res.skippedAll;
       console.error('[釋出空間] 計畫失敗，什麼都沒刪',e); return res;
@@ -3001,6 +3413,7 @@ function lsLoad(shop,month,half){
   // 雲端優先：先看新的 profit doc，再 fallback 到舊的 main doc（過渡期相容）
   try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  if(_REPORT_WINDOW_GATE&&_reportMonthOutMissing(shop,month)) return null;   // 窗口外還沒讀：本機那份可能是舊版，不能當真資料
   try{ return _reportCacheParse(localStorage.getItem(k)); }catch{ return null; }
 }
 function lsHasAny(shop){
@@ -3013,6 +3426,7 @@ function lsHasAny(shop){
     }
   }catch{}
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k && k.startsWith(`ec|${shop}|`))return true;}
+  if(_REPORT_WINDOW_GATE&&_reportIdx.map){ for(const k of Object.keys(_reportIdx.map)){ if(k.startsWith(`ec|${shop}|`)) return true; } }
   return false;
 }
 // ── 找出某賣場「最新有資料」的期間（月份+區間）──
@@ -3032,6 +3446,7 @@ function _findLatestPeriod(shop){
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
   try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  if(_REPORT_WINDOW_GATE&&_reportIdx.map) Object.keys(_reportIdx.map).forEach(collect);
   if(!seen.size) return null;
   let best=null,bestRank='';
   seen.forEach(v=>{
@@ -3058,6 +3473,7 @@ function _listPeriods(shop){
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
   try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  if(_REPORT_WINDOW_GATE&&_reportIdx.map) Object.keys(_reportIdx.map).forEach(collect);
   return [...seen].map(v=>{
     const [month,half]=v.split('|');
     return {month,half,rank:_periodRank(month,half)};
@@ -3072,7 +3488,9 @@ function _noteHistory(shop,code,skipMonth,skipHalf){
 
     // ① 匯入的：報表 built[] 裡的 r.note（純字串）
     let rep=null;
-    try{ rep=lsLoad(shop,p.month,p.half); }catch{}
+    const _leg=_legacyIsMonth(p.month);   // 窗口模式：這幾個月的 r.note 整段來自本機快取，不看報表有沒有載入
+    if(_leg){ const hit=_legacyPairs(shop,p.month,p.half).find(x=>x[0]===code&&x[2]); if(hit) out.push({month:p.month,half:p.half,text:hit[1]}); }
+    else try{ rep=lsLoad(shop,p.month,p.half); }catch{}
     const built=rep&&rep.built;
     if(Array.isArray(built)){
       const r=built.find(x=>x&&x.code===code);
@@ -3108,6 +3526,7 @@ function profitNoteHistoryFor(shop, code){
       .map(a=>({date:a.date||'',text:String(a.text)}))
       .sort((x,y)=>String(y.date).localeCompare(String(x.date)));   // 日期新到舊
   }catch(e){ console.warn('[profitNoteHistoryFor] growth 查詢失敗', e); }
+  if(_REPORT_WINDOW_GATE&&_reportLegacyStatus(shop,true)!=='ok') return {period, growth, legacyLoading:true};
   return {period, growth};
 }
 window.profitNoteHistoryFor = profitNoteHistoryFor;
@@ -4006,6 +4425,7 @@ function onMonthChange(shop,byUser,month,half){
   if(half!==undefined)  state[shop].curHalf=half; // 自動流程：用參數設半月（純 state 指派，不重繪）
   delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
+  if(_REPORT_WINDOW_GATE&&byUser) _reportOnUserPick(shop,sel.value);
   try{localStorage.setItem('ec_lastMonth_'+shop,sel.value);}catch{} // 記住這個賣場的最後月份
   updateDaysBadge(shop);
   updateHalfBtnLabels(shop);
@@ -4014,6 +4434,7 @@ function onMonthChange(shop,byUser,month,half){
 function onHalfChange(shop,half,btn,byUser){
   if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切半月 → 鎖住，之後不再自動跳
   if(byUser) _stRetryFailed(shop);          // 動銷率顯示讀取失敗的月份再讀一次
+  if(_REPORT_WINDOW_GATE&&byUser) _reportOnUserPick(shop,state[shop].curMonth);
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
@@ -4054,7 +4475,10 @@ function resetUploadCards(shop){
 
 function tryLoadSaved(shop){
   try{ _reportCacheFlush('tryLoadSaved'); }catch(e){}   // 切期間 / 切半月前，把剛編輯的報表寫進本機（見 _reportCacheFlush）
-  const s=state[shop];const rep=lsLoad(shop,s.curMonth,s.curHalf);
+  const s=state[shop];
+  const _winHtml=_REPORT_WINDOW_GATE?_reportPeriodGateHtml(shop,s.curMonth):null;   // 窗口外的選定月／前 1 月還沒到：先顯示載入中，到了再走原本流程
+  const rep=_winHtml?null:lsLoad(shop,s.curMonth,s.curHalf);
+  if(_REPORT_WINDOW_GATE) _reportPrevFailBanner(shop,s.curMonth);
   // 每次切換區間都重置上傳卡片，避免誤以為已上傳
   resetUploadCards(shop);
   if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days,rep.storeAds);}
@@ -4071,7 +4495,7 @@ function tryLoadSaved(shop){
     //   半真半假的提示比全錯更難察覺，跟著本分支的清理一起移除。
     document.getElementById('tagfx-jump-banner')?.remove();
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
-    document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
+    document.getElementById('tbl-'+shop).innerHTML=_winHtml||`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
     // 搜尋列右邊的「N 筆」。renderTable 是它唯一的寫入點（本檔搜 `cnt-'+shop`），而空狀態
     //   這條路不會走到 renderTable → 不清就會留著上一期的筆數，跟旁邊的空表格互相矛盾。
@@ -4975,6 +5399,10 @@ function getPrevPeriodKey(shop, month, half) {
 //       那兩種情況對她是完全不同的判斷。
 function getPrevPeriodMap(shop, month, half) {
   const key = getPrevPeriodKey(shop, month, half);
+  if(_REPORT_WINDOW_GATE){
+    const _ym=key.split('|')[2];
+    if(_reportMonthState(shop,_ym)!=='loaded') throw new Error('上期（'+_ym+'）的報表還沒載入，這次不算，以免上期變空白');   // 🔴 不回空表：_doGenerate 會接住、不存不推
+  }
   let rep = null;
   try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
   try{ if(!rep && typeof Store!='undefined' && Store._mem && Store._mem[key]) rep = Store._mem[key]; }catch{}
@@ -5078,6 +5506,31 @@ function generate(shop){
 function _doGenerate(shop){
   if(shop===TEST_SHOP_ID) return _doGenerateTest(shop);   // 測試通路：日期區間 + 雲端直寫，見下方
   setSpin(shop,true);
+  if(_REPORT_WINDOW_GATE){
+    // 🔴 所有產生報表的入口都經過這裡。上期讀到才算；確定沒有才算空上期；讀取失敗或逾時就擋下，不存不推。
+    const s=state[shop],month=s.curMonth,half=s.curHalf;
+    const prevYm=getPrevPeriodKey(shop,month,half).split('|')[2];
+    _reportEnsure(shop,[prevYm]).then(r=>{
+      if(s.curMonth!==month||s.curHalf!==half){
+        // 🔴 等的時候期別變了（使用者切換，或自動跳最新）：停下、不存。絕不能換一期繼續產，上傳的檔案是給原本那一期的，會蓋掉別期報表。
+        setSpin(shop,false);
+        const msg='等上期資料的時候，選的期別變了（原本 '+month+'），這次沒有產生、也沒有存。\n請確認期別後再按一次「產生報表」。';
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'報表沒有產生',message:msg,kind:'warn'}); else alert(msg);
+        return;
+      }
+      if(!r.ok){
+        setSpin(shop,false);
+        const msg='上期（'+prevYm+'）的報表讀取失敗，這次沒有產生、也沒有存。\n請確認網路後再按一次「產生報表」，上傳的檔案還在。';
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'報表沒有產生',message:msg,kind:'error'}); else alert(msg);
+        return;
+      }
+      _doGenerateRun(shop);
+    });
+    return;
+  }
+  _doGenerateRun(shop);
+}
+function _doGenerateRun(shop){
   setTimeout(()=>{
     try{
       const s=state[shop];
@@ -5871,6 +6324,18 @@ function openTagFxModal(shop){
     ov.classList.add('open');return;
   }
   const prevMonth=p.month;
+  if(_REPORT_WINDOW_GATE&&shop!==TEST_SHOP_ID&&(_reportMonthState(shop,curMonth)!=='loaded'||_reportMonthState(shop,prevMonth)!=='loaded')){
+    // 分清「載入中」「讀取失敗」和「真的缺」：還沒讀到的月份不能說缺報表
+    setTitle('測試標籤成效');
+    body.innerHTML='<div class="tagfx-empty">報表載入中…</div>';
+    ov.classList.add('open');
+    _reportEnsure(shop,[curMonth,prevMonth]).then(r=>{
+      if(!ov.classList.contains('open')||!state[shop]||state[shop].curMonth!==curMonth) return;
+      if(r.ok){ openTagFxModal(shop); return; }
+      body.innerHTML=`<div class="tagfx-empty">${r.failed.join('、')} 的報表讀取失敗，這不代表沒有資料。<br><button onclick="openTagFxModal('${shop}')" style="margin-top:8px;padding:4px 14px;cursor:pointer">重試</button></div>`;
+    });
+    return;
+  }
   const curRep=lsLoad(shop,curMonth,'full');
   const prevRep=lsLoad(shop,prevMonth,'full');
   // 缺哪一份就講哪一份，兩份都缺就並列。🔴 不要顯示 0：沒有存檔 ≠ 數字是 0。
@@ -7640,7 +8105,7 @@ function buildNoteCell(shopKey,code,noteId,noteData,xp){
   const _xN=isGrowth?histCount:((xp&&xp.otherPeriods)||0);
   const _xM=isGrowth?((xp&&xp.insight)||0):0;
   const _xParts=[];
-  if(_xN>0)_xParts.push(`其他期間 ${_xN}`);
+  if(_xN>0)_xParts.push(`其他期間 ${_xN}${(xp&&xp.partial)?'+':''}`);
   //   🔴 這裡【不要】把範圍寫進標籤。曾經試過「洞察表（全期） M」（2026-09-09 加、同日拿掉）。
   //     ⚠ 退回的理由【不是換行】—— 這一格所在的 <td> 吃 css/profit.css 的 `.tscroll td`
   //       與 `td` 兩條規則（都帶 white-space:nowrap），nowrap 會繼承給子孫，
@@ -8889,12 +9354,13 @@ function renderPnmHistory(){
   const curH=parts.length>=3?parts[2]:(state[shop]?state[shop].curHalf:'');
   let hist=[];
   try{ hist=_noteHistory(shop,code,curM,curH); }catch(e){ console.error('[pnm] 歷史查詢失敗',e); }
-  if(!hist.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+  const _legWait=_REPORT_WINDOW_GATE&&_reportLegacyStatus(shop,true)!=='ok';
+  if(!hist.length&&!_legWait){ wrap.style.display='none'; box.innerHTML=''; return; }
   wrap.style.display='';
   box.innerHTML=hist.map(h=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${h.month} ${_halfLabel(h.half)}</div>
     <div class="pnm-entry-text">${String(h.text).replace(/</g,'&lt;')}</div>
-  </div>`).join('');
+  </div>`).join('')+(_legWait?'<div class="pnm-entry"><div class="pnm-entry-text" style="color:#9ca3af">舊報表紀錄載入中，這裡可能還不完整</div></div>':'');
 }
 function renderPnmInsight(){
   // 洞察表紀錄（唯讀）：同商品在洞察表打過的調整，淨利表彈窗也看得到。
@@ -9132,6 +9598,7 @@ function _subAdsHtml(r){
 //     null / undefined →「—」 ：上期沒有這個商品（或整份上期報表還沒載到）。
 //     （`v?` 會把 0 也判成假 → 「上期沒投廣告」被錯誤顯示成「上期沒這商品」。）
 function _subDayBudgetHtml(v){
+  if(v===_REPORT_PREV_NA) return '';
   return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 $'+fmtN(v):'—'}</div>`;
 }
 // 上一期報表的「每列日預算」對照表，整包只讀一次的讀取器。回傳 (code)=>number|undefined。
@@ -9179,6 +9646,7 @@ function _prevDayBudgetReaderFor(shop){
     const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
     if(parts.length>=4){
       const rep=lsLoad(shop,parts[2],parts[3]);
+      if(_REPORT_WINDOW_GATE&&!rep&&_reportMonthOutMissing(shop,parts[2])) return { dayBudget:()=>_REPORT_PREV_NA, pureProfit:()=>_REPORT_PREV_NA };   // 上期還沒讀到／讀取失敗：不顯示，不是「上期沒這商品」
       if(rep&&Array.isArray(rep.built)){
         rep.built.forEach(r=>{ if(r.code){ budMap[r.code]=r.dayBudget; pureMap[r.code]=r.pureProfit; } });
       }
@@ -9190,6 +9658,7 @@ function _prevDayBudgetReaderFor(shop){
 //   🔴 金額一律走 _fSigned、不可用 fmtN（會吃掉負號）；但 null / undefined 要先擋成「—」，
 //     _fSigned 會把 undefined 變成 $0 ——「上期沒這商品」不能謊報成「上期淨利 $0」。
 function _subPureHtml(v){
+  if(v===_REPORT_PREV_NA) return '';
   return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 '+_fSigned(v):'—'}</div>`;
 }
 
@@ -9219,13 +9688,15 @@ function _crossPeriodIndexFor(shop){
   const s=state[shop];
   // Object.create(null)：商品編號是外部資料，理由同 _prevDayBudgetReaderFor 那段。
   const nMap=Object.create(null), mMap=Object.create(null);
+  if(_REPORT_WINDOW_GATE&&shop===curShop) _reportLegacyStatus(shop,true);   // 只讀正在看的通路（第一次要載 03～05 月）
   try{
     const skipM=s&&s.curMonth, skipH=s&&s.curHalf;
     _listPeriods(shop).forEach(p=>{
       if(p.month===skipM&&p.half===skipH) return;
       // ① 匯入的：報表 built[] 裡的 r.note（純字串，算 1 筆）
       let rep=null;
-      try{ rep=lsLoad(shop,p.month,p.half); }catch{}
+      if(_legacyIsMonth(p.month)) _legacyPairs(shop,p.month,p.half).forEach(x=>{ nMap[x[0]]=(nMap[x[0]]||0)+1; });
+      else try{ rep=lsLoad(shop,p.month,p.half); }catch{}
       const built=rep&&rep.built;
       if(Array.isArray(built)){
         built.forEach(r=>{
@@ -9258,7 +9729,8 @@ function _crossPeriodIndexFor(shop){
       if(m>0) mMap[c]=m;
     });
   }catch(e){ console.warn('[crossPeriodIndex] 洞察表計數失敗，該欄小字以 0 呈現',e); }
-  return { n(code){ return nMap[code]||0; }, m(code){ return mMap[code]||0; } };
+  // partial：舊紀錄或期別清單還沒到，計數可能偏少，格子上要顯示「N+」
+  return { n(code){ return nMap[code]||0; }, m(code){ return mMap[code]||0; }, partial:_REPORT_WINDOW_GATE&&_reportLegacyStatus(shop,false)!=='ok' };
 }
 function renderTable(shop,list,opts){
   // 🔴 淨利表 DOM 已被拆除就直接早退。這【不是預防性的防禦，是修一個正式站 v444 實測可重現的 bug】：
@@ -9421,7 +9893,7 @@ function renderTable(shop,list,opts){
     };
 
     const gnoteId=`gnote-${shop}-${r.code}`;
-    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})(),{otherPeriods:crossRead.n(r.code)});
+    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})(),{otherPeriods:crossRead.n(r.code),partial:crossRead.partial});
 
     if(!r.fromMobic){
       const adsId=`td-${shop}-${r.code}-adsFee`;
@@ -28602,6 +29074,11 @@ function testTryLoadSaved(shop){
   resetUploadCards(shop);
   const s=state[shop];
   if(!testHasPeriod(shop)){ _testEmpty(shop,'請先選擇起訖日'); return; }
+  if(_REPORT_WINDOW_GATE){
+    const st=_reportTestEnsure(shop);
+    if(st==='loading'){ _testEmpty(shop,'測試通路的報表載入中…'); return; }
+    if(st==='failed'){ _testEmpty(shop,`測試通路的報表讀取失敗，這不代表沒有資料。<br><button onclick="__reportTestRetry('${shop}')" style="margin-top:8px;padding:4px 14px;cursor:pointer">重試</button>`); return; }
+  }
   const rep=testLoad(shop,s.curStart,s.curEnd);
   if(rep){ loadIntoUI(shop,rep.built,rep.period,rep.days); return; }
   _testEmpty(shop,`${s.curStart} ～ ${s.curEnd} 尚無資料，請上傳報表產生`);
@@ -29412,6 +29889,17 @@ window.__healthLoadProducts=async function(platform,opts){
 const _healthAdjCache={};
 window.__healthProductSnapshot=function(platform,shop,month){
   const out={platform,shop,month,error:null};
+  // 🔴 窗口外還沒讀的月份：回 pending（呼叫端不能快取），並觸發讀取。算成「沒資料」會讓通路分數掉下去。讀取失敗回 error，一樣不是沒資料。
+  if(_REPORT_WINDOW_GATE&&platform==='shopee'&&/^\d{4}-\d{2}$/.test(month||'')){
+    const _ym=month.replace('-','/');
+    if(_reportMonthOutMissing(shop,_ym)){
+      const _st=_reportMonthState(shop,_ym);
+      if(_st==='failed'){ out.error='舊月份報表讀取失敗'; return out; }
+      if(_st==='idle') _reportEnsure(shop,[_ym]);
+      out.pending=true;
+      return out;
+    }
+  }
   const ck=platform+'|'+shop, hit=_healthAdjCache[ck];
   const cached=hit&&(Date.now()-hit.t<20000)?hit.map:null;
   const lastAdj=cached?Object.assign({},cached):{};
@@ -29525,7 +30013,7 @@ window.__profitOpenAt=function(o){
     return true;
   };
   try{ if(window.App&&typeof App.navigate==='function')App.navigate('office-d1-profit'); }catch(e){ console.error('[health] 跳淨利表失敗',e); }
-  const t0=Date.now();
+  let t0=Date.now();
   const tick=()=>{
     let done=false;
     try{ done=apply(); }catch(e){ console.warn('[health] 淨利表定位失敗',e); done=true; }
@@ -29533,6 +30021,12 @@ window.__profitOpenAt=function(o){
     if(Date.now()-t0>8000){ try{ if(typeof showToast==='function')showToast('已切到淨利表，請在表中搜尋 '+code,'info',6000); }catch{} return; }
     setTimeout(tick,250);
   };
+  if(_REPORT_WINDOW_GATE&&plat==='shopee'){
+    // 先讀到那個月，apply 才分得出有沒有整月報表、才不會顯示本機舊版。讀取失敗也照常切過去（畫面會顯示讀取失敗＋重試）。
+    const _ym=month.replace('-','/'), _p=_lmSamePeriodParts(_ym,'full');
+    _reportEnsure(shop,[_ym].concat(_p?[_p.month]:[])).then(()=>{ t0=Date.now(); setTimeout(tick,300); });
+    return true;
+  }
   setTimeout(tick,300);
   return true;
 };
@@ -32519,3 +33013,4 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }
+try{ if(_REPORT_WINDOW_GATE) _reportCloudIndex(); }catch(e){ console.error('[報表窗口] 讀取目錄失敗',e); }
