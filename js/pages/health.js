@@ -1263,7 +1263,7 @@ function _hlSortResults(results, rules) {
   const R = rules || HEALTH_RULES;
   const tier = r => (r.status === 'closed' ? 3 : r.score == null ? 2 : r.isReference ? 1 : 0);
   const typeOrd = r => (r.status === 'closed' ? 99 : (R.types[r.type] || {}).order || 50);
-  const last = r => (r.id === 'website' ? 1 : 0);   // 2026-11-05：官網不論有沒有關站都固定最後
+  const last = r => (r.id === 'website' ? 2 : r.id === 'other' ? 1 : 0);   // 2026-11-05：業外倒數第二、官網不論有沒有關站都固定最後
   return results.slice().sort((a, b) => (last(a) - last(b)) || (typeOrd(a) - typeOrd(b)) || (tier(a) - tier(b))
     || ((b.score || 0) - (a.score || 0)) || (a.id < b.id ? -1 : 1));
 }
