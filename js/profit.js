@@ -9933,8 +9933,9 @@ async function __kpiSmokeTest(){
 // 蝦皮「從對帳單帶入」各項費用的包裝費單價（含稅，每筆）。⚠ 必須宣告在 KPI_GROUPS 前面：蝦皮組的 desc 引用它（放後面會撞 TDZ）。
 const KPI_SHOPEE_PACK_PLAIN=2.5;   // 一般訂單。廠商調價時改這裡
 const KPI_SHOPEE_PACK_NOPACK=2;    // 無包裝訂單。廠商調價時改這裡
-// 耗材自動計算單價（每筆訂單）：FriDay $3、博客來 $2.5、酷澎 $2.5（照 MOMO 甲配耗材 autoFill 的寫法）。改這裡、不要散寫在公式裡。
-const KPI_MATERIAL_PER_ORDER={friday:3,books:2.5,coupang:2.5};
+// 耗材自動計算單價（每筆訂單）：FriDay $3、博客來 $2.5、酷澎 $3（2026-11-05 由 $2.5 改 $3；只影響沒存值、走 autoFill 的月份，01～06 存的手動值不變）。
+//   照 MOMO 甲配耗材 autoFill 的寫法。改這裡、不要散寫在公式裡。
+const KPI_MATERIAL_PER_ORDER={friday:3,books:2.5,coupang:3};
 const KPI_GROUPS=[
   {key:'shopee',title:'蝦皮',color:'#ee4d2d',shops:['好麻吉','玩樂','維克','森之旅'],
     // manual 的 desc＝填寫模式表頭 ⓘ：來源、算法、是否除 1.05（「從對帳單帶入」見 _kpiShopeeCalc；改算法要同步改這裡）。
@@ -9990,14 +9991,6 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>{const rev=Number(d.rev)||0;return rev>0?(rev-(Number(d.cost)||0)-(Number(d.fee)||0)-(Number(d.ret)||0)-(Number(d.tax)||0)-(Number(d.material)||0))/rev:0;},desc:'純利率 = 純利 ÷ 營收'},
     ]},
   {key:'other',title:'業外',color:'#d63bb0',shops:['業外'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
-    formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
-    ]},
-  // closedFrom（2026-10-15）：官網 2026-05 起關站。這個月（含）以後：計算一律當 0（不讀存的值）、填寫進度算已完成、
-  //   填寫模式顯示「已關站」、總覽列顯示「已關站」。之前的月份完全不變。見 _kpiGroupClosed。
-  {key:'website',title:'官網',color:'#2f9e5c',shops:['官網'],closedFrom:'2026-05',
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
@@ -10124,6 +10117,16 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.ship-(Number(d.freight)||0)-(Number(d.material)||0))/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ],
     fillFormula:['tax']},
+  // 2026-11-05：官網固定排在所有通路最後（不論營收、有沒有關站；所有月份）→ 整段放在 KPI_GROUPS 最後。
+  //   填寫模式左側清單、年度總表（各通路全年、每月明細、堆疊長條、Excel）都照這個順序；月結表各通路表另在 _ord 排序時強制最後。
+  // closedFrom（2026-10-15）：官網 2026-05 起關站。這個月（含）以後：計算一律當 0（不讀存的值）、填寫進度算已完成、
+  //   填寫模式顯示「已關站」、總覽列顯示「已關站」。之前的月份完全不變。見 _kpiGroupClosed。
+  {key:'website',title:'官網',color:'#2f9e5c',shops:['官網'],closedFrom:'2026-05',
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
+    formula:[
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+    ]},
 ];
 function _kpiFmt(v,fmt){
   if(fmt==='pct')return v?(v*100).toFixed(2)+'%':'—';
@@ -10673,7 +10676,7 @@ function _kpiChannelTableHtml(row,prevRow){
   // 2026-10-29：通路列照本月營收由高到低（sort 是穩定排序 → 營收相同維持 KPI_GROUPS 順序）；已關站的通路固定排最後。
   //   只影響這張表的顯示順序；填寫模式、年度總表、Excel 都還是 KPI_GROUPS 順序。
   const _ord=KPI_GROUPS.map(g=>({g,closed:_kpiGroupClosed(g,month),rev:(_kpiGroupT(row,g)||{}).rev||0}))
-    .sort((a,b)=>(a.closed-b.closed)||(b.rev-a.rev));
+    .sort((a,b)=>((a.g.key==='website')-(b.g.key==='website'))||(a.closed-b.closed)||(b.rev-a.rev));   // 官網固定最後（2026-11-05）
   const body=_ord.map(({g})=>{
     const closed=_kpiGroupClosed(g,month);
     const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=closed?{rev:'',pure:'',pp:''}:cmpCells(cur,prev);

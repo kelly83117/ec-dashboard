@@ -1258,12 +1258,13 @@ function healthDefaultMonth(snap, todayYm, channels, rules) {
   return m < R.firstMonth ? R.firstMonth : m;
 }
 
-// 總覽排序：類型 order → 類型內 正式分高→低 → 參考分 → 沒分數；業外、官網（關站）固定在最後。
+// 總覽排序：類型 order → 類型內 正式分高→低 → 參考分 → 沒分數；業外、官網固定在最後（官網不論有沒有關站都是最後一個）。
 function _hlSortResults(results, rules) {
   const R = rules || HEALTH_RULES;
   const tier = r => (r.status === 'closed' ? 3 : r.score == null ? 2 : r.isReference ? 1 : 0);
   const typeOrd = r => (r.status === 'closed' ? 99 : (R.types[r.type] || {}).order || 50);
-  return results.slice().sort((a, b) => (typeOrd(a) - typeOrd(b)) || (tier(a) - tier(b))
+  const last = r => (r.id === 'website' ? 1 : 0);   // 2026-11-05：官網不論有沒有關站都固定最後
+  return results.slice().sort((a, b) => (last(a) - last(b)) || (typeOrd(a) - typeOrd(b)) || (tier(a) - tier(b))
     || ((b.score || 0) - (a.score || 0)) || (a.id < b.id ? -1 : 1));
 }
 
