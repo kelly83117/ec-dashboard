@@ -11287,7 +11287,7 @@ function _kpiFillHtml(row){
     const h=anyReady?_kpiCoupangAutoHint(month,row):null;
     const offShort=!canBtn?'2026-06 以前':(anyOld?'報表舊格式':'淨利表尚未產表');
     const offHint=!canBtn?'2026-06 以前維持手填':(anyOld?'此月報表為舊格式（營收沒扣賣家優惠券），請重新上傳 DeliveryList 後產表':'淨利表尚未產表');
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${(canBtn&&anyReady)?'':`<span class="km-au-hint" title="${_kpiEscAttr(offHint)}">${_kpiEscAttr(offShort)}</span>`}<span class="km-howto">怎麼傳？${_kpiInfoHtml('酷澎（資料在淨利表上傳）：',COUPANG_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${(canBtn&&anyReady)?'':' km-au-off'}"${(canBtn&&anyReady)?'':' disabled'} onclick="kpiCoupangAutoFill()" title="${_kpiEscAttr(canBtn?'商城兩店的訂單數、營收（淨額＝扣賣家券、再扣掛回本月的 MSF 退貨）、商品成本、平台費，從淨利表酷澎同店同月合計帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；耗材自動（訂單數×2.5）；退貨運費、酷澎買斷手填。':'2026-06 以前維持手填，不帶入')}">從淨利表帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${(canBtn&&anyReady)?'':`<span class="km-au-hint" title="${_kpiEscAttr(offHint)}">${_kpiEscAttr(offShort)}</span>`}<span class="km-howto">怎麼傳？${_kpiInfoHtml('酷澎在淨利表上傳（淨利表 → 酷澎 → 訂單明細，先選好賣場）：',COUPANG_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${(canBtn&&anyReady)?'':' km-au-off'}"${(canBtn&&anyReady)?'':' disabled'} onclick="kpiCoupangAutoFill()" title="${_kpiEscAttr(canBtn?'商城兩店的訂單數、營收（淨額＝扣賣家券；DeliveryList 匯出時已移除退貨訂單，營收已是退貨後淨額，不再扣 MSF 退貨）、商品成本、平台費，從淨利表酷澎同店同月合計帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；耗材自動（訂單數×3）；退貨運費、酷澎買斷手填。':'2026-06 以前維持手填，不帶入')}">從淨利表帶入 ${month.replace('-','/')}</button></span>`;
   }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
@@ -13229,14 +13229,14 @@ function kpiFridayMissCostSave(month, code, site){
 }
 // ══ 酷澎 KPI「從淨利表帶入」（2026-11-05；資料在淨利表 → 酷澎 → 訂單明細上傳，KPI 只讀同店同月合計，單向）══
 //   店對應：KPI 商城-好麻吉 ↔ 淨利表 麻吉；KPI 商城-露營館 ↔ 淨利表 露營館。酷澎買斷淨利表無資料源、全手填、不帶入。
-//   歸月口徑同淨利表（訂購日；退貨依 MSF 掛回原下單月）。只帶 2026-07 以後（2026-06 以前維持手填）。
-//   讀的是淨利表報表 doc（cupLoadReport）的 rows：rev＝選項價格×量（退貨前）、fee＝平台費（成交+金流+免運+發票）；
-//   商品成本 live 查莫筆克（momoLoadCostByOrigin，同淨利表 cupEnrichRows 逐列 round 再加）；退貨金額經 coupangResolveReturns 掛回該月。
+//   歸月口徑同淨利表（訂購日）。只帶 2026-07 以後（2026-06 以前維持手填）。不扣 MSF 退貨（DeliveryList 已是退貨後淨額，見下）。
+//   讀的是淨利表報表 doc（cupLoadReport）的 rows：rev＝淨額(扣賣家券)、fee＝平台費（成交+金流+免運+發票）；
+//   商品成本 live 查莫筆克（momoLoadCostByOrigin，同淨利表 cupEnrichRows 逐列 round 再加）。
 const KPI_COUPANG_SHOPS=['商城-好麻吉','商城-露營館'];                              // 帶入只寫這兩家（酷澎買斷手填）
 const KPI_COUPANG_PROFIT_SHOP={'商城-好麻吉':'麻吉','商城-露營館':'露營館'};       // KPI 店名 → 淨利表賣場
 const KPI_COUPANG_AUTO_FIELDS=['qty','rev','cost','fee'];                            // 退貨運費手填、稅金公式、耗材 autoFill：都不帶入
 const KPI_COUPANG_SINCE='2026-07';                                                  // 帶入只用於 2026-07 以後
-const COUPANG_HOWTO_LINES=['① 我的訂單（DeliveryList）｜每月 1 次','② MSF 付款明細｜每月 1 次，月底後重新匯出更新退貨','上傳後在淨利表產表，再回來按「從淨利表帶入」。','退貨運費、酷澎買斷請手填。'];
+const COUPANG_HOWTO_LINES=['① 我的訂單（DeliveryList）｜每月 25 日，匯出上個月整月','② MSF 付款明細｜選填，只用來看退貨率','上傳後在淨利表產表，再回來按「從淨利表帶入」。','退貨運費、酷澎買斷請手填。'];
 // 純函式：某淨利表賣場、某月的 KPI 帶入值。回 {ok, month, profitShop, qty, grossRev, ret, rev(淨額), fee, cost, missing[], msfTs, why}
 //   🔴 禁讀 KPI 任何格子（維持單向）。成本缺（cm 未載入）→ cost:null、why.cost；缺成本品號進 missing（純數字條碼不算，同淨利表）。
 function coupangKpiFromProfit(profitShop,month,costMap){
@@ -13260,19 +13260,30 @@ function coupangKpiFromProfit(profitShop,month,costMap){
   out.grossFee=Math.round(fee); out.grossCost=costReady?cost:null;
   if(!costReady)out.why.cost='成本表還沒載入';
   out.missing=Object.values(missMap).sort((a,b)=>b.amt-a.amt);
-  // 退貨（金額制）掛回該下單月：全部已存報表 orderNos 建索引 + 全部 MSF docs
-  const res=coupangResolveReturns(cupListMsfDocs(profitShop), coupangBuildOrderIndex(cupListReportRefs(profitShop)));
-  const ret=Math.round((res.byMonth||{})[month]||0);
-  out.ret=ret;
-  // 退貨同時調整營收／成本／平台費（2026-11-05；月比例，逐筆留到「酷澎淨利表對齊 MO+」）。基準營收＝淨額(扣賣家券)。
-  //   營收＝淨額 − 退貨金額；成本沖回＝退貨金額 ×（成本 ÷ 淨額營收）（退貨商品可再販售）；平台費退還＝退貨金額 ×（5.5%＋2%）（免運7%、發票$2 不退）。
-  out.feeRefund=Math.round(ret*(COUPANG_FEE_RATES.deal+COUPANG_FEE_RATES.flow));     // Z：退還手續費
-  out.costReversal=(costReady&&out.revBeforeRet>0&&ret>0)?Math.round(ret*(out.grossCost/out.revBeforeRet)):0;   // Y：退貨成本沖回（月比例，分母＝淨額營收）
-  out.rev=out.revBeforeRet-ret;                                                      // 營收（扣券後再扣退貨）
-  out.fee=out.grossFee-out.feeRefund;                                                // 平台費（退還後）
-  out.cost=costReady?(out.grossCost-out.costReversal):null;                          // 商品成本（沖回後）；成本表沒載入 → null
-  let msfTs=0; if(ret>0)cupListMsfDocs(profitShop).forEach(md=>{ const m=cupLoadReturns(profitShop,md.src); if(m&&m.ts)msfTs=Math.max(msfTs,m.ts); });
-  out.msfTs=msfTs;
+  // 🔴 不扣 MSF 退貨（2026-11-05 查證：DeliveryList 匯出時已移除退貨訂單——銷售不在 DeliveryList 的 706/709 都是被退貨的，
+  //   逐月 DeliveryList 淨額 ≈ MSF 銷售淨額 − MSF 退貨淨額）。營收/成本/費用都已是退貨後淨額，再扣就是重複扣。
+  //   MSF 退貨改只用在淨利表的「退貨率」顯示（銷售確認月），不調整任何金額。舊的月比例退貨（coupangResolveReturns）已退役。
+  out.rev=out.revBeforeRet;                        // 營收＝淨額(扣賣家券)，不扣退貨
+  out.fee=out.grossFee;                            // 平台費不退還
+  out.cost=costReady?out.grossCost:null;           // 商品成本不沖回（成本表沒載入 → null）
+  return out;
+}
+// 唯讀驗收工具（不寫入、不以 __cloud 開頭、不影響防寫物件數）：列出各月酷澎 KPI「改前（舊月比例退貨）vs 改後（不扣退貨）」
+//   的營收/成本/平台費/純利 ＋ 退貨率（銷售確認月）。純利＝營收−成本−平台費−稅金(營收×5/105)−耗材(訂單數×KPI_MATERIAL_PER_ORDER.coupang)；
+//   退貨運費手填此處當 0（兩邊相同）。改前的月比例退貨沿用已退役的 coupangResolveReturns 重算，僅供對照。
+function __cupKpiReturnsDiff(month){
+  month=month||_kpiYM(); const cm=momoLoadCostByOrigin()||{}; const mat=KPI_MATERIAL_PER_ORDER.coupang; const out={};
+  const mk=(rev,cost,fee,qty)=>{ const tax=Math.round(rev*5/105), material=Math.round((qty||0)*mat); return {營收:rev, 成本:cost, 平台費:fee, 稅金:tax, 耗材:material, 純利:rev-(cost||0)-fee-tax-material}; };
+  KPI_COUPANG_SHOPS.forEach(shop=>{
+    const ps=KPI_COUPANG_PROFIT_SHOP[shop]; const cp=coupangKpiFromProfit(ps,month,cm);
+    if(!cp.ok){ out[shop]={錯誤:cp.why}; return; }
+    const ret=Math.round((coupangResolveReturns(cupListMsfDocs(ps), coupangBuildOrderIndex(cupListReportRefs(ps))).byMonth||{})[month]||0);
+    const feeRefund=Math.round(ret*(COUPANG_FEE_RATES.deal+COUPANG_FEE_RATES.flow));
+    const costRev=(cp.grossCost!=null&&cp.revBeforeRet>0&&ret>0)?Math.round(ret*(cp.grossCost/cp.revBeforeRet)):0;
+    const rr=cupReturnRate(ps,month);
+    out[shop]={ 改前:mk(cp.revBeforeRet-ret, cp.grossCost!=null?cp.grossCost-costRev:null, cp.grossFee-feeRefund, cp.qty),
+                改後:mk(cp.rev, cp.cost, cp.fee, cp.qty), 退貨率_銷售確認月:(rr?rr.rate.toFixed(2)+'%':'—'), 舊月比例退貨:ret };
+  });
   return out;
 }
 function _kpiCoupangAutoPlan(month,row,costMap){
@@ -13295,9 +13306,9 @@ function _kpiCoupangAutoPlan(month,row,costMap){
     const sd=((row.coupang||{})[shop])||{};
     const comp={
       qty:cp.ok?'該月訂單編號數 '+fmtN(cp.qty)+'（非件數）':'',
-      rev:cp.ok?('定價(選項價格×量) '+m0(cp.listRev)+'　− 賣家券 '+m0(cp.sellerCoupon)+' ＝ 淨額 '+m0(cp.revBeforeRet)+(cp.ret?'　− MSF 退貨 '+m0(cp.ret)+(cp.msfTs?'（MSF 上傳 '+_kpiFmtTime(cp.msfTs)+'）':''):'　本月無退貨掛回')):'',
-      cost:cp.ok?('Σ 莫筆克成本×量 '+(cp.grossCost!=null?m0(cp.grossCost):'（成本表未載入）')+(cp.costReversal?'　− 退貨成本 '+m0(cp.costReversal)+'（以當月成本÷淨額營收比例估算）':(cp.ret?'　退貨成本沖回 0':''))):'',
-      fee:cp.ok?('平台費 '+m0(cp.grossFee)+(cp.feeRefund?'　− 退還手續費 '+m0(cp.feeRefund)+'（退貨金額 × 7.5%＝成交5.5%＋金流2%；免運7%、發票$2 不退）':'')+'　｜費率(基數＝淨額)：成交5.5%＋金流2%＋免運7%(所有訂單)＋發票$2/訂單'):'',
+      rev:cp.ok?('定價(選項價格×量) '+m0(cp.listRev)+'　− 賣家券 '+m0(cp.sellerCoupon)+' ＝ 淨額 '+m0(cp.revBeforeRet)+'（營收已是退貨後；DeliveryList 匯出時移除退貨訂單，不再扣 MSF 退貨）'):'',
+      cost:cp.ok?('Σ 莫筆克成本×量 '+(cp.grossCost!=null?m0(cp.grossCost):'（成本表未載入）')):'',
+      fee:cp.ok?('平台費 '+m0(cp.grossFee)+'　｜費率(基數＝淨額)：成交5.5%＋金流2%＋免運7%(所有訂單)＋發票$2/訂單'):'',
     };
     KPI_COUPANG_AUTO_FIELDS.forEach(f=>{
       const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['coupang',shop,f],cur:sd[f]};
@@ -25541,7 +25552,7 @@ function cupSyncToCloud(shop){
 // MSF doc 存【原始 byOrder】非解析結果（PR-2 設計：coupangResolveReturns 是讀取端）。
 //   src＝MSF 自身月份（銷售確認日期的眾數月）→ 同一份 MSF 不論配哪個訂單檔上傳，都寫同一 doc（覆蓋、不累加、不雙重計算）。
 function cupSaveReturns(shop, src, msfRaw){ const k=cupMsfKey(shop,src);
-  const payload={byOrder:(msfRaw&&msfRaw.byOrder)||{}, returnTotal:(msfRaw&&msfRaw.returnTotal)||0, ts:Date.now()};
+  const payload={byOrder:(msfRaw&&msfRaw.byOrder)||{}, returnTotal:(msfRaw&&msfRaw.returnTotal)||0, byConfirmMonth:(msfRaw&&msfRaw.byConfirmMonth)||{}, ts:Date.now()};
   try{ localStorage.setItem(k, JSON.stringify(payload)); }catch(e){} try{ Store._mem=Store._mem||{}; Store._mem[k]=payload; }catch(e){} _markPending(k); }
 // MSF 自身月份＝byOrder 各單「銷售確認日期」的眾數月（平手取較晚；解析不到→fallback 傳入的訂單月）。同檔案→同結果＝冪等鍵。
 function _cupMsfMonth(parsedMsf, fallback){
@@ -25572,7 +25583,7 @@ function cupListMsfDocs(shop){ const pre='ec_coupang_msf|'+shop+'|'; const out=[
   _cupScanKeys(pre, cupIsMsfKey).forEach(k=>{ const src=k.slice(pre.length); const d=cupLoadReturns(shop,src);
     const badTotal = d && d.byOrder && (!isFinite(d.returnTotal) || Math.abs(d.returnTotal||0)>=DOC_TOTAL_MAX
       || Object.values(d.byOrder).some(o=>Math.abs((o&&o.returnAmt)||0)>=DOC_TOTAL_MAX));   // doc 總額或任一單退貨額異常大
-    if(d && d.byOrder && !badTotal){ out.push({src, byOrder:d.byOrder, returnTotal:d.returnTotal||0}); }
+    if(d && d.byOrder && !badTotal){ out.push({src, byOrder:d.byOrder, returnTotal:d.returnTotal||0, byConfirmMonth:d.byConfirmMonth||null, ts:d.ts||0}); }
     else if(d){ try{ localStorage.removeItem(k); }catch(e){} try{ delete Store._mem[k]; }catch(e){} try{ delete Store._profitMem[k]; }catch(e){} }   // stale res 格式 或 Bug A 壞 doc → 清（不計 hasMsf、不進解析）
   });
   return out; }
@@ -27230,7 +27241,6 @@ function setReconTab(id,btn){
 let _cupShop='';
 const _cupFiles={order:null, pi:null, msf:null};   // PR-3：訂單(必要)/price_inventory(先收檔不解析)/MSF(退貨·選填)
 const _cupReportDoc={};   // shop → 最近一次產出的報表 doc（coupangBuildReportDoc）
-const _cupReturns={};     // shop → 退貨歸期解析結果（coupangResolveReturns）
 // 顯示名（沿用 MOMO_SHOP_DISPLAY 那一套：內部 key 不變、顯示層單一對照）。麻吉→好麻吉；露營館/總表不變。
 const CUP_SHOP_DISPLAY={ '麻吉':'好麻吉' };
 function cupShopDisplay(shop){ return CUP_SHOP_DISPLAY[shop] || shop; }
@@ -27277,18 +27287,15 @@ function cupGeneratePreview(){
     const nameByCode={}; ordRows.slice(1).forEach(r=>{ if(!r||!r[2])return; const code=String(r[17]||'').replace(/\s+$/,'').replace(/^\s+/,''); const nm=String(r[13]||r[11]||'').trim(); if(code&&!nameByCode[code]) nameByCode[code]=nm; });
     const costMap=momoLoadCostByOrigin();   // 莫筆克成本表（原廠編號→成本數字）；走 MOMO 官方 loader（讀 _profitMem，Store.get 讀不到此命名空間）
     const rd=coupangBuildReportDoc(shop, month, parsed, costMap, piMaps||null);   // PR-3b：傳 price_inventory join maps（未傳／失敗→null→stock 全 null→庫存欄「—」）
-    // 退貨（讀取端解析，僅供預覽顯示）：index＝【全部已存報表 + 本檔】的 orderNos → 同一份 MSF 的歸期結果與總表一致
-    let msfRaw=null, msfMonth=null, res=null, msfReject='';
+    // MSF（選填）：只用來算退貨率（銷售確認月）。壞格式→拒收不落地。不再做訂單編號歸期（營收已是退貨後淨額，不扣退貨）。
+    let msfRaw=null, msfMonth=null, msfReject='';
     if(msfRows){
       const parsedMsf=coupangParseMSF(msfRows);
       if(!parsedMsf.ok){
-        msfReject=parsedMsf.reason||'MSF 格式不符';   // Bug A：壞 MSF 拒收——不設 msfRaw→不解析退貨、不寫入；預覽紅字說明
+        msfReject=parsedMsf.reason||'MSF 格式不符';   // Bug A：壞 MSF 拒收——不設 msfRaw→不寫入；預覽紅字說明
       }else{
         msfRaw=parsedMsf;
         msfMonth=_cupMsfMonth(msfRaw, month);
-        const refs=cupListReportRefs(shop).filter(x=>x.month!==cupNormMonth(month));   // 本月改用本檔最新 orderNos
-        refs.push({month:cupNormMonth(month), orderNos:rd.orderNos||[]});
-        res=coupangResolveReturns([{byOrder:msfRaw.byOrder}], coupangBuildOrderIndex(refs));
       }
     }
     _cupReportDoc[shop]=rd;
@@ -27301,7 +27308,7 @@ function cupGeneratePreview(){
     rows.forEach(r=>{ const has=(costMap[r.code]!=null&&!isNaN(+costMap[r.code])); if(has)st.costOk++; else if(/^\d+$/.test(r.code))st.costBar++; else st.costMiss++; });
     const sysHasMsf=cupListMsfDocs(shop).length>0;   // 系統既有 MSF doc（本次未帶時，總表仍會用既有 MSF 計退貨）→ 文案要區分
     const piStat = piMaps ? { rowN:piMaps.rowN, codeN:piMaps.codeN, covered:rows.filter(r=>r.stock!=null).length, total:rows.length } : null;   // PR-3b：庫存涵蓋率（本月幾個商品對到庫存）
-    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, res, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st};   // hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 第 17117 行以 hasMsf&&msfRaw 為守衛）
+    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st};   // hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 以 hasMsf&&msfRaw 為守衛）
     cupRenderUploadPreview(shop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生預覽';}
   }).catch(err=>{ console.error(err); fail((err&&err.message)||err); });
@@ -27312,26 +27319,17 @@ function cupRenderUploadPreview(shop){
   const S=_cupUpStage[shop]; if(!S){ box.innerHTML=''; return; }
   const st=S.stats, esc=_momoEsc, money=n=>'$'+Math.round(n).toLocaleString();
   // 顏色照 MO+ 預覽框：數字一律 <b> 不上色；橘 #d97706＝需注意（>0 才上）；紅 #dc2626＝真缺；灰 #9ca3af/#6b7280＝輔助說明。無 emoji。
-  const resolved=S.res?Object.entries(S.res.byMonth||{}):[];
+  // MSF 只用來算退貨率（銷售確認月），不調整營收/成本/費用（營收已是退貨後淨額）。
+  const tipRet='MSF 付款明細（選填）只用來看退貨率（銷售確認月＝退貨淨額÷銷售淨額，排除賣家券）。營收已是退貨後淨額，不扣退貨。同一份 MSF 以自身月份（'+(S.msfMonth||'?')+'）為鍵，重傳覆蓋、不累加。';
   let retHtml;
   if(S.msfReject){
-    // 本次有帶 MSF 但格式不符→拒收（不寫入）。fail-loud：紅字說明原因，退貨沿用系統既有 MSF（若有）。
-    retHtml=`<div style="color:#dc2626">退貨歸期：<b>MSF 付款明細已擋下（未寫入）</b>——${esc(S.msfReject)}</div>`
-      +(S.sysHasMsf?`<div style="color:#6b7280;margin-top:2px">系統既有 MSF 資料仍會在總表計入退貨（本次不影響）。</div>`:'');
+    retHtml=`<div style="color:#dc2626">MSF 付款明細：<b>已擋下（未寫入）</b>——${esc(S.msfReject)}</div>`;
   }else if(!S.hasMsf){
-    // 本次沒帶 MSF：區分「系統已有 MSF」（總表仍計退貨、不矛盾）vs「系統完全沒有」（真的尚無退貨）。
-    retHtml=S.sysHasMsf
-      ? `<div style="color:#6b7280">退貨歸期：<span>本次未附 MSF；<b>系統既有 MSF 資料仍會在總表計入退貨</b></span> <span class="mm-info" title="退貨歸期為帳號級：MSF 存一份（以其自身月份為鍵），總表用全部既有 MSF × 全部報表訂單編號現場解析。本次只更新營收/費用，不影響既有退貨計算。要換一份 MSF 才附檔重傳。">?</span></div>`
-      : `<div style="color:#6b7280">退貨歸期：<span style="color:#d97706">未上傳 MSF 付款明細，尚無退貨資料</span> <span class="mm-info" title="退貨率／已歸期／擱置以 MSF 付款明細（VAT History Report）為準，補傳即補算。">?</span></div>`;
+    retHtml=`<div style="color:#6b7280">MSF 付款明細（選填）：<span style="color:#d97706">本次未附</span>${S.sysHasMsf?'；系統既有 MSF 仍供退貨率顯示':'，退貨率將顯示「—」'} <span class="mm-info" title="${esc(tipRet)}">?</span></div>`;
   }else{
-    const tip='已歸期：'+(resolved.length?resolved.map(([m,v])=>m+' '+money(v)).join('、'):'（無）')+'。'
-      +'待歸期＝MSF 退貨查無對應訂單檔（近似判斷·非確定月份），補傳對應月訂單檔即可歸期'
-      +((S.res.missingOrderFiles||[]).length?('，可能屬於 '+S.res.missingOrderFiles.join('–')):'')+'。'
-      +'同一份 MSF 以自身月份（'+(S.msfMonth||'?')+'）為鍵，重傳覆蓋、不累加。';
-    const segs=[];
-    if(resolved.length) segs.push('已歸期 <b>'+money(resolved.reduce((s,[,v])=>s+v,0))+'</b>');
-    if(S.res.pendingN>0) segs.push('待歸期 <b style="color:#d97706">'+S.res.pendingN+' 筆（'+money(S.res.pendingTotal)+'）</b>');
-    retHtml=`<div>退貨歸期：${segs.length?segs.join(' · '):'本期 MSF 無退貨'} <span class="mm-info" title="${esc(tip)}">?</span></div>`;
+    const bc=(S.msfRaw&&S.msfRaw.byConfirmMonth)||{}; const e=bc[cupNormMonth(S.month)];
+    const rr=(e&&e.saleNet>0)?(' · 本月退貨率 <b>'+(e.retNet/e.saleNet*100).toFixed(2)+'%</b>'):'';
+    retHtml=`<div style="color:#6b7280">MSF 付款明細：<b>已解析（供退貨率）</b>${rr} <span class="mm-info" title="${esc(tipRet)}">?</span></div>`;
   }
   let piHtml;
   if(S.piErr){ piHtml=`<div style="color:#dc2626">庫存：<b>${esc(S.piErr)}</b>（庫存欄維持「—」）</div>`; }
@@ -27365,8 +27363,7 @@ function generateCoupang(shop){
   const S=_cupUpStage[shop];
   if(!S){ alert('請先按「▶ 產生預覽」'); return; }
   cupSaveReport(shop, S.month, S.rows, S.orderNos);                 // 報表 rows+orderNos → ec_coupang|<shop>|<month>（+ _markPending）
-  if(S.hasMsf && S.msfRaw) cupSaveReturns(shop, S.msfMonth, S.msfRaw);   // MSF 原始 byOrder → ec_coupang_msf|<shop>|<MSF自身月>（同檔重傳＝覆蓋同 doc、不累加）
-  _cupReturns[shop]=S.res||{byMonth:{},pending:[],pendingTotal:0,pendingN:0,missingOrderFiles:[]};
+  if(S.hasMsf && S.msfRaw) cupSaveReturns(shop, S.msfMonth, S.msfRaw);   // MSF（byOrder + byConfirmMonth）→ ec_coupang_msf|<shop>|<MSF自身月>（同檔重傳＝覆蓋同 doc、不累加）；只供退貨率
   _cupSelMonth[shop]=cupNormMonth(S.month);
   _cupUpStage[shop]=null;
   _cupFiles.order=_cupFiles.msf=_cupFiles.pi=null;
@@ -27415,39 +27412,33 @@ function cupKpi(rows){
   const cRev=cov.reduce((s,r)=>s+(r.rev||0),0);
   return { rev, net, rate:(cRev>0?net/cRev*100:null) };
 }
-// 退貨歸期橫幅：已歸期 / 擱置（近似缺檔提示·標明非確定月份）+ 缺成本 vs 純數字條碼統計
-function renderCoupangReturnsBanner(shop, res, rows, hasMsf){
+// 退貨率（銷售確認月）：Σ 各 MSF doc 的 byConfirmMonth[month]。MSF 檔是每月一份（非累積），跨 docs 加總不重複計。
+//   回 { rate, saleNet, retNet } 或 null（沒上傳該月 MSF、或舊格式 MSF doc 無 byConfirmMonth、或 saleNet≤0）。
+function cupReturnRate(shop, month){
+  if(!month) return null;
+  let saleNet=0, retNet=0, have=false;
+  cupListMsfDocs(shop).forEach(d=>{ const bc=d.byConfirmMonth; if(!bc) return; const e=bc[month];
+    if(e){ saleNet+=Number(e.saleNet)||0; retNet+=Number(e.retNet)||0; have=true; } });
+  if(!have || saleNet<=0) return null;
+  return { rate:retNet/saleNet*100, saleNet:Math.round(saleNet), retNet:Math.round(retNet) };
+}
+// 退貨率橫幅（僅供參考，不調整任何金額）。營收已是退貨後淨額（DeliveryList 匯出時移除退貨訂單），退貨率只拿 MSF 自己的銷售/退貨比。
+function renderCoupangReturnsBanner(shop, hasMsf){
   const tbl=document.getElementById('cup-tbl-'+shop); if(!tbl) return;
   let box=document.getElementById('cup-returns-'+shop);
   if(!box){ box=document.createElement('div'); box.id='cup-returns-'+shop; tbl.parentNode.insertBefore(box, tbl); }
-  // 缺資料要顯示成「缺資料」、不靜默消失（同缺成本不用 0 頂替原則）：未傳 MSF → 明確狀態列，而非整片不見。
+  const month=_cupSelMonth[shop]||'';
+  const tip='營收已是退貨後淨額（DeliveryList 匯出時會移除退貨訂單），退貨率僅供參考。退貨率（銷售確認月）＝該月 MSF 退貨淨額 ÷ MSF 銷售淨額（皆排除賣家折價券）。';
   if(!hasMsf){
-    box.innerHTML=`<div class="mm-banner" style="background:#f8fafc;border:1px solid #e2e8f0;color:#64748b">退貨：<b style="color:#d97706">未上傳 MSF 付款明細，本期無退貨資料</b> <span class="mm-info" title="退貨率／已歸期／擱置以 MSF 付款明細（VAT History Report）為準。到「訂單明細」分頁補傳該月 MSF 即補算，不影響已存的營收/費用。">?</span></div>`;
+    box.innerHTML=`<div class="mm-banner" style="background:#f8fafc;border:1px solid #e2e8f0;color:#64748b">退貨率 <b>—</b>（未上傳 MSF 付款明細，選填） <span class="mm-info" title="${_momoEsc(tip)}">?</span></div>`;
     return;
   }
-  // 文案精簡（照 MO+ 橫幅範式）：主數字露出成一行，冗長明細一律收 tooltip（mm-info「?」）。
-  //   原本四行（退貨率全式／已歸期逐月／待歸期長句／成本對應）→ 退貨率＋待歸期兩個 metric，其餘進 tooltip。
-  const segs=[];
-  const curMonth=_cupSelMonth[shop]||'';
-  const revThis=(rows||[]).reduce((s,r)=>s+(r.rev||0),0);
-  const retThis=((res&&res.byMonth)||{})[curMonth]||0;
-  const resolved=Object.entries((res&&res.byMonth)||{});
-  // 退貨率（金額制）：主數字露出，退貨額÷營收、MSF口徑、已歸期逐月、低估提醒 → tooltip
-  if(revThis>0){
-    const rr=(retThis/revThis*100);
-    const tip='金額制＝已歸到本月的退貨額 ÷ 本月營收。退貨額 NT$'+Math.round(retThis).toLocaleString()+' ÷ 營收 NT$'+Math.round(revThis).toLocaleString()+'（MSF 僅金額、無件數）。'
-      + (resolved.length?' 已歸期：'+resolved.map(([m,v])=>_momoEsc(m)+' NT$'+Math.round(v).toLocaleString()).join('、')+'。':'')
-      + ((res&&res.pendingN>0)?' ⚠ 擱置未歸期的退貨未計入、此數字可能低估。':'');
-    segs.push('退貨率（金額制）<b>'+rr.toFixed(2)+'%</b> <span class="mm-info" title="'+_momoEsc(tip)+'">?</span>');
+  const rr=cupReturnRate(shop, month);
+  if(!rr){
+    box.innerHTML=`<div class="mm-banner" style="background:#f8fafc;border:1px solid #e2e8f0;color:#64748b">退貨率 <b>—</b>（本月尚無 MSF 銷售資料，補傳該月 MSF 即顯示） <span class="mm-info" title="${_momoEsc(tip)}">?</span></div>`;
+    return;
   }
-  // 待歸期：主筆數露出，金額/近似判斷/補傳訂單檔 → tooltip
-  if(res&&res.pendingN>0){
-    const miss=(res.missingOrderFiles||[]);
-    const tip='金額 NT$'+Math.round(res.pendingTotal).toLocaleString()+'。近似判斷·非確定月份，尚未計入任何期別的退貨率／淨利。'
-      + (miss.length?(' 可能屬於 '+_momoEsc(miss.join('–'))+'，補傳該期訂單檔即可歸期。'):'');
-    segs.push('<b style="color:#b45309">⚠ '+res.pendingN+' 筆退貨待歸期</b> <span class="mm-info" title="'+_momoEsc(tip)+'">?</span>');
-  }
-  box.innerHTML = segs.length ? ('<div class="mm-banner mm-banner-warn" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'+segs.join('')+'</div>') : '';
+  box.innerHTML=`<div class="mm-banner mm-banner-warn" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">退貨率（銷售確認月）<b>${rr.rate.toFixed(2)}%</b> <span style="color:#6b7280;font-size:12px">退貨 NT$${rr.retNet.toLocaleString()} ÷ 銷售 NT$${rr.saleNet.toLocaleString()}</span> <span class="mm-info" title="${_momoEsc(tip)}">?</span></div>`;
 }
 
 /* ═══════════════ 酷澎 PR-3 介面對齊（比照 MO+ momoRenderShop）：子分頁殼 + 總表 + 訂單明細（上傳）═══════════════ */
@@ -27484,7 +27475,7 @@ function cupProfitTabHTML(shop){
   if(!_cupSelMonth[shop] || months.indexOf(_cupSelMonth[shop])<0) _cupSelMonth[shop]= months.length?months[months.length-1]:'';   // 選值不在可見集合→重設到最新有資料月（照 MO+）
   const sel=_cupSelMonth[shop];
   const monthOpts = months.length ? [...months].reverse().map(m=>`<option value="${m}"${m===sel?' selected':''}>${m.slice(0,4)}/${+m.slice(5,7)}</option>`).join('') : `<option value="">尚無期別資料</option>`;
-  const cmpTip='上面三格跟「上個月」比。⚠ 若上個月有「擱置未歸期的退貨」，上月淨利尚未完整、此對比可能偏樂觀（退貨掛原始銷售期、補傳該月訂單檔後才歸期）。表格逐列不做跨期比較。';
+  const cmpTip='上面三格跟「上個月」比。營收/成本/淨利都取自 DeliveryList（已是退貨後淨額）。表格逐列不做跨期比較。';
   return `
     <div style="margin-bottom:12px"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupSelectMonth('${shop}',this.value)">${monthOpts}</select></span></div>
     <div class="mm-kpis" style="margin-bottom:10px">
@@ -27493,6 +27484,7 @@ function cupProfitTabHTML(shop){
       <div class="mm-kpi"><div class="mm-kpi-l">淨利率 <span class="mm-info" title="${_momoEsc(cmpTip)}">?</span></div><div class="mm-kpi-v" id="cup-kv-rate-${shop}" style="color:#6366f1">—</div><div class="mm-kpi-d" id="cup-kv-rate-cmp-${shop}"></div></div>
     </div>
     <div id="cup-fee-rule-${shop}" style="font-size:11px;color:#9ca3af;margin-bottom:8px;line-height:1.6"></div>
+    <div id="cup-freshwarn-${shop}"></div>
     <div id="cup-misscost-chip-${shop}"></div>
     <div id="cup-returns-${shop}"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">階層分布</button></div>
@@ -27505,15 +27497,11 @@ function cupRenderProfitBody(shop){
   const saved=month?cupLoadReport(shop,month):null;
   const oldFmt=_cupRowsOld((saved&&saved.rows)||null);   // 舊格式（沒扣賣家券）→ 紅字提示重傳、不默默用 gross
   const rows=cupEnrichRows((saved&&saved.rows)||[]);
-  // 退貨＝讀取端現場解析（PR-2 設計）：全部 MSF docs（原始 byOrder）× 全部報表 orderNos → byMonth 歸各銷售月、查無＝擱置。
-  //   單一資料源、不落地解析結果 → 同一份 MSF 不論配哪個月上傳都只算一次（覆蓋同 doc）。
-  const msfDocs=cupListMsfDocs(shop);
-  const hasMsf=msfDocs.length>0;
-  const res=hasMsf?coupangResolveReturns(msfDocs, coupangBuildOrderIndex(cupListReportRefs(shop)))
-                  :{byMonth:{},pending:[],pendingTotal:0,pendingN:0,missingOrderFiles:[]};
+  // 退貨不再調整營收/成本/費用（DeliveryList 匯出時已移除退貨訂單，營收已是退貨後淨額）。MSF 只用來顯示退貨率（銷售確認月）。
+  const hasMsf=cupListMsfDocs(shop).length>0;
   const noteDoc=cupLoadNoteDoc(shop, month)||{};   // PR-4b：note 從獨立 coupang_note doc 讀（按 SKU）
   rows.forEach(r=>{ r.note = noteDoc[r.code] || ''; });   // ⚠ note doc[sku] 有值就顯示，不管中間 SKU 消失過 → SKU 消失又回來自動接回舊 note（孤兒接回）
-  _cupMergedRows[shop]=rows; _cupReturns[shop]=res;
+  _cupMergedRows[shop]=rows;
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerHTML=v;};
   const kpi=cupKpi(rows);
   set('cup-kv-rev-'+shop,momoMoney(kpi.rev));
@@ -27524,7 +27512,7 @@ function cupRenderProfitBody(shop){
   const cmpTxt=(cur,pv)=>{ const d=cur-pv, pct=pv?(d/Math.abs(pv)*100):null; return '較 '+(+prevM.slice(5,7))+'月 '+(d>=0?'▲':'▼')+(pct!=null?Math.abs(pct).toFixed(1)+'%':'')+' ('+(d>=0?'+':'')+Math.round(d).toLocaleString()+')'; };
   if(prev){ const pr=cupEnrichRows(prev.rows||[]); const pk=cupKpi(pr);
     const rc=document.getElementById('cup-kv-rev-cmp-'+shop); if(rc){rc.textContent=cmpTxt(kpi.rev,pk.rev);rc.style.color=kpi.rev>=pk.rev?'#10b981':'#ef4444';}
-    const nc=document.getElementById('cup-kv-net-cmp-'+shop); if(nc){nc.innerHTML=cmpTxt(kpi.net,pk.net)+((res&&res.pendingN>0)?' <span style="color:#b45309" title="有擱置未歸期退貨、上月淨利可能未完整，此對比偏樂觀">上月未完整</span>':'');nc.style.color=kpi.net>=pk.net?'#10b981':'#ef4444';}
+    const nc=document.getElementById('cup-kv-net-cmp-'+shop); if(nc){nc.textContent=cmpTxt(kpi.net,pk.net);nc.style.color=kpi.net>=pk.net?'#10b981':'#ef4444';}
     const tc=document.getElementById('cup-kv-rate-cmp-'+shop); if(tc){ if(kpi.rate!=null&&pk.rate!=null){const dd=kpi.rate-pk.rate;tc.textContent='較上月 '+(dd>=0?'+':'')+dd.toFixed(1)+'pp';tc.style.color=dd>=0?'#10b981':'#ef4444';} else tc.textContent=''; }
   } else { ['rev','net','rate'].forEach(k=>{const e=document.getElementById('cup-kv-'+k+'-cmp-'+shop);if(e)e.textContent='（無上月報表可比）';}); }
   const monthCoupon=rows.reduce((s,r)=>s+(Number(r.sellerCoupon)||0),0);
@@ -27533,9 +27521,21 @@ function cupRenderProfitBody(shop){
     ? '<div style="color:#dc2626;font-weight:700;margin-bottom:4px">⚠ 此月報表為舊格式（營收沒有扣賣家優惠券），請到「訂單明細」重新上傳 DeliveryList 後產表</div>'
     : (monthCoupon>0?'<div style="color:#6b7280;margin-bottom:4px">營收已扣賣家優惠券（本月 −'+momoMoney(monthCoupon)+'）</div>':'');
   set('cup-fee-rule-'+shop, couponNote+feeRule);
+  // 最新月份提醒：DeliveryList 匯出/上傳時間若早於「該月最後一天 + 25 天」，此月可能還有退貨未結算（DeliveryList 尚未移除）。
+  //   報表沒存匯出時間 → 用上傳時間（saved.ts）判斷。
+  set('cup-freshwarn-'+shop, _cupStaleWarnHtml(month, saved));
   cupRenderMissCostChip(shop, rows);
-  renderCoupangReturnsBanner(shop, res, rows, hasMsf);   // 無任何 MSF doc → 顯示「未上傳 MSF」狀態列（不靜默）
+  renderCoupangReturnsBanner(shop, hasMsf);
   renderCoupangTableBody(shop);
+}
+// 匯出/上傳時間早於「該月最後一天＋25 天」→ 黃色提醒（此月可能還有退貨未結算）。無報表或無時間 → 不提醒。
+function _cupStaleWarnHtml(month, saved){
+  const m=String(month||'').match(/(\d{4})-(\d{2})/); if(!m || !saved) return '';
+  const ts=Number(saved.ts)||0; if(!ts) return '';
+  const y=+m[1], mo=+m[2];
+  const threshold=new Date(y, mo, 0).getTime() + 25*24*3600*1000;   // 該月最後一天(本地 00:00) + 25 天
+  if(ts>=threshold) return '';
+  return '<div class="mm-banner mm-banner-warn" style="margin-bottom:8px">⚠ 此月訂單可能還有退貨未結算，請於次月 25 日後重新匯出 DeliveryList 並重新產表</div>';
 }
 // 缺成本 chip（真缺 missing；純數字條碼不算）→ 點開複用面板補成本
 function cupRenderMissCostChip(shop, rows){
@@ -28405,12 +28405,17 @@ async function cupReadPriceInventory(file){
   return { byCode, byBar, rowN:pi.length, codeN:Object.keys(byCode).length };
 }
 
-// ④ MSF（VAT History Report 分頁，含表頭）→ per-order。cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11/退貨12-18
-//    回 { byOrder:{oid:{hasDeliveryFee, returnAmt}}, returnTotal, orderN }。⚠ 廠商商品代號一律字串讀（15 位純數字·避免浮點精度掉尾）
+// ④ MSF（VAT History Report 分頁，含表頭）→ per-order ＋ 按銷售確認月的銷售/退貨淨額（退貨率用）。
+//    cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11(賣家券銷售=7)/退貨12-18(賣家券退貨=14)
+//    回 { byOrder:{oid:{hasDeliveryFee, returnAmt}}, returnTotal, orderN, byConfirmMonth:{'YYYY-MM':{saleNet,retNet}}, ok, reason }。
+//    byConfirmMonth：只計 VENDOR_ITEM（商品列，排除 DELIVERY_FEE 運費列）；淨額＝排除「賣家折價券」那一欄（酷澎券仍算我方）。
+//    退貨率＝該銷售確認月 retNet ÷ saleNet；MSF 檔是「每月一份、非累積快照」（實測：各月銷售只在自己的檔、退貨尾巴散在次月檔），
+//    所以讀取端跨所有 MSF docs【加總】同一銷售確認月、不會重複計。⚠ 廠商商品代號一律字串讀（15 位純數字·避免浮點精度掉尾）
 function coupangParseMSF(rows){
   const num=v=>{ const n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isNaN(n)?0:n; };   // Bug A：一律 parseFloat + NaN→0（訂單編號等字串轉不成數就是 0，不會裸相加）
   const RET_CELL_MAX=1e9;   // 單格退貨金額合理上限。>10億＝命中訂單編號(14-16位)/廠商商品代號(15位)等非退貨欄→欄位位移或非 VAT History Report；跳過不併入（防天文數字溢位）
-  const byOrder={}; let returnTotal=0;
+  const safe=v=>{ const c=num(v); return Math.abs(c)>=RET_CELL_MAX?0:c; };   // 大數防護（同退貨欄）
+  const byOrder={}; let returnTotal=0; const byConfirmMonth={};
   let dataRows=0, catRows=0, badCells=0, badSample='';
   (rows||[]).slice(1).forEach(r=>{
     if(!r||r[0]==null||String(r[0]).trim()==='') return;
@@ -28428,13 +28433,25 @@ function coupangParseMSF(rows){
       ret+=c;
     }
     o.returnAmt+=ret; returnTotal+=ret;
+    // 退貨率用：只計商品列（VENDOR_ITEM）、按銷售確認月、淨額排除賣家折價券（col7 銷售／col14 退貨）
+    if(cat==='VENDOR_ITEM'){
+      const cm=(cd.match(/(\d{4}-\d{2})/)||[])[1];
+      if(cm){
+        let sale=0; for(let i=5;i<=11;i++) sale+=safe(r[i]);
+        const saleNet=sale-safe(r[7]);               // 銷售淨額（排除賣家券銷售）
+        const retNet=ret-safe(r[14]);                // 退貨淨額（排除賣家券退貨）
+        const b=byConfirmMonth[cm]=byConfirmMonth[cm]||{saleNet:0,retNet:0};
+        b.saleNet+=saleNet; b.retNet+=retNet;
+      }
+    }
   });
+  Object.keys(byConfirmMonth).forEach(k=>{ byConfirmMonth[k].saleNet=Math.round(byConfirmMonth[k].saleNet); byConfirmMonth[k].retNet=Math.round(byConfirmMonth[k].retNet); });
   // 驗證：結構（項目類別欄）＋ 退貨欄無異常大數。任一不過＝ok:false，呼叫端拒收、不落地（缺資料 fail-loud，不靜默產生垃圾）
   let ok=true, reason='';
   if(dataRows===0){ ok=false; reason='MSF 無資料列'; }
   else if(catRows===0){ ok=false; reason='項目類別欄（第 4 欄）查無 VENDOR_ITEM／DELIVERY_FEE，可能不是 VAT History Report 分頁或欄位位移'; }
   else if(badCells>0){ ok=false; reason='退貨欄（第 13–19 欄）出現非退貨大數（'+badCells+' 格，如 '+badSample+'）——可能欄位位移或上傳到錯誤報表，已擋下不寫入'; }
-  return { byOrder, returnTotal:Math.round(returnTotal), orderN:Object.keys(byOrder).length, ok, reason };
+  return { byOrder, returnTotal:Math.round(returnTotal), orderN:Object.keys(byOrder).length, byConfirmMonth, ok, reason };
 }
 
 // ⑤ 成本對應：codes(訂單/PI 出現的公司商品代碼) vs 莫筆克成本表(costCodes＝已 trim 的 Set/Map key)。
@@ -28496,7 +28513,7 @@ function coupangBuildReportDoc(shop, month, parsed, costMap, pi){
 }
 
 // ② MSF 退貨 doc 建構：parsedMsf=coupangParseMSF()。整包冪等（重傳同 MSF 覆蓋）
-function coupangBuildMsfDoc(shop, src, parsedMsf){ return { shop, src, byOrder:(parsedMsf&&parsedMsf.byOrder)||{}, returnTotal:(parsedMsf&&parsedMsf.returnTotal)||0 }; }
+function coupangBuildMsfDoc(shop, src, parsedMsf){ return { shop, src, byOrder:(parsedMsf&&parsedMsf.byOrder)||{}, returnTotal:(parsedMsf&&parsedMsf.returnTotal)||0, byConfirmMonth:(parsedMsf&&parsedMsf.byConfirmMonth)||{} }; }
 
 // ③ 訂單編號→下單月 索引（跨所有已上傳月 report doc 的 orderNos）
 function coupangBuildOrderIndex(reportDocs){ const idx={}; (reportDocs||[]).forEach(rd=>{ (rd&&rd.orderNos||[]).forEach(oid=>{ idx[String(oid)]=rd.month; }); }); return idx; }
@@ -29430,7 +29447,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
