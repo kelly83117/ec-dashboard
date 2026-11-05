@@ -10094,7 +10094,7 @@ const KPI_GROUPS=[
   //   2026-11-04 拆兩店：博客來-寄倉（在上）／博客來-轉單，名稱欄顯示「寄倉」「轉單」（KPI_SHOP_LABELS）。從報表帶入只寫寄倉。
   //   轉單：寄倉運費不適用（fieldMerge notApplicable）；目前沒銷量 → shopOptional：這個月一格都沒填就不列入填寫進度（填了任何一格就照一般規則算）。
   //   正式站拆店前博客來沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
-  {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
+  {key:'books',since:'2026-09',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
     shopOptional:['博客來-轉單'],
     fieldMerge:{ship:{notApplicable:['博客來-轉單']}},
     // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。寄倉／轉單都適用。
