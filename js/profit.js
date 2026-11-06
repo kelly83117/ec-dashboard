@@ -11233,10 +11233,11 @@ const KPI_GROUPS=[
   //   2026-11-05 加物流運費（key freight）手填＋耗材（key material）自動計算（照 MOMO 甲配耗材 autoFill：灰底、即時算、可手動覆蓋、不計入填寫格數），放寄倉運費後面、純利扣掉這兩項（上傳／解析／帶入／補成本／快照／還原全不變）。KPI 月份 M＝結算帳月 M。
   //   2026-11-04 拆兩店：博客來-寄倉（在上）／博客來-轉單，名稱欄顯示「寄倉」「轉單」（KPI_SHOP_LABELS）。從報表帶入只寫寄倉。
   //   轉單：寄倉運費不適用（fieldMerge notApplicable）；目前沒銷量 → shopOptional：這個月一格都沒填就不列入填寫進度（填了任何一格就照一般規則算）。
+  //   2026-11-06：寄倉的物流運費（freight）不適用（寄倉由博客來出貨、我方不付物流運費，照 PChome 寄倉）→ fieldMerge notApplicable、格子「—」、不能編輯、不算填寫進度、算純利時歸 0。
   //   正式站拆店前博客來沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
   {key:'books',since:'2026-09',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
     shopOptional:['博客來-轉單'],
-    fieldMerge:{ship:{notApplicable:['博客來-轉單']}},
+    fieldMerge:{ship:{notApplicable:['博客來-轉單']},freight:{notApplicable:['博客來-寄倉']}},
     // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。寄倉／轉單都適用。
     autoFill:{material:{shops:['博客來-寄倉','博客來-轉單'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*KPI_MATERIAL_PER_ORDER.books,desc:'耗材 = 訂單數 × $'+KPI_MATERIAL_PER_ORDER.books+'（可手動覆蓋）'}},
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'},{k:'freight',l:'物流運費'},{k:'material',l:'耗材'}],
@@ -11801,11 +11802,11 @@ function _kpiChannelTableHtml(row,prevRow){
   };
   const neg=v=>v<0?' km-down':'';
   // 一列 8 格：通路｜營收本月｜營收較上月｜純利本月｜純利較上月｜純利率本月｜純利率較上月｜填寫進度
-  const line=(cls,attrs,c)=>'<div class="kc-row '+cls+'"'+(attrs||'')+'>'
+  const line=(cls,attrs,c,rc)=>'<div class="kc-row '+cls+'"'+(attrs||'')+'>'
     +'<div class="kc-c kc-name">'+c[0]+'</div>'
     +'<div class="kc-c kc-n kc-g1">'+c[1]+'</div><div class="kc-c kc-n">'+c[2]+'</div>'
     +'<div class="kc-c kc-n kc-g1">'+c[3]+'</div><div class="kc-c kc-n">'+c[4]+'</div>'
-    +'<div class="kc-c kc-n kc-g1">'+c[5]+'</div><div class="kc-c kc-n kc-gend">'+c[6]+'</div>'
+    +'<div class="kc-c kc-n kc-g1">'+c[5]+'</div><div class="kc-c kc-n kc-gend'+(rc&&rc.cls?' '+rc.cls:'')+'"'+(rc&&rc.title?' title="'+_kpiEscAttr(rc.title)+'"':'')+'>'+c[6]+'</div>'
     +'<div class="kc-c kc-n kc-fill">'+c[7]+'</div></div>';
   const head='<div class="kc-row kc-h1"><div class="kc-c"></div>'
     +'<div class="kc-c kc-glabel kc-g1 kc-s1">營收</div>'
@@ -11823,6 +11824,9 @@ function _kpiChannelTableHtml(row,prevRow){
   const body=_ord.map(({g})=>{
     const closed=_kpiGroupClosed(g,month);
     const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=closed?{rev:'',pure:'',pp:''}:cmpCells(cur,prev);
+    const prevRate=(prev&&prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&prev.rev>0)?prev.rate:null;
+    const gAlert=(closed||_kpiAnomAcked(month,'ro:'+g.key+':__sub__:pureRate'))?null:_kpiPureRateAlert(cur.rev>0?cur.rate:null,prevRate);
+    const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)}:null;
     const open=_kpiExpandedGroups.has(month+':'+g.key);
     let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
       '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title,
@@ -11830,19 +11834,27 @@ function _kpiChannelTableHtml(row,prevRow){
       '<span class="'+neg(cur.pure).trim()+'">'+_kpiMoney(cur.pure)+'</span>',cc.pure,
       cur.rev>0?_kpiRatePct(cur.rate):'—',cc.pp,
       closed?`<span class="km-badge km-badge-off" title="${_kpiClosedLabel(g)}">已關站</span>`:_kpiFillBadge(_kpiFillCount(row,g)),
-    ]);
+    ],gRc);
     if(open){
       // 各店明細也照本月營收由高到低（穩定排序，營收相同維持原順序）
       g.shops.map(s=>{const d=_kpiShopCalc(row,g,s);return{s,d,rev:_kpiRealRev(d)};}).sort((a,b)=>b.rev-a.rev).forEach(({s,d,rev},i)=>{
         const pure=_kpiShopPureAdj(row,g,s,d).pure;   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
-        html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
+        const sRate=rev>0?pure/rev:null;
+        let pSRate=null;
+        if(prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&((prevRow[g.key]||{})[s])){const pd=_kpiShopCalc(prevRow,g,s),prv=_kpiRealRev(pd);if(prv>0)pSRate=_kpiShopPureAdj(prevRow,g,s,pd).pure/prv;}
+        const sAlert=_kpiAnomAcked(month,'ro:'+g.key+':'+s+':pureRate')?null:_kpiPureRateAlert(sRate,pSRate);
+        const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)}:null;
+        html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','',''],sRc);
       });
     }
     return html;
   }).join('');
   const all=_kpiAllTotals(row),pa=prevRow?_kpiAllTotals(prevRow):null,ca=cmpCells(all,pa);
+  const fPrevRate=(pa&&pa.rev>0)?pa.rate:null;
+  const fAlert=_kpiPureRateAlert(all.rev>0?all.rate:null,fPrevRate);
+  const fRc=fAlert?{cls:fAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(fAlert,all.rate,fPrevRate)}:null;
   const foot=line('kc-total','',['合計',_kpiMoney(all.rev),ca.rev,'<span class="'+neg(all.pure).trim()+'">'+_kpiMoney(all.pure)+'</span>',ca.pure,
-    all.rev>0?_kpiRatePct(all.rate):'—',ca.pp,_kpiFillBadge(_kpiFillCountAll(row))]);
+    all.rev>0?_kpiRatePct(all.rate):'—',ca.pp,_kpiFillBadge(_kpiFillCountAll(row))],fRc);
   return '<div class="km-tablewrap"><div class="kc">'+head+body+foot+'</div></div>';
 }
 function _kpiOverviewHtml(row,prevRow){
@@ -12108,6 +12120,24 @@ function _kpiAnomCellVal(row,group,shop,f){
 function _kpiAnomMoney(v){return _kpiMoney(Math.round(v));}
 function _kpiAnomPct(v){return (v<0?'−':'')+Math.abs(v*100).toFixed(1)+'%';}
 function _kpiAnomSigned(v,suf){return (v>=0?'+':'−')+Math.abs(v).toFixed(suf==='pp'?1:0)+suf;}
+// ── 純利率警示（2026-11-06）：全通路／每店列／群組小計共用的一套判斷 ──
+//   🔴 本月純利率 < 0（本月純利為負）：只要本月營收>0 就標，跟上月有沒有、差多少都無關。
+//   🟡 本月純利率跟「上一個日曆月同一對象」差 ≥ KPI_PURE_RATE_ALERT_PP 個百分點（已經 🔴 就不再 🟡）。
+//   營收=0／空白 ⇒ rate 傳 null ⇒ 不判斷；上月沒資料或上月營收=0 ⇒ prevRate 傳 null ⇒ 不比變化（本月為負照樣 🔴）。
+//   官網關站月份、通路 since 之前不判斷（呼叫端用 _kpiAnomSkipGroup 擋）。回 null｜'red'｜'yellow'。
+const KPI_PURE_RATE_ALERT_PP=5;
+function _kpiPureRateAlert(rate,prevRate){
+  if(rate==null)return null;
+  if(rate<0)return 'red';
+  if(prevRate!=null&&Math.abs(rate-prevRate)*100>=KPI_PURE_RATE_ALERT_PP)return 'yellow';
+  return null;
+}
+// 警示文字（格子 title／月結表 title／左側清單用）。
+function _kpiPureRateMsg(level,rate,prevRate){
+  if(level==='red')return '本月純利為負（純利率 '+_kpiAnomPct(rate)+'），請確認。';
+  if(level==='yellow')return '本月純利率 '+_kpiAnomPct(rate)+'／上月 '+_kpiAnomPct(prevRate)+'（變化 '+_kpiAnomSigned((rate-prevRate)*100,'pp')+'），請確認。';
+  return '';
+}
 // 這家店這個月還有欄位沒填嗎（同「暫」）：純利率類規則要等填完才檢查。
 function _kpiAnomShopOpen(row,group,shop){return _kpiFillSlots(row,group).some(s=>!s.filled&&s.shops.includes(shop));}
 function _kpiAnomShopRate(row,group,shop){
@@ -12132,10 +12162,10 @@ function _kpiAnomalies(month,rows){
     // 共同費用另外一列的組（蝦皮）：也當一格檢查（commonAsColumn 的組本來就在 cols 裡）
     const chk=(group.commonCostLabel&&!group.commonAsColumn)?cols.concat([{k:'_common',l:'共同費用（'+(group.commonCostShortLabel||'')+'）',common:true}]):cols;
     // full＝格子 title 用的完整原因（含店名）；msg＝標題列清單用的說明句（去掉開頭的店名 pre 與欄位名，清單那一條前面已經寫了）
-    const push=(shop,label,key,rule,short,full,pre)=>{let msg=full;if(pre&&msg.startsWith(pre))msg=msg.slice(pre.length);
+    const push=(shop,label,key,rule,short,full,pre,sym)=>{let msg=full;if(pre&&msg.startsWith(pre))msg=msg.slice(pre.length);
       const lb=(pre&&pre.trim()&&label.startsWith(pre.trim()))?label.slice(pre.trim().length).trim():label;   // 共用格的標籤「甲配+乙配共用 應收帳款」→ 欄位名「應收帳款」
       if(msg.startsWith(lb+' '))msg=msg.slice(lb.length+1);
-      out.push({group:group.key,groupTitle:group.title,shop,label,key,rule,short,full,msg});};
+      out.push({group:group.key,groupTitle:group.title,shop,label,key,rule,short,full,msg,sym});};
     // ── 一格一格：R5 負數、R6 歸零、R4 同上月、R1 量級（共用格、共同費用只算一次）──
     const seen=new Set();
     group.shops.forEach(shop=>{
@@ -12187,6 +12217,16 @@ function _kpiAnomalies(month,rows){
       if(revFilled&&rev>0&&has('cost')&&Number(sd.cost)>rev)push(shop,'商品成本',keyOf('cost'),'R5','請確認',`${L} 商品成本 ${_kpiAnomMoney(sd.cost)} 比實際營收 ${_kpiAnomMoney(rev)} 還多，請確認。`,L+' ');
       if(revFilled&&rev<=0&&has('cost')&&Number(sd.cost)>0)push(shop,'商品成本',keyOf('cost'),'R5','請確認',`${L} 營收是 0，但商品成本有 ${_kpiAnomMoney(sd.cost)}，請確認。`,L+' ');
       if(revFilled&&rev>0&&has('qty')&&Number(sd.qty)===0)push(shop,'訂單數',keyOf('qty'),'R5','請確認',`${L} 有營收 ${_kpiAnomMoney(rev)}，但訂單數是 0，請確認。`,L+' ');
+      // R8 純利率警示（全通路，營收>0 就判、不受 minRev／填完與否限制；見 _kpiPureRateAlert）
+      if(revFilled&&rev>0){
+        const r8=_kpiAnomShopRate(row,group,shop);
+        if(r8!=null){
+          let pr8=null;const pRow8=rows.find(x=>x.month===prevKey);
+          if(pRow8&&!_kpiAnomSkipGroup(group,prevKey)&&((pRow8[group.key]||{})[shop])&&_kpiRealRev(_kpiShopCalc(pRow8,group,shop))>0)pr8=_kpiAnomShopRate(pRow8,group,shop);
+          const lv8=_kpiPureRateAlert(r8,pr8);
+          if(lv8){const sym8=lv8==='red'?'🔴':'🟡';push(shop,'純利率',roKey('pureRate'),'R8',sym8,L+' '+_kpiPureRateMsg(lv8,r8,pr8),L+' ',sym8);}
+        }
+      }
       if(!revFilled||rev<R.minRev)return;
       const open=_kpiAnomShopOpen(row,group,shop);
       const rate=_kpiAnomShopRate(row,group,shop);
@@ -12225,27 +12265,78 @@ function _kpiAnomalies(month,rows){
         if(Math.abs(p)>=R.aovPct)push(shop,'客單價',roKey('aov'),'R3',_kpiAnomSigned(p*100,'%'),`${L} 客單價 ${_kpiAnomMoney(aov)}，前 ${ah.length} 個月（${ah.map(h=>ym(h.m)).join('、')}）平均 ${_kpiAnomMoney(avg)}，差 ${_kpiAnomSigned(p*100,'%')}；請確認營收或訂單數有沒有填錯。`,L+' ');
       }
     });
+    // R8 群組小計純利率警示（對象＝群組小計 _kpiGroupTotals.pureRateAgg；有小計的組才判）
+    if(!group.noSubtotal){
+      const gt8=_kpiGroupTotals(row,group);
+      if(gt8.totalRev>0){
+        let pgr8=null;const pRowG=rows.find(x=>x.month===prevKey);
+        if(pRowG&&!_kpiAnomSkipGroup(group,prevKey)){const pgt8=_kpiGroupTotals(pRowG,group);if(pgt8.totalRev>0)pgr8=pgt8.pureRateAgg;}
+        const lvg=_kpiPureRateAlert(gt8.pureRateAgg,pgr8);
+        if(lvg){const symg=lvg==='red'?'🔴':'🟡';const keyg='ro:'+group.key+':__sub__:pureRate';const msgg=group.title+' 小計 '+_kpiPureRateMsg(lvg,gt8.pureRateAgg,pgr8);
+          out.push({group:group.key,groupTitle:group.title,shop:'',label:'小計純利率',key:keyg,rule:'R8',short:symg,full:msgg,msg:msgg,sym:symg});}
+      }
+    }
   });
+  out.forEach(a=>{const m=_kpiAckMatch(month,a.key,row); if(m){a.acked=true;a.ackBy=m.by;a.ackReason=m.reason||'';}});
   return out;
 }
 // 依 key 分組（一格可能有多條）＋各群組「幾格」。
 function _kpiAnomIndex(list){
   const byKey=new Map(),byGroup={};
-  list.forEach(a=>{
-    if(!byKey.has(a.key)){byKey.set(a.key,[]);byGroup[a.group]=(byGroup[a.group]||0)+1;}
-    byKey.get(a.key).push(a);
-  });
+  list.forEach(a=>{if(!byKey.has(a.key))byKey.set(a.key,[]);byKey.get(a.key).push(a);});
+  byKey.forEach(as=>{if(as.some(a=>!a.acked))byGroup[as[0].group]=(byGroup[as[0].group]||0)+1;});
   return{list,byKey,byGroup};
 }
-// 格子下方的小標籤：畫面上【只有「⚠」】，完整原因（全部條數）放 title／aria-label，短字（a.short）只給 __kpiAnomalyReport。
-//   🔴 不可撐寬欄位（2026-10-28 實測：「⚠ −6.0pp」跟「自動」並排讓 MOMO 表格 scrollWidth 904 → 949）：
-//     只有一個符號 ⇒ 比最窄的輸入框還窄；跟其他小字同一格時自己佔一行（不並排）；.km-anom-sub 再加 contain:inline-size，
-//     不參與欄寬計算。改回顯示短字之前先量 .km-tablewrap 的 scrollWidth（方法見 docs/report-kpi-anomaly.md 追加修正）。
-function _kpiAnomTagHtml(ix,key){
+// ── 警示確認（2026-11-06）：使用者核對過某格 → 按「確認無誤」把該格警示收起來，存雲端 app/kpi 的 acks.{月}.{ackId}。
+//   ackId＝格子 key 的雜湊；sig＝該格【目前數值】的簽章（_kpiAnomSig）。數值之後再被改動 ⇒ sig 不符 ⇒ 警示重新出現。
+//   存雲端＝全公司共用（沿用 __cloudKpi.writePaths，不新增雲端物件）。唯讀 / 未連線不給確認。
+function _kpiAckId(key){let h=0;const t=String(key);for(let i=0;i<t.length;i++){h=(Math.imul(h,31)+t.charCodeAt(i))|0;}return 'k'+(h>>>0).toString(36);}
+function _kpiAcks(month){return ((_kpiV2.cloud&&_kpiV2.cloud.acks)||{})[month]||{};}
+// 某格目前的數值（給 sig 用）：可編輯格＝存的值（沒存而且是自動格 → 算出來的）；ro 格＝客單價 / 純利率 / 小計純利率。
+function _kpiKeyCurVal(month,key,row){
+  row=row||getKpiRows().find(r=>r.month===month); if(!row)return null;
+  if(key[0]==='['){ let segs; try{segs=JSON.parse(key);}catch(e){return null;}
+    if(segs.length===1){const v=row[segs[0]];return (v==null||v==='')?null:Number(v);}
+    const gk=segs[0],shop=segs[1],field=segs[2],g=KPI_GROUPS.find(x=>x.key===gk); if(!g)return null;
+    const raw=((row[gk]||{})[shop]||{})[field];
+    if(raw!=null&&raw!=='')return Number(raw);
+    try{const c=_kpiShopCalc(row,g,shop)[field];return c==null?null:Number(c);}catch(e){return null;}
+  }
+  if(key.indexOf('ro:')===0){const p=key.split(':'),gk=p[1],shop=p[2],metric=p[3],g=KPI_GROUPS.find(x=>x.key===gk); if(!g)return null;
+    if(shop==='__sub__'){const t=_kpiGroupTotals(row,g);return t.totalRev>0?Math.round(t.pureRateAgg*1e6)/1e6:null;}
+    const d=_kpiShopCalc(row,g,shop);
+    if(metric==='aov'){const a=_kpiAovOf(d,g);return a==null?null:Math.round(a);}
+    const r=_kpiAnomShopRate(row,g,shop);return r==null?null:Math.round(r*1e6)/1e6;
+  }
+  return null;
+}
+function _kpiAnomSig(month,key,row){const v=_kpiKeyCurVal(month,key,row);return v==null?'∅':String(v);}
+function _kpiAckMatch(month,key,row){const a=_kpiAcks(month)[_kpiAckId(key)];return (a&&a.key===key&&a.sig===_kpiAnomSig(month,key,row))?a:null;}
+function _kpiAnomAcked(month,key,row){return !!_kpiAckMatch(month,key,row);}
+function _kpiAckTitle(a){return '✓ 已確認'+(a&&a.by?'（'+a.by+'）':'')+(a&&a.reason?'：'+a.reason:'')+'\n數字之後再被改動會重新提醒。';}
+function kpiAnomAck(btn){
+  const key=btn&&btn.dataset&&btn.dataset.k, month=btn&&btn.dataset&&btn.dataset.m;
+  if(!key||!month)return;
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法確認','error');return;}
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.writePaths!=='function'){if(typeof showToast==='function')showToast('❌ 雲端未連線，確認沒有存進去','error',6000);return;}
+  const li=btn.closest&&btn.closest('.km-anom-li'); const rEl=li&&li.querySelector('.km-anom-reason'); const reason=((rEl&&rEl.value)||'').trim().slice(0,200);
+  const sig=_kpiAnomSig(month,key),ackId=_kpiAckId(key),by=_kpiWho();
+  const ackObj={sig,by,at:ck.TS,key}; if(reason)ackObj.reason=reason;
+  _kpiV2.cloud=_kpiV2.cloud||{}; _kpiV2.cloud.acks=_kpiV2.cloud.acks||{}; _kpiV2.cloud.acks[month]=Object.assign({},_kpiV2.cloud.acks[month]); _kpiV2.cloud.acks[month][ackId]={sig,by,at:Date.now(),key,reason:reason||''};
+  renderKpiTab();
+  ck.writePaths([[['acks',month,ackId],ackObj]]).then(function(){},function(e){console.error('[KPI ack] 寫入失敗',e);if(typeof showToast==='function')showToast('❌ 確認沒存進雲端：'+((e&&(e.code||e.message))||e),'error',6000);});
+}
+// 一格的警示底色＋原因（2026-11-06 改版）：取代原本格子下方的 ⚠／🔴🟡 小標籤——小標籤會多佔一行、讓同一列其他格高低不齊，也不夠明顯。
+//   改成整格上底色（天生對齊、以整格為單位、不佔版面＝不撐寬欄）：任何 R8 🔴 ⇒ 紅底（本月純利為負）；否則有任何警示 ⇒ 琥珀底。
+//   完整原因（全部條數）放該格 title。純利／純利率兩格共用純利率那一條警示（一起上底色）。短字（a.short）只給 __kpiAnomalyReport。
+function _kpiAnomCell(ix,key){
   const as=key&&ix.byKey.get(key);
-  if(!as)return '';
-  const full=as.map(a=>a.full).join('\n')+'\n（只是提醒，不影響存檔）';
-  return `<div class="km-sublabel km-anom-sub"><span class="km-anom-tag" title="${_kpiEscAttr(full)}" aria-label="${_kpiEscAttr('請確認：'+full)}">⚠</span></div>`;
+  if(!as||!as.length)return {cls:'',title:''};
+  const active=as.filter(a=>!a.acked);
+  if(!active.length){const a0=as[0];return {cls:'km-anom-ok-cell', title:_kpiAckTitle({by:a0.ackBy,reason:a0.ackReason})};}
+  const red=active.some(a=>a.sym==='🔴');
+  return {cls:red?'km-anom-cell-red':'km-anom-cell', title:active.map(a=>a.full).join('\n')+'\n（只是提醒，不影響存檔）'};
 }
 // 標題列：「⚠ 有 N 格請再確認」（點開清單）＋「ⓘ 警示規則」（沒有警示也在）。
 let _kpiAnomListOpen=false;
@@ -12253,12 +12344,18 @@ function _kpiAnomTitleHtml(ix,group){
   const n=ix.byGroup[group.key]||0;
   return `<span class="km-anom-bar">${n?`<button type="button" class="km-anom-btn${_kpiAnomListOpen?' open':''}" onclick="kpiAnomToggle()" aria-expanded="${_kpiAnomListOpen}" title="${_kpiAnomListOpen?'收起清單':'展開清單，看每一格的原因'}">⚠ 有 ${n} 格請再確認</button>`:''}<button type="button" class="km-anom-help" onclick="kpiAnomGuide()" title="哪些情況會跳「請確認」">ⓘ 警示規則</button></span>`;
 }
-function _kpiAnomListHtml(ix,group){
+function _kpiAnomListHtml(ix,group,month){
   if(!_kpiAnomListOpen)return '';
-  const items=ix.list.filter(a=>a.group===group.key);
+  const items=ix.list.filter(a=>a.group===group.key&&!a.acked);
   if(!items.length)return '';
-  return `<div class="km-anom-list"><div class="km-anom-list-t">以下數字跟前幾個月差很多，請再確認一次（只是提醒，不影響存檔）</div><ol>${items.map(a=>
-    `<li><button type="button" class="km-anom-item" data-k="${_kpiEscAttr(a.key)}" onclick="kpiAnomFocus(this)"><span class="km-anom-item-w">${_kpiEscAttr((a.shop?_kpiShopLabel(a.shop)+' · ':'')+a.label)}：</span>${_kpiEscAttr(a.msg||a.full)}</button></li>`).join('')}</ol></div>`;
+  const byKey=new Map(); items.forEach(a=>{if(!byKey.has(a.key))byKey.set(a.key,[]);byKey.get(a.key).push(a);});
+  const rows=[...byKey.entries()].map(function(e){
+    const k=e[0],as=e[1],a0=as[0];
+    const label=(a0.shop?_kpiShopLabel(a0.shop)+' · ':'')+a0.label;
+    const reasons=as.map(function(a){return a.msg||a.full;}).join('；');
+    return `<li class="km-anom-li"><button type="button" class="km-anom-item" data-k="${_kpiEscAttr(k)}" onclick="kpiAnomFocus(this)"><span class="km-anom-item-w">${_kpiEscAttr(label)}：</span>${_kpiEscAttr(reasons)}</button><input type="text" class="km-anom-reason" maxlength="200" placeholder="原因（選填）" onkeydown="if(event.key==='Enter'){event.preventDefault();var b=this.parentNode.querySelector('.km-anom-ok');if(b)b.click();}"><button type="button" class="km-anom-ok" data-k="${_kpiEscAttr(k)}" data-m="${_kpiEscAttr(month)}" onclick="kpiAnomAck(this)" title="我已經核對過，這格數字沒問題，把提醒收起來">✓ 確認無誤</button></li>`;
+  }).join('');
+  return `<div class="km-anom-list"><div class="km-anom-list-t">以下數字跟前幾個月差很多，請再確認一次。核對沒問題可以順手填個原因（選填）再按「確認無誤」把提醒收起來（數字之後再被改動會重新提醒）。</div><ol>${rows}</ol></div>`;
 }
 function kpiAnomToggle(){_kpiAnomListOpen=!_kpiAnomListOpen;renderKpiTab();}
 // 點清單的一條：可填的格子 → 聚焦；唯讀欄（客單價、純利率）→ 捲到那一格。
@@ -12277,8 +12374,9 @@ function _kpiAnomGuideBlocks(){
   const R=KPI_ANOMALY_RULES;
   const $=v=>'$'+fmtN(v), pp=v=>Math.round(v*100)+' 個百分點', pc=v=>(v<0?'−':'')+Math.abs(Math.round(v*100))+'%';
   return [
-    {p:'填寫模式會把這個月的數字跟前幾個月比，差很多的格子下面會出現黃色「⚠」小標籤。滑鼠移上去可以看原因；標題列「⚠ 有 N 格請再確認」點開可以看全部。'},
-    {h:'會跳的 7 種情況',ol:[
+    {p:'填寫模式會把這個月的數字跟前幾個月比，差很多的格子下面會出現黃色「⚠」小標籤（純利率的格子改用 🔴 本月純利為負／🟡 跟上月差很多）。滑鼠移上去可以看原因；標題列「⚠ 有 N 格請再確認」點開可以看全部。'},
+    {h:'會跳的 8 種情況',ol:[
+      `純利率特別看：純利率是負的（本月純利為負）會標 🔴；純利率跟上個月差 ${KPI_PURE_RATE_ALERT_PP} 個百分點以上會標 🟡（已經 🔴 就不再 🟡）。每一家店、每個通路的小計都會看。營收是 0 或空白的不看；上個月沒資料或上個月營收是 0 時，只看負不看變化。`,
       `差好幾倍：同一格是上個月的 ${R.magX} 倍以上、或 1/${R.magX} 以下，而且差 ${$(R.magMinMoney)} 以上（訂單數差 ${fmtN(R.magMinQty)} 筆以上）。\n例：上月 $46,000，這個月打成 $460,000。`,
       `比率變很多：商品成本、廣告費、手續費這類費用除以營收的比率，跟前 ${R.histMonths} 個月平均比。成本率差 ${pp(R.ppCost)}以上、純利率差 ${pp(R.ppPure)}以上；其他小比率差 ${pp(R.ppSmall)}以上、而且變動超過原本的 ${pc(R.smallRel)}。\n營收和成本一起變多（例如大檔期）不會跳。只比營收 ${$(R.minRev)} 以上的通路。\n例：成本率平常 50%，這個月變 ${50+Math.round(R.ppCost*100)+5}%。`,
       `客單價變很多：營收 ÷ 訂單數，跟前 ${R.histMonths} 個月平均差 ${pc(R.aovPct)} 以上。\n例：營收填對了，訂單數卻少打一位。`,
@@ -12300,7 +12398,7 @@ function kpiAnomGuide(){
 // Console 只讀觀測點：__kpiAnomalyReport('2026-03')。只讀 getKpiRows()，不寫任何東西。
 function __kpiAnomalyReport(month){
   month=month||_kpiYM();
-  const list=_kpiAnomalies(month);
+  const list=_kpiAnomalies(month).filter(a=>!a.acked);
   const rows=list.map(a=>({月份:month,群組:a.groupTitle,通路:a.shop?_kpiShopLabel(a.shop):'(整組)',欄位:a.label,規則:a.rule,標籤:a.short,原因:a.full}));
   if(rows.length)console.table(rows);else console.log('[KPI 警示] '+month+' 沒有警示');
   return rows;
@@ -12318,7 +12416,7 @@ function _kpiFillHtml(row){
     const fc=_kpiFillCount(row,g);
     const an=ax.byGroup[g.key]||0;
     return `<button class="km-side-item${g.key===group.key?' active':''}" onclick="kpiFillPickGroup('${g.key}')">
-      <span class="km-dot" style="background:${g.color}"></span><span class="km-side-name">${g.title}</span>${_kpiFillBadge(fc)}${an?`<span class="km-side-anom" title="${an} 格請再確認">⚠ ${an}</span>`:''}</button>`;
+      <span class="km-dot" style="background:${g.color}"></span><span class="km-side-name">${g.title}</span>${_kpiFillBadge(fc)}</button>`;
   }).join('');
   const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價</th>${cols.map(f=>{
     const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
@@ -12352,9 +12450,11 @@ function _kpiFillHtml(row){
         +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="${fxTtl}">手動</span></div>`:'')
         +(auKind==='auto'?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'')
         +(auKind==='legacy'?`<div class="km-sublabel"><span class="km-legacy-tag" title="2026/10/01 舊版從淨利表帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；之後的對帳單帶入沒有寫這一格">舊版帶入</span></div>`:'')
-        +_kpiAnomTagHtml(ax,JSON.stringify(cell.segs))
         +_kpiCostMissTagHtml(group,shop,f.k,month);
-      return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
+      const an=_kpiAnomCell(ax,JSON.stringify(cell.segs));
+      const mergeTtl=cell.kind==='merge'?`${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額`:'';
+      const cellTtl=[mergeTtl,an.title].filter(Boolean).join('\n');
+      return `<td class="${an.cls}"${cellTtl?` title="${_kpiEscAttr(cellTtl)}"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const pa=_kpiShopPureAdj(row,group,shop,d);
     const pure=pa.pure;
@@ -12362,16 +12462,19 @@ function _kpiFillHtml(row){
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     const aov=_kpiAovOf(d,group);
     const roK=k=>'ro:'+group.key+':'+shop+':'+k;
-    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov" data-anom-k="${_kpiEscAttr(roK('aov'))}"${aov==null&&(Number(d.qty)>0||_kpiRealRev(d)>0)?' title="訂單數或營收未填，不算客單價"':''}><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div>${_kpiAnomTagHtml(ax,roK('aov'))}</td>${cells}
-      <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${tmp}${_kpiMoney(pure)}</div></td>
-      <td class="km-n km-f-ro" data-anom-k="${_kpiEscAttr(roK('pureRate'))}"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div>${_kpiAnomTagHtml(ax,roK('pureRate'))}</td></tr>`;
+    const aovAn=_kpiAnomCell(ax,roK('aov')),rateAn=_kpiAnomCell(ax,roK('pureRate'));
+    const aovTtl=[aovAn.title,(aov==null&&(Number(d.qty)>0||_kpiRealRev(d)>0))?'訂單數或營收未填，不算客單價':''].filter(Boolean).join('\n');
+    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov ${aovAn.cls}" data-anom-k="${_kpiEscAttr(roK('aov'))}"${aovTtl?` title="${_kpiEscAttr(aovTtl)}"`:''}><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
+      <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''} ${rateAn.cls}"${rateAn.title?` title="${_kpiEscAttr(rateAn.title)}"`:''}><div class="km-roval">${tmp}${_kpiMoney(pure)}</div></td>
+      <td class="km-n km-f-ro ${rateAn.cls}" data-anom-k="${_kpiEscAttr(roK('pureRate'))}"${rateAn.title?` title="${_kpiEscAttr(rateAn.title)}"`:''}><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
   let commonRow='';
   if(group.commonCostLabel&&!group.commonAsColumn){
     const cell={kind:'common',segs:[group.key+'Common'],ph:group.commonCostPlaceholder||''};
     const cv=Number(row[group.key+'Common'])||0;
+    const anC=_kpiAnomCell(ax,JSON.stringify(cell.segs));
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用${group.commonCostInfo?_kpiInfoHtml(group.title+' 共同費用',[group.commonCostInfo]):''}<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
-      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div>${_kpiCommonTaxSubHtml(month,row,group)}${_kpiAnomTagHtml(ax,JSON.stringify(cell.segs))}</td>
+      <td colspan="${cols.length}" class="${anC.cls}"${anC.title?` title="${_kpiEscAttr(anC.title)}"`:''}><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div>${_kpiCommonTaxSubHtml(month,row,group)}</td>
       <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
   // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
@@ -12392,8 +12495,9 @@ function _kpiFillHtml(row){
   const ap=_kpiAovPool(row,[group]);   // 小計客單價：只算營收、訂單數都有填的店
   const subAov=(ap.aov!=null?_kpiMoney(ap.aov):'—')+_kpiAovExHtml(ap.excluded);
   // 「未完成」改成小計旁的 ⚠ 小圖示＋滑鼠提示（文字標籤放店名欄會撐寬通路欄、放純利前面會撐寬純利欄，1280 寬 MOMO 就放不下）
+  const subAn=_kpiAnomCell(ax,'ro:'+group.key+':__sub__:pureRate');
   const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-sub-warn" title="未完成：這個月還有格子沒填，小計純利是暫時的">⚠</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
-    <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiMoney(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
+    <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''} ${subAn.cls}"${subAn.title?` title="${_kpiEscAttr(subAn.title)}"`:''}>${_kpiMoney(t.totalPure)}</td><td class="km-n ${subAn.cls}" data-anom-k="${_kpiEscAttr('ro:'+group.key+':__sub__:pureRate')}"${subAn.title?` title="${_kpiEscAttr(subAn.title)}"`:''}>${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
   const le=_kpiLastEdit(month,group.key);
   const gi=KPI_GROUPS.findIndex(g=>g.key===group.key);
   const next=KPI_GROUPS.slice(gi+1).concat(KPI_GROUPS.slice(0,gi)).find(g=>_kpiFillCount(row,g).missing>0);
@@ -12446,7 +12550,7 @@ function _kpiFillHtml(row){
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
       <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span>${_kpiAnomTitleHtml(ax,group)}${autoBtn}</div>
-      ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${group.noSubtotal?'':subRow}</tbody></table></div>${_kpiAnomListHtml(ax,group)}`}
+      ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${group.noSubtotal?'':subRow}</tbody></table></div>${_kpiAnomListHtml(ax,group,month)}`}
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
   </div>`;
@@ -30908,7 +31012,7 @@ Object.assign(window, {
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
-  kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
+  kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
