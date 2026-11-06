@@ -2073,3 +2073,46 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 /* FriDay「上傳 FriDay 報表」旁「怎麼傳？」ⓘ（2026-11-04）：說明框保留縮排換行 */
 .km-howto{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;}
 .km-info-pre .km-info-l{white-space:pre-wrap;}
+
+/* #436 第 ⑤ 塊：廣告調整一鍵封存視窗（js/profit.js openNotesArchiveTool，只有管理員）。樣式比照 .mm-delg-*。 */
+.nar-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;}
+.nar-box{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.25);width:100%;max-width:880px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;}
+.nar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px;border-bottom:1px solid #e5e7eb;}
+.nar-head h3{margin:0;font-size:16px;color:#111827;}
+.nar-x{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:#6b7280;padding:4px 8px;border-radius:6px;}
+.nar-x:hover{background:#f3f4f6;}
+.nar-x:disabled{opacity:.35;cursor:default;}
+.nar-body{padding:14px 16px;overflow:auto;font-size:13px;line-height:1.6;color:#111827;position:relative;}
+.nar-intro{margin:0 0 10px;color:var(--text-muted);}
+.nar-ctl{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-bottom:10px;}
+.nar-ctl select{padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;}
+.nar-ack{display:flex;align-items:center;gap:6px;color:#92400e;}
+.nar-ack input{accent-color:var(--primary);}
+/* profit.css 全站的 table / th / td（靠右、不換行、sticky 表頭、hover 底色）會套進來，這裡逐項蓋回 */
+.nar-tbl{width:100%;border-collapse:collapse;table-layout:auto;}
+.nar-tbl thead tr{position:static;background:transparent;}
+.nar-tbl th{text-align:left;font-size:12px;color:var(--text-muted);font-weight:600;padding:6px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;text-transform:none;letter-spacing:0;cursor:default;}
+.nar-tbl td{padding:8px;border-bottom:1px solid #f3f4f6;vertical-align:top;text-align:left;white-space:normal;color:#111827;font-size:13px;}
+.nar-tbl tbody tr,.nar-tbl tbody tr:hover td{background:transparent;}
+.nar-tbl td.nar-shop{font-weight:600;white-space:nowrap;width:1%;}
+.nar-tbl td.nar-act{width:1%;white-space:nowrap;text-align:right;}
+.nar-doc{font-size:11px;font-weight:500;color:var(--text-muted);}
+.nar-msg{font-weight:600;}
+.nar-st-ready .nar-msg,.nar-st-ok .nar-msg{color:#047857;}
+.nar-st-fail .nar-msg{color:#b91c1c;}
+.nar-st-skip .nar-msg,.nar-st-cancel .nar-msg{color:var(--text-muted);font-weight:500;}
+.nar-lines,.nar-warns,.nar-steps{margin:4px 0 0;padding-left:18px;}
+.nar-warns{color:#b45309;}
+.nar-steps{color:#374151;}
+.nar-act button,.nar-all button,.nar-ask-f button{padding:5px 12px;margin-left:6px;border:1px solid #d1d5db;border-radius:7px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
+.nar-act button:disabled,.nar-all button:disabled{opacity:.45;cursor:default;}
+.nar-act .nar-go,.nar-all .nar-go,.nar-ask-f .nar-go{border-color:var(--primary);color:var(--primary);}
+.nar-act .nar-back{border-color:#fca5a5;color:#dc2626;}
+.nar-all{display:flex;justify-content:flex-end;gap:4px;margin-top:10px;}
+.nar-ask{margin-top:12px;padding:12px 14px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;}
+.nar-ask-t{font-weight:700;color:#92400e;margin-bottom:4px;}
+.nar-ask-b ul{margin:4px 0;padding-left:18px;}
+.nar-ask-b p{margin:4px 0;}
+.nar-ask-f{display:flex;justify-content:flex-end;margin-top:8px;}
+.nar-act button:focus-visible,.nar-all button:focus-visible,.nar-ask-f button:focus-visible,.nar-x:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px;}
+@media (max-width:640px){ .nar-tbl thead{display:none;} .nar-tbl td,.nar-tbl td.nar-shop,.nar-tbl td.nar-act{display:block;width:auto;border:0;padding:4px 0;text-align:left;} .nar-tbl tr{display:block;border-bottom:1px solid #f3f4f6;padding:6px 0;} .nar-act button:first-child{margin-left:0;} .nar-all{justify-content:flex-start;} .nar-all button:first-child{margin-left:0;} }

@@ -81,6 +81,10 @@ try {
   const OPTLOG_SHOPS = ['甲配', '乙配', 'MO+麻吉', 'MO+森之旅', 'MO+玩樂', 'PChome', '博客來', 'FriDay', '酷澎', '麻吉', '露營館'];
   const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
+  // #436 第 ⑤ 塊：之後的廣告調整封存＝notes_archive collection，每通路每月一份（doc id「通路__YYYY-MM」）。上面兩片維持唯讀照常讀。
+  //   ⚠ 通路清單寫死：新增蝦皮通路要加進來（同 PROFITS_SUB_SHOPS、GROWTH_SHOPS），沒列的通路一鍵封存工具不處理。
+  const NOTES_ARCHIVE_COL = 'notes_archive';
+  const NOTES_ARCHIVE_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克', '測試通路'];
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
     + '/databases/(default)/documents/app/profit';
   const restDeleteProfitFields = async (keys) => {
@@ -91,7 +95,7 @@ try {
     return resp.json();
   };
   window.__cloudProfit = {
-    getDoc: () => getDoc(profitDocRef),
+    getDoc: (src) => src === 'server' ? getDocFromServer(profitDocRef) : getDoc(profitDocRef),   // 'server'＝強制讀伺服器（#436 ⑤ 一鍵封存用）；無參數行為不變
     setField: (key, value) => safeSetField(profitDocRef, key, value),
     removeFields: (keys) => restDeleteProfitFields(keys),
     subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
@@ -117,12 +121,135 @@ try {
     //     （SDK 的 onSnapshot 出錯後該監聽即終止、不會再送快照，「錯誤已解除」不會有任何訊號，清了等於說謊）
     const profitArchiveMeta = {};
     const profitArchiveErrors = {};
-    // 這把 key 是否存在於任一封存分片的【最新快照】。
+    // #436 ⑤ 新封存的狀態（訂閱在 __loadArchiveSubs）。naParts：doc id → { shop, ym, state, keys:{ 完整 key: 內容 }, raw }。
+    //   naMeta.invalid：內容不合法的文件（不併進畫面、ready 為 false ＝ 寫入一律擋下）。
+    const naParts = {};
+    const naMeta = { subscribed: false, gotSnap: false, fromCache: null, error: null, invalid: {}, warned: '' };
+    const naReady = () => naMeta.subscribed && naMeta.gotSnap && naMeta.fromCache === false && !naMeta.error && !Object.keys(naMeta.invalid).length;
+    const naFind = (key) => { for (const id in naParts) { if (Object.prototype.hasOwnProperty.call(naParts[id].keys, key)) return naParts[id]; } return null; };
+    // 這把 key 是否存在於任一封存分片的【最新快照】（含 #436 ⑤ 新封存，不分 copied / done）。
     //   快照未到 → false，與「確定不在」無法區分 → 呼叫端要先看 __profitArchivesReady()。
     window.__profitArchiveHas = (key) => PROFIT_ARCHIVE_DOCS.some(n => {
       const d = profitParts.archives[n];
       return !!d && Object.prototype.hasOwnProperty.call(d, key);
-    });
+    }) || !!naFind(key);
+    // #436 ⑤：這把 key 在已生效（state 'done'）的新封存裡。app/profit 也有這把時 ＝ 舊分頁寫回的殘留，期別仍算已封存（js/profit.js _notesWriteBlockReason）。
+    window.__notesArchiveDoneHas = (key) => { const p = naFind(key); return !!(p && p.state === 'done'); };
+    // 一鍵封存工具用：這把 key 在哪裡（只回位置，不回內容）。legacy＝舊封存片名；monthly＝新封存 { id, state }。
+    window.__notesArchiveWhere = (key) => {
+      const p = naFind(key);
+      return { legacy: PROFIT_ARCHIVE_DOCS.filter(n => { const d = profitParts.archives[n]; return !!d && Object.prototype.hasOwnProperty.call(d, key); }),
+        monthly: p ? { id: p.id, state: p.state } : null, current: Object.prototype.hasOwnProperty.call(profitParts.current || {}, key) };
+    };
+    // 唯讀觀測（不以 __cloud 開頭）：新封存的訂閱狀態與每份文件的 key 數
+    window.__notesArchiveState = () => ({ ready: naReady(), subscribed: naMeta.subscribed, fromCache: naMeta.fromCache, error: naMeta.error,
+      invalid: JSON.parse(JSON.stringify(naMeta.invalid)),
+      docs: Object.fromEntries(Object.keys(naParts).sort().map(id => [id, { state: naParts[id].state, keys: Object.keys(naParts[id].keys) }])) });
+    // NOTES_ARCHIVE_PURE_BEGIN（node 驗證會擷取這段，改名要一起改 node 腳本；比對用 growthCanon / growthSig，定義在下方 GROWTH_PURE）
+    //   文件形狀：{ schema:1, shop, month:'YYYY-MM', state:'copied'|'done', notes:{ first|second|full: { 品號: {adjustments:[…]} } },
+    //     src:{ keys:[原 key…], sig:{ 半月: 指紋 }, codes:{ 半月: 品號數 } }, createdAt, createdBy, doneAt?, doneBy? }
+    const NA_HALVES = ['first', 'second', 'full'];
+    const NA_KEY_RE = /^ec_notes\|([^|]+)\|(\d{4})\/(\d{2})\|(first|second|full)$/;
+    const naIsMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+    const naDocId = (shop, ym) => shop + '__' + ym;
+    const naKey = (shop, ym, half) => 'ec_notes|' + shop + '|' + ym.replace('-', '/') + '|' + half;
+    const naParseKey = (k) => { const m = NA_KEY_RE.exec(String(k)); return m ? { shop: m[1], ym: m[2] + '-' + m[3], half: m[4] } : null; };
+    const naParseId = (id) => { const i = String(id).lastIndexOf('__'); if (i <= 0) return null; const shop = id.slice(0, i), ym = id.slice(i + 2); return /^\d{4}-\d{2}$/.test(ym) ? { shop, ym } : null; };
+    // 文件是否合法。回 { ok:true, shop, ym, state, keys:{ 完整 key: 內容 } } 或 { ok:false, why }。
+    const naValidate = (id, d) => {
+      const p = naParseId(id);
+      if (!p) return { ok: false, why: 'doc id 格式不對' };
+      if (!naIsMap(d)) return { ok: false, why: '文件不是物件' };
+      if (d.schema !== 1) return { ok: false, why: 'schema 不是 1' };
+      if (d.shop !== p.shop || d.month !== p.ym) return { ok: false, why: 'shop / month 跟 doc id 不同' };
+      if (!NOTES_ARCHIVE_SHOPS.includes(d.shop)) return { ok: false, why: '不是列管的通路' };
+      if (d.state !== 'copied' && d.state !== 'done') return { ok: false, why: 'state 不對' };
+      if (!naIsMap(d.notes)) return { ok: false, why: 'notes 不是物件' };
+      const halves = Object.keys(d.notes);
+      if (!halves.length) return { ok: false, why: 'notes 是空的' };
+      const keys = {};
+      for (const h of halves) {
+        if (!NA_HALVES.includes(h)) return { ok: false, why: '不認得的半月：' + h };
+        if (!naIsMap(d.notes[h])) return { ok: false, why: h + ' 不是物件' };
+        keys[naKey(p.shop, p.ym, h)] = d.notes[h];
+      }
+      return { ok: true, shop: p.shop, ym: p.ym, state: d.state, keys };
+    };
+    // 盤點 app/profit 裡某通路某月的廣告調整。回 { source:{ 完整 key: 內容 }, list:[{ key, half, codes, adjs, maxDate, noBy, bad }] }。
+    //   maxDate＝紀錄裡最晚的 date（字串比較，格式 YYYY/MM/DD）；noBy＝沒有 by 的筆數；bad＝內容不是物件（不能封存）。
+    const naInventory = (profitDoc, shop, ym) => {
+      const source = {}, list = [];
+      NA_HALVES.forEach(h => {
+        const k = naKey(shop, ym, h);
+        if (!profitDoc || !Object.prototype.hasOwnProperty.call(profitDoc, k)) return;
+        const v = profitDoc[k];
+        const row = { key: k, half: h, codes: 0, adjs: 0, maxDate: '', noBy: 0, bad: !naIsMap(v) };
+        if (!row.bad) {
+          source[k] = v;
+          Object.keys(v).forEach(c => {
+            row.codes++;
+            const adjs = growthAdjList(v[c]);
+            adjs.forEach(a => {
+              row.adjs++;
+              const dt = a && typeof a.date === 'string' ? a.date : '';
+              if (dt > row.maxDate) row.maxDate = dt;
+              if (!(a && a.by)) row.noBy++;
+            });
+          });
+        }
+        list.push(row);
+      });
+      return { source, list };
+    };
+    // 由盤點結果產生要寫入的文件（state 'copied'）。source 只能是同一通路同一月份的 key。
+    const naBuild = (shop, ym, source, by, at) => {
+      const notes = {}, sig = {}, codes = {};
+      Object.keys(source).sort().forEach(k => {
+        const p = naParseKey(k);
+        if (!p || p.shop !== shop || p.ym !== ym) throw new Error('不是 ' + shop + ' ' + ym + ' 的 key：' + k);
+        notes[p.half] = JSON.parse(JSON.stringify(source[k]));
+        sig[p.half] = growthSig(source[k]);
+        codes[p.half] = Object.keys(source[k]).length;
+      });
+      return { schema: 1, shop, month: ym, state: 'copied', notes, src: { keys: Object.keys(source).sort(), sig, codes }, createdAt: at, createdBy: by || '' };
+    };
+    // source（完整 key → 內容）與文件 notes 逐品號比對。回 { same, diffs:[{ key, code, why:'missing'|'extra'|'changed' }] }。
+    //   why 以 source 為準：missing＝文件少了、extra＝文件多了、changed＝內容不同。整把 key 少了／多了 code 是 '*'。
+    const naCompare = (shop, ym, source, notes) => {
+      const diffs = [];
+      const doc = {};
+      Object.keys(notes || {}).forEach(h => { doc[naKey(shop, ym, h)] = notes[h]; });
+      const all = new Set(Object.keys(source || {}).concat(Object.keys(doc)));
+      all.forEach(k => {
+        const a = (source || {})[k], b = doc[k];
+        if (a === undefined) { diffs.push({ key: k, code: '*', why: 'extra' }); return; }
+        if (b === undefined) { diffs.push({ key: k, code: '*', why: 'missing' }); return; }
+        const codes = new Set(Object.keys(a || {}).concat(Object.keys(b || {})));
+        codes.forEach(c => {
+          if (!Object.prototype.hasOwnProperty.call(b || {}, c)) diffs.push({ key: k, code: c, why: 'missing' });
+          else if (!Object.prototype.hasOwnProperty.call(a || {}, c)) diffs.push({ key: k, code: c, why: 'extra' });
+          else if (growthCanon(a[c]) !== growthCanon(b[c])) diffs.push({ key: k, code: c, why: 'changed' });
+        });
+      });
+      return { same: !diffs.length, diffs };
+    };
+    // 已生效的封存（arch）與 app/profit 的殘留（cur，舊分頁寫的）逐品號合併：封存為主，殘留多的紀錄補到尾端，不刪任何東西。
+    //   回 { value, codes:[有補到東西的品號] }。
+    const naOverlay = (arch, cur) => {
+      const value = Object.assign({}, arch || {});
+      const codes = [];
+      if (naIsMap(cur)) Object.keys(cur).forEach(c => {
+        if (!Object.prototype.hasOwnProperty.call(value, c)) { value[c] = cur[c]; codes.push(c); return; }
+        if (growthCanon(value[c]) === growthCanon(cur[c])) return;
+        const before = growthAdjList(value[c]).length;
+        const next = growthAddExtras(value[c], growthAdjList(cur[c]));
+        if (next.adjustments.length !== before) { value[c] = next; codes.push(c); }
+      });
+      return { value, codes };
+    };
+    // NOTES_ARCHIVE_PURE_END
+    const naPure = { HALVES: NA_HALVES, docId: naDocId, key: naKey, parseKey: naParseKey, parseId: naParseId, validate: naValidate,
+      inventory: naInventory, build: naBuild, compare: naCompare, overlay: naOverlay };
     // 所有封存分片是否都已從【伺服器】收到過快照（嚴格版）：
     //   每片都要 (1) profitParts.archives 有那片的 key（訂閱 callback 對 exists()===false 也會寫入 {}，
     //   所以 doc 不存在也算已到達），且 (2) 最近一次快照 metadata.fromCache 為 false。
@@ -130,11 +257,17 @@ try {
     //   快照，若只看 (1) 會在離線時把所有封存期別誤判成「未封存」。離線 → ready 永遠 false（fail-closed）。
     //   ⚠ 已 ready 後若又收到 fromCache=true 的快照（連線中斷、SDK 切到快取），ready 會退回 false，
     //     等重新連上收到伺服器快照才恢復 —— 這是刻意的，離線期間不該相信封存判斷。
+    //   #436 ⑤：另外要新封存 collection 的最近一次快照來自伺服器、沒有訂閱錯誤、沒有不合法的文件（naReady）。
     window.__profitArchivesReady = () => PROFIT_ARCHIVE_DOCS.every(n =>
       Object.prototype.hasOwnProperty.call(profitParts.archives, n)
-      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false);
-    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。
-    window.__profitArchiveErrors = () => JSON.parse(JSON.stringify(profitArchiveErrors));
+      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false) && naReady();
+    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。#436 ⑤：新封存的訂閱錯誤與不合法文件也列在這裡。
+    window.__profitArchiveErrors = () => {
+      const o = JSON.parse(JSON.stringify(profitArchiveErrors));
+      if (naMeta.error) o[NOTES_ARCHIVE_COL] = JSON.parse(JSON.stringify(naMeta.error));
+      Object.keys(naMeta.invalid).forEach(id => { o[NOTES_ARCHIVE_COL + '/' + id] = JSON.parse(JSON.stringify(naMeta.invalid[id])); });
+      return o;
+    };
     // app/profit【最新快照】裡是否有這把 key（讀 profitParts.current；首批快照未到時是 {} → 一律 false）。
     //   與 __profitArchiveHas 搭配用（js/profit.js 的 _notesWriteBlockReason）：app/profit 有 → 不可能是「被搬走」的封存 key。
     //   刻意不另設「app/profit 首批已到」狀態：它只會讓提示文字更細，不改變任何放行／擋下結果
@@ -273,10 +406,27 @@ try {
       if (p.items) Object.values(p.items).forEach(a => { if (Array.isArray(a)) entries += a.length; });
       return [s, { route: window.__optlogRoute(s), skus: p.items ? Object.keys(p.items).length : 0, entries, tomb: p.tomb ? Object.keys(p.tomb).length : 0, oldField: Object.prototype.hasOwnProperty.call(profitParts.current, optlogKey(s)), residue: window.__optlogResidueCount ? window.__optlogResidueCount(s) : null, error: p.error }];
     }));
+    // #436 ⑤：data 已是「封存 → app/profit」的合併結果。done 的 key 若 app/profit 也有，改成封存為主、逐品號補上殘留。
+    const naOverlayDone = (data) => {
+      const hit = [];
+      Object.values(naParts).forEach(p => {
+        if (p.state !== 'done') return;
+        Object.keys(p.keys).forEach(k => {
+          if (!Object.prototype.hasOwnProperty.call(profitParts.current || {}, k)) return;
+          const ov = naOverlay(p.keys[k], profitParts.current[k]);
+          data[k] = ov.value;
+          hit.push(k + ':' + ov.codes.join(','));
+        });
+      });
+      const tag = hit.join(';');
+      if (tag && naMeta.warned !== tag) { naMeta.warned = tag; console.warn('[廣告調整封存] 已封存的期別在 app/profit 又出現（可能是舊分頁寫的），畫面以封存為主、只補上多出來的紀錄：', hit); }
+    };
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
+      Object.values(naParts).forEach(p => Object.assign(data, p.keys));   // #436 ⑤ 新封存（key 跟舊兩片、彼此都不重複）
       Object.assign(data, profitParts.current);
+      naOverlayDone(data);   // #436 ⑤ 已生效的封存又出現在 app/profit（舊分頁寫的）：逐品號合併，不讓 app/profit 整把蓋掉
       const oldData = Store._profitMem || {};
       const changedShops = new Set();
       // 只比對 profitDoc 自己的非報表 key（ec_notes|、ec_edits| 等）
@@ -409,7 +559,12 @@ try {
         const m = profitDocMeasure(raw, 'app/optlog_' + s);
         optlog[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
       });
-      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog });
+      const notesArchive = {};   // #436 ⑤ 新封存（還沒載入的不報）
+      Object.keys(naParts).forEach(id => {
+        const m = profitDocMeasure(naParts[id].raw || {}, NOTES_ARCHIVE_COL + '/' + id);
+        notesArchive[id] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog, notesArchive });
       profitDocStatsDirty = false;
       try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
       return profitDocStatsCache;
@@ -539,7 +694,118 @@ try {
           console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
         });
       });
+      naSubscribe();   // #436 ⑤ 新封存，跟舊兩片同一組、同一個時機
       __markSubsMaybeAllLoaded();
+    };
+
+    // ══════ #436 第 ⑤ 塊：廣告調整新封存 notes_archive（每通路每月一份）══════
+    //   訂閱：整個 collection 一個監聽，由 __loadArchiveSubs 觸發（進蝦皮個別通路、工作日誌、洞察表調整彈窗、健檢）。
+    //   🔴 includeMetadataChanges 不能拿掉：沒開 persistence，離線可能先送 fromCache 的空快照，要等翻成伺服器狀態才算 ready。
+    //   不合法的文件不併進畫面，記在 naMeta.invalid ⇒ __profitArchivesReady 為 false ⇒ 寫入一律擋下（fail-closed）。
+    const naSubscribe = () => {
+      if (naMeta.subscribed) return;
+      naMeta.subscribed = true;
+      try {
+        onSnapshot(collection(db, NOTES_ARCHIVE_COL), { includeMetadataChanges: true }, snap => {
+          naMeta.fromCache = !!(snap && snap.metadata && snap.metadata.fromCache);
+          // 只有 fromCache／待寫入狀態變了的快照：文件沒變，不用重算（第一份快照一律處理）
+          if (naMeta.gotSnap && snap && typeof snap.docChanges === 'function' && !snap.docChanges().length) return;
+          naMeta.gotSnap = true;
+          Object.keys(naParts).forEach(id => delete naParts[id]);
+          Object.keys(naMeta.invalid).forEach(id => delete naMeta.invalid[id]);
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const v = naValidate(d.id, data);
+            if (!v.ok) { naMeta.invalid[d.id] = { at: Date.now(), code: 'invalid', message: v.why }; console.error('[廣告調整封存] 文件內容不合法，不採用（寫入會先擋下）：', NOTES_ARCHIVE_COL + '/' + d.id, v.why); return; }
+            naParts[d.id] = { id: d.id, shop: v.shop, ym: v.ym, state: v.state, keys: v.keys, raw: data };
+          });
+          mergeAndNotify();
+          _pdSchedule();
+        }, err => {
+          naMeta.error = { at: Date.now(), code: (err && err.code) || '', message: String((err && err.message) || err) };
+          console.error('[廣告調整封存] 訂閱失敗：', err);
+        });
+      } catch (e) {
+        naMeta.error = { at: Date.now(), code: 'throw', message: String((e && e.message) || e) };
+        console.error('[廣告調整封存] 訂閱失敗：', e);
+      }
+    };
+    window.__notesArchivePure = Object.assign({ measure: profitDocMeasure, sig: growthSig, canon: growthCanon }, naPure);
+    // 雲端物件：讀 getDoc(shop, ym, 'server')（名字在讀取白名單）；寫 createMonth / commitDelete / restoreMonth（三支都是交易）。
+    //   寫入成功回 { ok:true, … }；條件不符回 { ok:false, why, … }（什麼都沒寫）；被唯讀／本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+    //   ⚠ 新增這顆後本機防護物件數 +1、寫入方法 +3（實際數字以合併時防護碼輸出為準，見 CLAUDE.md）。
+    const naRef = (shop, ym) => {
+      if (!NOTES_ARCHIVE_SHOPS.includes(shop)) throw new Error('不是列管的通路：' + shop);
+      if (!/^\d{4}-\d{2}$/.test(String(ym))) throw new Error('月份格式不對：' + ym);
+      return doc(db, NOTES_ARCHIVE_COL, naDocId(shop, ym));
+    };
+    // 把 app/profit 裡這個通路這個月的廣告調整撈出來（交易內用）
+    const naSourceOf = (pdata, shop, ym) => naInventory(pdata, shop, ym).source;
+    window.__cloudNotesArchive = {
+      getDoc: (shop, ym, src) => src === 'server' ? getDocFromServer(naRef(shop, ym)) : getDoc(naRef(shop, ym)),
+      // 複製：文件不存在才建立（state 'copied'）。已是 done 一律拒絕；已是 copied 要帶 opts.replaceCopied 才重建。
+      createMonth: (shop, ym, data, opts) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const s = await tx.get(ref);
+          if (s.exists()) {
+            const cur = s.data() || {};
+            if (cur.state === 'done') return { ok: false, why: 'done' };
+            if (!(opts && opts.replaceCopied)) return { ok: false, why: 'exists', state: cur.state || '' };
+          }
+          const v = naValidate(id, data);
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (data.state !== 'copied') return { ok: false, why: 'invalid', detail: 'state 要是 copied' };
+          tx.set(ref, data);
+          return { ok: true, replaced: s.exists() };
+        });
+      },
+      // 刪舊欄位＋生效：同一個交易讀 app/profit 與封存文件，這個通路這個月的 key 要跟封存逐品號相同才刪，同時把封存改成 done。
+      commitDelete: (shop, ym, by) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const as = await tx.get(ref);
+          const ps = await tx.get(profitDocRef);
+          if (!as.exists()) return { ok: false, why: 'no-archive' };
+          const a = as.data() || {};
+          const v = naValidate(id, a);
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (a.state !== 'copied') return { ok: false, why: a.state === 'done' ? 'done' : 'state' };
+          if (!ps.exists()) return { ok: false, why: 'no-profit' };
+          const src = naSourceOf(ps.data() || {}, shop, ym);
+          const cmp = naCompare(shop, ym, src, a.notes);
+          if (!cmp.same) return { ok: false, why: 'changed', diffs: cmp.diffs.slice(0, 50), nDiffs: cmp.diffs.length };
+          const keys = Object.keys(v.keys);
+          const args = [];
+          keys.forEach(k => { args.push(new FieldPath(k), deleteField()); });
+          tx.update(profitDocRef, ...args);
+          tx.update(ref, { state: 'done', doneAt: Date.now(), doneBy: by || '' });
+          return { ok: true, keys };
+        });
+      },
+      // 回搬：封存內容寫回 app/profit、刪掉封存文件。app/profit 已經有任何一把 ⇒ 不做；寫回後 app/profit 超過 90%（大小或索引）⇒ 不做。
+      restoreMonth: (shop, ym) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const as = await tx.get(ref);
+          const ps = await tx.get(profitDocRef);
+          if (!as.exists()) return { ok: false, why: 'no-archive' };
+          const v = naValidate(id, as.data() || {});
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (!ps.exists()) return { ok: false, why: 'no-profit' };
+          const pdata = ps.data() || {};
+          const keys = Object.keys(v.keys);
+          const clash = keys.filter(k => Object.prototype.hasOwnProperty.call(pdata, k));
+          if (clash.length) return { ok: false, why: 'profit-has', keys: clash };
+          const after = profitDocMeasure(Object.assign({}, pdata, v.keys), 'app/profit');
+          if (after.ratio >= 0.9 || after.idxRatio >= 0.9) return { ok: false, why: 'capacity', ratio: after.ratio, idxRatio: after.idxRatio };
+          const args = [];
+          keys.forEach(k => { args.push(new FieldPath(k), v.keys[k]); });
+          tx.update(profitDocRef, ...args);
+          tx.delete(ref);
+          return { ok: true, keys, ratio: after.ratio, idxRatio: after.idxRatio };
+        });
+      },
     };
 
     // #315：profits collection 是否已從【伺服器】收到過快照（唯讀觀測點，給 js/profit.js 的 _progHeavyLoaded 判「載入中 / 尚無報表」）。

@@ -119,6 +119,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
           <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
           <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
+          <button id="notes-archive-btn" class="export-btn nar-open-btn" onclick="openNotesArchiveTool()" style="display:none" title="把已結束月份的廣告調整搬出 app/profit（只有管理員看得到）">🗄 封存廣告調整</button>
         </div>
       </div>
       <div id="header-kpi-block" class="kv-grid">
@@ -1586,7 +1587,11 @@ function _notesWriteBlockReason(shopKey){
   const k='ec_notes|'+shopKey;
   const ok=typeof window.__profitCurrentHas==='function' && typeof window.__profitArchivesReady==='function' && typeof window.__profitArchiveHas==='function';
   if(!ok) return _NOTES_BLOCK_LOADING;
-  if(window.__profitCurrentHas(k)) return null;
+  if(window.__profitCurrentHas(k)){
+    // #436 ⑤：已生效的新封存（done）又出現在 app/profit ＝ 舊分頁寫回的殘留，期別仍是已封存。封存還沒載入時照舊放行（當期編輯不用等封存）。
+    if(typeof window.__notesArchiveDoneHas==='function' && window.__profitArchivesReady() && window.__notesArchiveDoneHas(k)) return _NOTES_BLOCK_ARCHIVED;
+    return null;
+  }
   if(!window.__profitArchivesReady()) return _notesArchiveHasErrors() ? _NOTES_BLOCK_ERROR : _NOTES_BLOCK_LOADING;   // 第 4 塊：只換文字，仍是擋下
   if(window.__profitArchiveHas(k)) return _NOTES_BLOCK_ARCHIVED;
   return null;
@@ -3607,6 +3612,258 @@ function profitNoteHistoryFor(shop, code){
   return {period, growth};
 }
 window.profitNoteHistoryFor = profitNoteHistoryFor;
+// ══════ #436 第 ⑤ 塊：廣告調整一鍵封存（只有管理員）══════
+//  把已結束月份的 ec_notes|{通路}|{YYYY/MM}|{first|second|full} 從 app/profit 搬到 notes_archive/{通路}__{YYYY-MM}。
+//  步驟：0 檢查（只讀；「試跑」只做到這裡）→ 1 下載備份 → 2 複製（文件不存在才建立）→ 3 讀回逐品號比對
+//        → 4 刪舊欄位＋生效（同一個交易：app/profit 跟封存逐品號相同才刪）→ 5 最後讀回。任何一步不符就停、顯示原因。
+//  雲端讀寫只走 js/firebase.js 的 __cloudNotesArchive / __cloudProfit.getDoc('server')；比對、盤點都用 __notesArchivePure（同一份純函式）。
+//  ⚠ 「只有管理員」是前端防呆（Firestore 規則全開）；交易內的比對才是最後一道把關。
+const _NAR_SHOPS=['好麻吉','玩樂','森之旅','維克',TEST_SHOP_ID];   // 跟 js/firebase.js NOTES_ARCHIVE_SHOPS 同一份
+const _NAR_FIRST_YM='2026-03';
+const _NAR_RECENT_DAYS=3;      // 最晚一筆紀錄在幾天內 ⇒ 提醒（不擋）
+const _NAR_SIZE_MAX=0.6;       // 新文件大小或索引超過上限的 60% ⇒ 停
+const _NAR_HALF_TXT={first:'上半月',second:'下半月',full:'整月'};
+let _nar=null;   // 視窗狀態 { ym, ack, busy, rows:{ 通路:{ st, msg, lines, warns, steps } }, ask }
+function _narIsAdmin(){ try{ const u=window.App&&App.currentUser; return !!(u&&u.role==='admin'&&!(typeof App.isReadOnly==='function'&&App.isReadOnly())); }catch{ return false; } }
+function _narBtnSync(){ const b=document.getElementById('notes-archive-btn'); if(b) b.style.display=_narIsAdmin()?'':'none'; }
+function _narTaipei(){ const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()); const g=t=>(p.find(x=>x.type===t)||{}).value; return {y:+g('year'),m:+g('month'),d:+g('day')}; }
+function _narYm(y,m){ return y+'-'+String(m).padStart(2,'0'); }
+function _narNowYm(){ const t=_narTaipei(); return _narYm(t.y,t.m); }
+function _narMonths(){ const t=_narTaipei(), out=[]; let y=t.y, m=t.m; while(_narYm(y,m)>=_NAR_FIRST_YM){ out.push(_narYm(y,m)); m--; if(m<1){ m=12; y--; } } return out; }
+function _narDefaultYm(){ const ms=_narMonths(); return ms[1]||ms[0]; }
+function _narRecentFrom(){ const t=_narTaipei(); const d=new Date(Date.UTC(t.y,t.m-1,t.d-_NAR_RECENT_DAYS)); return d.getUTCFullYear()+'/'+String(d.getUTCMonth()+1).padStart(2,'0')+'/'+String(d.getUTCDate()).padStart(2,'0'); }
+function _narEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _narErr(e){ return String((e&&(e.code||e.message))||e||'不明原因'); }
+function _narUser(){ const u=window.App&&App.currentUser; return (u&&u.username)||''; }
+// 條件不符的回傳（r）翻成白話。r===undefined ＝ 被唯讀／本機防護擋下。
+function _narWhy(r){
+  if(r===undefined||r===null) return '被防寫保護擋下（唯讀帳號或本機測試防護），什麼都沒有寫。';
+  switch(r.why){
+    case 'done': return '這個月已經封存過了。';
+    case 'exists': return '已經有一份封存文件（狀態 '+(r.state||'不明')+'），請先按「試跑」重新檢查。';
+    case 'invalid': return '封存內容不合法（'+(r.detail||'')+'），什麼都沒有寫，請通知 Keani。';
+    case 'no-archive': return '找不到封存文件，請先按「試跑」重新檢查。';
+    case 'state': return '封存文件的狀態不對，什麼都沒有改，請通知 Keani。';
+    case 'no-profit': return '讀不到雲端的淨利表資料（app/profit），什麼都沒有改。';
+    case 'changed': return '複製之後，有人改了 '+(r.nDiffs||(r.diffs||[]).length)+' 個品號（'+(r.diffs||[]).slice(0,10).map(d=>d.code==='*'?_narKeyTxt(d.key)+' 整把':d.code).join('、')+'）。為了不蓋掉他們的修改已經停止：封存還沒生效、資料都在 app/profit。請按「試跑」再封存一次。';
+    case 'profit-has': return 'app/profit 已經有這幾把（'+(r.keys||[]).map(_narKeyTxt).join('、')+'），可能是舊分頁寫回的。為了不蓋掉，回搬停止，請通知 Keani。';
+    case 'capacity': return '寫回後 app/profit 會到 '+Math.round((r.ratio||0)*100)+'%（大小）／'+Math.round((r.idxRatio||0)*100)+'%（索引），超過 90%，空間不夠，回搬停止。請通知 Keani。';
+    default: return '雲端回覆了不認得的結果（'+_narEsc(JSON.stringify(r))+'），請通知 Keani。';
+  }
+}
+function _narKeyTxt(k){ const p=window.__notesArchivePure&&window.__notesArchivePure.parseKey(k); return p?(_NAR_HALF_TXT[p.half]||p.half):String(k); }
+// 0 號檢查（只讀）。pre＝已讀好的 app/profit 內容（全部試跑共用一次讀取）。
+//   回 { kind:'ready'|'skip'|'fail', why, lines:[], warns:[], plan? }
+async function _narCheck(shop,ym,pre){
+  const P=window.__notesArchivePure, C=window.__cloudNotesArchive;
+  const fail=why=>({kind:'fail',why,lines:[],warns:[]});
+  if(!P||!C||!window.__cloudProfit) return fail('雲端還沒連上，請重新整理頁面再試。');
+  if(!_narIsAdmin()) return fail('只有管理員可以封存。');
+  if(_NAR_SHOPS.indexOf(shop)<0) return fail('不是列管的通路。');
+  try{ if(window.__loadArchiveSubs) window.__loadArchiveSubs(); }catch{}
+  if(!(typeof window.__profitArchivesReady==='function'&&window.__profitArchivesReady())){
+    const e=typeof window.__profitArchiveErrors==='function'?window.__profitArchiveErrors():{};
+    return fail(Object.keys(e).length?'封存資料讀取失敗（'+Object.keys(e).join('、')+'），請重新整理頁面；若持續發生請通知 Keani。':'封存資料還在載入，請等幾秒再按一次。');
+  }
+  if(shop!==TEST_SHOP_ID&&!(ym<_narNowYm())) return fail(ym+' 還沒結束，只能封存已經結束的月份。');
+  let pdata=pre;
+  if(!pdata){
+    let ps; try{ ps=await window.__cloudProfit.getDoc('server'); }catch(e){ return fail('讀不到雲端的淨利表資料（app/profit），可能是網路斷了（'+_narErr(e)+'）。什麼都沒有改。'); }
+    if(!(ps&&ps.exists&&ps.exists())) return fail('雲端的淨利表資料（app/profit）讀不到，什麼都沒有改。');
+    pdata=ps.data()||{};
+  }
+  const inv=P.inventory(pdata,shop,ym);
+  const bad=inv.list.filter(r=>r.bad);
+  if(bad.length) return fail(bad.map(r=>_narKeyTxt(r.key)).join('、')+' 的內容格式不對（不是物件），不能封存，請通知 Keani。');
+  let as; try{ as=await C.getDoc(shop,ym,'server'); }catch(e){ return fail('讀不到封存文件（'+_narErr(e)+'），可能是網路斷了。什麼都沒有改。'); }
+  const ad=(as&&as.exists&&as.exists())?(as.data()||{}):null;
+  if(!inv.list.length){
+    if(ad&&ad.state==='done') return {kind:'skip',why:'已經封存過了。',lines:[],warns:[],done:true};
+    if(ad) return fail('有一份沒做完的封存文件，但 app/profit 已經沒有這個月的資料，請通知 Keani。');
+    return {kind:'skip',why:'這個月沒有廣告調整，不用封存。',lines:[],warns:[]};
+  }
+  if(ad&&ad.state==='done') return fail('這個月已經封存過，但 app/profit 又出現 '+inv.list.length+' 把（'+inv.list.map(r=>_narKeyTxt(r.key)).join('、')+'），多半是還開著舊版分頁的人寫的。畫面已經以封存為主，請通知 Keani 處理。');
+  const resume=!!ad;
+  for(const k of Object.keys(inv.source)){
+    const w=typeof window.__notesArchiveWhere==='function'?window.__notesArchiveWhere(k):{legacy:[]};
+    if(w.legacy&&w.legacy.length) return fail(_narKeyTxt(k)+' 也在舊封存（'+w.legacy.join('、')+'）裡，兩邊同時有，不能自動封存，請通知 Keani 人工處理。');
+  }
+  const dirty=Object.keys(inv.source).filter(k=>_notesIsDirty(k)||_pendingSyncKeys.has(k));
+  if(dirty.length) return fail('你這台電腦還有這個月沒同步的廣告調整（'+dirty.map(_narKeyTxt).join('、')+'），請先按「☁ 同步雲端」再封存。');
+  let payload;
+  try{ payload=P.build(shop,ym,inv.source,_narUser(),Date.now()); }catch(e){ return fail('產生封存內容失敗（'+_narErr(e)+'），請通知 Keani。'); }
+  const v=P.validate(P.docId(shop,ym),payload);
+  if(!v.ok) return fail('產生的封存內容不合法（'+v.why+'），請通知 Keani。');
+  const cmp=P.compare(shop,ym,inv.source,payload.notes);
+  if(!cmp.same) return fail('產生的封存內容跟 app/profit 對不上（'+cmp.diffs.length+' 處），請通知 Keani。');
+  const m=P.measure(payload,'notes_archive/'+P.docId(shop,ym));
+  if(m.ratio>=_NAR_SIZE_MAX||m.idxRatio>=_NAR_SIZE_MAX) return fail('這份封存會太大（大小 '+Math.round(m.ratio*100)+'%、索引 '+Math.round(m.idxRatio*100)+'%），請通知 Keani。');
+  const recent=_narRecentFrom();
+  const lines=inv.list.map(r=>_NAR_HALF_TXT[r.half]+'：'+r.codes+' 個品號、'+r.adjs+' 筆紀錄，最晚 '+(r.maxDate||'（沒有日期）')+(r.noBy?'，'+r.noBy+' 筆沒有填寫人':''));
+  lines.push('封存文件大小約 '+Math.max(1,Math.round(m.bytes/1024))+' KB（'+Math.round(m.ratio*100)+'%）、索引 '+m.idx+' 筆（'+Math.round(m.idxRatio*100)+'%）');
+  const warns=[];
+  inv.list.forEach(r=>{ if(r.maxDate&&r.maxDate>=recent) warns.push(_NAR_HALF_TXT[r.half]+' 最近 '+_NAR_RECENT_DAYS+' 天內還有人寫（最晚 '+r.maxDate+'），封存後就不能再改，請確認大家都寫完了。'); });
+  if(resume) warns.push('上次封存沒做完（封存文件已建立、還沒生效），這次會用 app/profit 的現值重建。');
+  return {kind:'ready',why:'可以封存',lines,warns,plan:{shop,ym,source:inv.source,payload,resume,list:inv.list}};
+}
+function _narDownloadBackup(p){
+  const P=window.__notesArchivePure;
+  const sig={}; Object.keys(p.source).forEach(k=>{ sig[k]=P.sig(p.source[k]); });
+  const out={ kind:'ec-notes-archive-backup', v:1, shop:p.shop, month:p.ym, at:Date.now(), by:_narUser(),
+    appVersion:(document.querySelector('meta[name=app-version]')||{}).content||'', source:p.source, sig, codes:p.payload.src.codes };
+  const t=new Date(), pad=n=>String(n).padStart(2,'0');
+  const name='廣告調整封存備份_'+p.shop+'_'+p.ym+'_'+t.getFullYear()+pad(t.getMonth()+1)+pad(t.getDate())+'-'+pad(t.getHours())+pad(t.getMinutes())+'.json';
+  try{
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'})); a.download=name;
+    document.body.appendChild(a); a.click(); setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); a.remove(); }catch{} },1000);
+  }catch(e){ console.error('[廣告調整封存] 下載備份失敗',e); return null; }
+  try{ window.__narLastBackup={name,out}; }catch{}
+  return name;
+}
+// ── 視窗 ──
+function _narRow(shop){ return (_nar.rows[shop]=_nar.rows[shop]||{st:'idle',msg:'',lines:[],warns:[],steps:[]}); }
+function _narResetRows(){ _nar.rows={}; _NAR_SHOPS.forEach(s=>_narRow(s)); }
+function _narDocState(shop,ym){ try{ const st=window.__notesArchiveState&&window.__notesArchiveState(); const d=st&&st.docs&&st.docs[shop+'__'+ym]; return d?d.state:''; }catch{ return ''; } }
+function _narRender(){
+  const ov=document.getElementById('nar-ov'); if(!ov||!_nar) return;
+  const ym=_nar.ym, busy=!!_nar.busy;
+  const stTxt={idle:'',busy:'處理中…',ready:'✓ 可以封存',skip:'—',fail:'✕ 停止',ok:'✓ 已封存',cancel:'已取消'};
+  const rows=_NAR_SHOPS.map(shop=>{
+    const r=_narRow(shop), ds=_narDocState(shop,ym);
+    const docTxt=ds==='done'?'已封存':ds==='copied'?'封存未完成':'';
+    return '<tr class="nar-r nar-st-'+r.st+'"><td class="nar-shop">'+_narEsc(shop)+(docTxt?'<div class="nar-doc">'+docTxt+'</div>':'')+'</td>'
+      +'<td class="nar-res"><div class="nar-msg">'+_narEsc(stTxt[r.st]||'')+(r.msg?' '+_narEsc(r.msg):'')+'</div>'
+      +(r.lines.length?'<ul class="nar-lines">'+r.lines.map(x=>'<li>'+_narEsc(x)+'</li>').join('')+'</ul>':'')
+      +(r.warns.length?'<ul class="nar-warns">'+r.warns.map(x=>'<li>⚠ '+_narEsc(x)+'</li>').join('')+'</ul>':'')
+      +(r.steps.length?'<ol class="nar-steps">'+r.steps.map(x=>'<li>'+_narEsc(x)+'</li>').join('')+'</ol>':'')+'</td>'
+      +'<td class="nar-act"><button type="button" data-act="dry" data-shop="'+_narEsc(shop)+'"'+(busy?' disabled':'')+'>試跑</button>'
+      +'<button type="button" class="nar-go" data-act="run" data-shop="'+_narEsc(shop)+'"'+(busy?' disabled':'')+'>封存</button>'
+      +(ds==='done'?'<button type="button" class="nar-back" data-act="restore" data-shop="'+_narEsc(shop)+'"'+(busy?' disabled':'')+'>回搬</button>':'')+'</td></tr>';
+  }).join('');
+  const opts=_narMonths().map(m=>'<option value="'+m+'"'+(m===ym?' selected':'')+'>'+m+(m===_narNowYm()?'（本月，只有測試通路能封存）':'')+'</option>').join('');
+  const ask=_nar.ask;
+  ov.querySelector('.nar-box').innerHTML=
+    '<div class="nar-head"><h3 id="nar-title">🗄 封存廣告調整</h3><button type="button" class="nar-x" data-act="close" aria-label="關閉"'+(busy?' disabled':'')+'>✕</button></div>'
+    +'<div class="nar-body">'
+    +'<p class="nar-intro">把已結束月份的廣告調整從 app/profit 搬到每通路每月一份的封存文件。封存後那個月的廣告調整只能看、不能改。「試跑」只檢查、不寫任何東西。</p>'
+    +'<div class="nar-ctl"><label>月份 <select data-act="ym"'+(busy?' disabled':'')+'>'+opts+'</select></label>'
+    +'<label class="nar-ack"><input type="checkbox" data-act="ack"'+(_nar.ack?' checked':'')+(busy?' disabled':'')+'> 部署新版後已請大家重新整理（舊分頁看不到新封存）</label></div>'
+    +'<table class="nar-tbl"><thead><tr><th>通路</th><th>檢查結果</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class="nar-all"><button type="button" data-act="dryall"'+(busy?' disabled':'')+'>全部試跑</button><button type="button" class="nar-go" data-act="runall"'+(busy?' disabled':'')+'>依序封存全部</button></div>'
+    +(ask?'<div class="nar-ask" role="alertdialog"><div class="nar-ask-t">'+_narEsc(ask.title)+'</div><div class="nar-ask-b">'+ask.body+'</div>'
+      +'<div class="nar-ask-f"><button type="button" class="nar-go" data-act="ask-ok">'+_narEsc(ask.ok)+'</button><button type="button" data-act="ask-no">取消</button></div></div>':'')
+    +'</div>';
+}
+function _narAsk(title,body,ok){ return new Promise(res=>{ _nar.ask={title,body,ok,res}; _narRender(); try{ document.querySelector('#nar-ov [data-act="ask-no"]').focus(); }catch{} }); }
+function _narAnswer(v){ const a=_nar&&_nar.ask; if(!a) return; _nar.ask=null; _narRender(); a.res(v===true); }
+function _narSet(shop,patch){ Object.assign(_narRow(shop),patch); _narRender(); }
+function _narStep(shop,txt){ _narRow(shop).steps.push(txt); _narRender(); }
+async function _narDry(shop,pre){
+  _narSet(shop,{st:'busy',msg:'',lines:[],warns:[],steps:[]});
+  let c; try{ c=await _narCheck(shop,_nar.ym,pre); }catch(e){ c={kind:'fail',why:'檢查時出錯（'+_narErr(e)+'），什麼都沒有改。',lines:[],warns:[]}; console.error('[廣告調整封存] 檢查出錯',e); }
+  _narSet(shop,{st:c.kind,msg:c.kind==='ready'?'':c.why,lines:c.lines||[],warns:c.warns||[]});
+  return c;
+}
+// 正式封存一個通路。回 true＝完成或不用封存；false＝停下（原因在列上）。
+async function _narRun(shop){
+  const P=window.__notesArchivePure, C=window.__cloudNotesArchive, ym=_nar.ym;
+  if(!_nar.ack){ _narSet(shop,{st:'fail',msg:'請先勾「部署新版後已請大家重新整理」。舊分頁看不到新封存，會把封存的月份當成可以改。',lines:[],warns:[],steps:[]}); return false; }
+  const c=await _narDry(shop);
+  if(c.kind==='skip') return true;
+  if(c.kind!=='ready') return false;
+  const p=c.plan;
+  const stop=(msg)=>{ const r=_narRow(shop); r.st='fail'; r.msg=msg; _narRender(); console.warn('[廣告調整封存] '+shop+' '+ym+' 停止：'+msg); return false; };
+  const sum='<ul>'+c.lines.map(x=>'<li>'+_narEsc(x)+'</li>').join('')+'</ul>'+(c.warns.length?'<ul class="nar-warns">'+c.warns.map(x=>'<li>⚠ '+_narEsc(x)+'</li>').join('')+'</ul>':'');
+  if(!await _narAsk('封存 '+shop+' '+ym+'？',sum+'<p>下一步會先下載備份檔。</p>','下載備份並繼續')){ _narSet(shop,{st:'cancel',msg:'沒有寫任何東西。'}); return false; }
+  const name=_narDownloadBackup(p);
+  if(!name) return stop('備份檔下載失敗，沒有寫任何東西。');
+  _narStep(shop,'已下載備份：'+name);
+  if(!await _narAsk('備份檔已下載','<p>檔名：<b>'+_narEsc(name)+'</b></p><p>請確認檔案存好了再繼續。</p>','備份已存好，開始封存')){ _narSet(shop,{st:'cancel',msg:'沒有寫任何東西。'}); return false; }
+  _narRow(shop).st='busy'; _narStep(shop,'複製到 notes_archive/'+P.docId(shop,ym)+'…');
+  let r;
+  try{ r=await C.createMonth(shop,ym,p.payload,{replaceCopied:p.resume}); }catch(e){ return stop('複製失敗（'+_narErr(e)+'）。資料都還在 app/profit，沒有任何改變。'); }
+  if(!(r&&r.ok)) return stop('複製沒有寫入：'+_narWhy(r));
+  _narStep(shop,'讀回比對…');
+  let rs; try{ rs=await C.getDoc(shop,ym,'server'); }catch(e){ return stop('讀回失敗（'+_narErr(e)+'）。封存還沒生效、資料都在 app/profit，請按「試跑」再封存一次。'); }
+  const rd=(rs&&rs.exists&&rs.exists())?(rs.data()||{}):null;
+  if(!rd||rd.state!=='copied') return stop('讀回的封存文件不見了或狀態不對（'+(rd?rd.state:'沒有文件')+'）。封存還沒生效、資料都在 app/profit，請通知 Keani。');
+  const cmp=P.compare(shop,ym,p.source,rd.notes);
+  if(!cmp.same) return stop('讀回的內容跟 app/profit 不一樣（'+cmp.diffs.length+' 處：'+cmp.diffs.slice(0,10).map(d=>d.code).join('、')+'）。封存還沒生效、資料都在 app/profit，請通知 Keani。');
+  _narStep(shop,'刪除 app/profit 舊欄位（刪前再比對）…');
+  try{ r=await C.commitDelete(shop,ym,_narUser()); }catch(e){ return stop('刪除舊欄位失敗（'+_narErr(e)+'）。封存還沒生效、資料都在 app/profit，請稍後按「試跑」再封存一次。'); }
+  if(!(r&&r.ok)) return stop('沒有刪除：'+_narWhy(r));
+  _narStep(shop,'最後檢查…');
+  let left=null, fin=null;
+  try{ const ps=await window.__cloudProfit.getDoc('server'); left=P.inventory(ps.exists()?(ps.data()||{}):{},shop,ym).list; }catch(e){}
+  try{ const fs=await C.getDoc(shop,ym,'server'); fin=fs.exists()?(fs.data()||{}):null; }catch(e){}
+  const okFin=left&&!left.length&&fin&&fin.state==='done'&&P.compare(shop,ym,p.source,fin.notes).same;
+  if(!okFin){ const rr=_narRow(shop); rr.st='fail'; rr.msg='封存已經生效，但最後檢查對不上（'+(left===null||fin===null?'讀不到雲端':left.length?'app/profit 還有 '+left.length+' 把':'封存文件狀態或內容不對')+'）。請截圖通知 Keani，備份檔留著。'; _narRender(); return false; }
+  const codes=Object.values(p.payload.src.codes).reduce((a,b)=>a+b,0);
+  _narSet(shop,{st:'ok',msg:'完成：'+Object.keys(p.source).length+' 把、'+codes+' 個品號已搬到 notes_archive/'+P.docId(shop,ym)+'。'});
+  console.log('%c[廣告調整封存] '+shop+' '+ym+' 完成','color:#16a34a;font-weight:700',r.keys);
+  return true;
+}
+async function _narRestore(shop){
+  const C=window.__cloudNotesArchive, P=window.__notesArchivePure, ym=_nar.ym;
+  if(!_narIsAdmin()) return;
+  if(!await _narAsk('回搬 '+shop+' '+ym+'？','<p>把封存內容寫回 app/profit、刪掉封存文件，那個月又可以修改。app/profit 已經有這個月的資料、或寫回後超過 90% 會自動停止。</p>','確定回搬')) return;
+  _narSet(shop,{st:'busy',msg:'',lines:[],warns:[],steps:['回搬中…']});
+  let r; try{ r=await C.restoreMonth(shop,ym); }catch(e){ _narSet(shop,{st:'fail',msg:'回搬失敗（'+_narErr(e)+'），什麼都沒有改。'}); return; }
+  if(!(r&&r.ok)){ _narSet(shop,{st:'fail',msg:'沒有回搬：'+_narWhy(r)}); return; }
+  let ok=false;
+  try{ const ps=await window.__cloudProfit.getDoc('server'); const fs=await C.getDoc(shop,ym,'server'); ok=!fs.exists()&&P.inventory(ps.data()||{},shop,ym).list.length===r.keys.length; }catch(e){}
+  _narSet(shop,{st:ok?'idle':'fail',msg:ok?'已回搬 '+r.keys.length+' 把到 app/profit（寫回後約 '+Math.round(r.ratio*100)+'%）。':'回搬已寫入，但讀回檢查對不上，請截圖通知 Keani。'});
+}
+async function _narDryAll(){
+  if(_nar.busy) return; _nar.busy=true; _narResetRows(); _narRender();
+  try{
+    let pre=null;
+    try{ const ps=await window.__cloudProfit.getDoc('server'); if(ps&&ps.exists&&ps.exists()) pre=ps.data()||{}; }catch(e){}
+    for(const s of _NAR_SHOPS) await _narDry(s,pre||undefined);
+  }finally{ _nar.busy=false; _narRender(); }
+}
+async function _narRunGuarded(fn){ if(_nar.busy) return; _nar.busy=true; _narRender(); try{ return await fn(); }finally{ if(_nar){ _nar.busy=false; _narRender(); } } }
+function _narClose(){
+  if(!_nar) return;
+  if(_nar.busy&&!_nar.ask){ if(typeof showToast==='function') showToast('處理中，請等這一步做完再關','info',2500); return; }
+  if(_nar.ask) _narAnswer(false);
+  const ov=document.getElementById('nar-ov'); if(ov) ov.remove();
+  try{ document.removeEventListener('keydown',_narKey,true); }catch{}
+  _nar=null;
+}
+function _narKey(e){ if(e.key==='Escape'&&_nar){ e.preventDefault(); e.stopPropagation(); if(_nar.ask) _narAnswer(false); else _narClose(); } }
+function openNotesArchiveTool(){
+  if(!_narIsAdmin()){ if(typeof showToast==='function') showToast('只有管理員可以封存廣告調整','error',3000); return; }
+  if(document.getElementById('nar-ov')) return;
+  try{ if(window.__loadArchiveSubs) window.__loadArchiveSubs(); }catch{}
+  _nar={ym:_narDefaultYm(),ack:false,busy:false,rows:{},ask:null};
+  _narResetRows();
+  const ov=document.createElement('div'); ov.id='nar-ov'; ov.className='nar-ov';
+  ov.innerHTML='<div class="nar-box" role="dialog" aria-modal="true" aria-labelledby="nar-title"></div>';
+  ov.addEventListener('click',e=>{
+    if(e.target===ov){ _narClose(); return; }
+    const b=e.target&&e.target.closest?e.target.closest('[data-act]'):null; if(!b||b.disabled) return;
+    const act=b.getAttribute('data-act'), shop=b.getAttribute('data-shop');
+    if(act==='close') _narClose();
+    else if(act==='ask-ok') _narAnswer(true);
+    else if(act==='ask-no') _narAnswer(false);
+    else if(act==='ack') _nar.ack=!!b.checked;
+    else if(act==='dry') _narRunGuarded(()=>_narDry(shop));
+    else if(act==='run') _narRunGuarded(()=>_narRun(shop));
+    else if(act==='restore') _narRunGuarded(()=>_narRestore(shop));
+    else if(act==='dryall') _narDryAll();
+    else if(act==='runall') _narRunGuarded(async()=>{ _narResetRows(); _narRender(); for(const s of _NAR_SHOPS){ if(!await _narRun(s)) break; } });
+  });
+  ov.addEventListener('change',e=>{ const t=e.target; if(t&&t.getAttribute&&t.getAttribute('data-act')==='ym'&&_nar&&!_nar.busy){ _nar.ym=t.value; _narResetRows(); _narRender(); } });
+  document.addEventListener('keydown',_narKey,true);
+  document.body.appendChild(ov);
+  _narRender();
+}
+// 新封存訂閱到了 → 重畫「已封存／未完成」小字
+window.addEventListener('profitDataReady',()=>{ try{ if(_nar&&!_nar.busy) _narRender(); }catch{} });
+Object.assign(window,{ openNotesArchiveTool, __narBtnSync:_narBtnSync });
+// Console 唯讀：本機有沒推的廣告調整 key（給一鍵封存檢查用，不回內容）
+window.__notesLocalDirtyKeys=function(){ const out=new Set(); try{ const a=JSON.parse(localStorage.getItem(_NOTES_DIRTY_LS)||'[]'); if(Array.isArray(a)) a.forEach(k=>{ if(String(k).indexOf('ec_notes|')===0) out.add(k); }); }catch{} _pendingSyncKeys.forEach(k=>{ if(String(k).indexOf('ec_notes|')===0) out.add(k); }); return [...out]; };
 const _userPickedPeriod={};   // 使用者主動切過月份/半月的賣場 → 之後不再自動跳，尊重其選擇
 // 把某賣場的下拉切到「最新有資料的期間」。
 // 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
@@ -15980,6 +16237,7 @@ function saveScoreTargetsModal(btn){
 // ── Tab switch ──
 function setShop(shop,btn){
   try{ _reportCacheFlush('setShop'); }catch(e){}   // 切通路前，把剛編輯的報表寫進本機。刻意放在下面「不在淨利表就 return」之前：多寫一次無害
+  try{ _narBtnSync(); }catch(e){}   // #436 ⑤ 一鍵封存鈕：只有管理員看得到
   // 🔴 不在淨利表頁面 → 直接 return，什麼都不做（2026-08-07 新增）
   //   「不在淨利表頁還會呼叫 setShop」乍看很莫名，成因在 offices.js：
   //   - offices.js:820 那顆 200ms 計時器（內含 restoreProfitView）的排程條件是 activeTab.key==='profit'，
