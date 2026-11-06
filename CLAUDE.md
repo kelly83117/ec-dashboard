@@ -313,7 +313,7 @@ ESM 有個致命陷阱必須牢記：
   MOMO 動銷率三條線（甲配 49/47/44、乙配 74/70/67、MO+ 34/21/14）用新口徑 2026-05～10 校準，MO+ 不含 2026-09（下半月幾乎沒有資料）。算法：100 分線＝P75 往上取整、80 分線＝P50 往下取整、60 分線＝P10 往下取整（整數 %；由舊線與 v4 百分位反推後確認沿用）。`types[*].sellThrough` 的零分線／滿分線另用 `healthCalibrate` 算，只給舊面向函式、不影響總分。
   🔴 改 BASE 只影響雲端最早一版之前的月份：目前雲端有 `2026-11` 版，所以 BASE 只管 2026-10 以前，2026-11 起要管理員在「⚙ 評分標準」另存。設定視窗的適用月份只能選當月起 12 個月（`_hlStdMonths`），過了那個月就改不到。
   沒資料的面向一律帶 status（不適用／資料不足／尚未上傳／營收過小／已關站／尚未載入／載入中），**不得算成 0 分**。
-  頁首「📖 怎麼看這頁」第一層由 `_hlGuideIntro`、「看完整規則」表格由 `_hlGuideFullHtml` 產生，都讀選定月份適用的規則（`_hlSelectedRules`），門檻數字不寫死——改規則說明自動跟著變，不必另外改文字。
+  頁首「📖 怎麼看這頁」第一層 5 行由 `_hlGuideIntro`、預設收合的「看算法說明」（上方「評分標準：X 起適用」＋5 點）由 `_hlGuideFullHtml` 產生，都讀選定月份適用的規則（`_hlSelectedRules`），權重、級距、營收門檻不寫死——改規則說明自動跟著變，不必另外改文字。說明彈窗**不列分數線**（只在評分標準視窗看），第 3 行的「看各通路分數線 →」關掉說明、呼叫 `_hlStdOpen`。評分標準視窗的「近 6 月 平均・範圍」格只放一行（平均粗體＋範圍小字，不是 6 個月才寫 n 個月），原本兩行完整文字放在滑鼠提示最上面。
   不是部門、所有登入者可看；不在 `CLOUD_RENDER_ROUTES`。Console：`__healthBacktest()`（唯讀回測）、`__healthMock('demo'|'empty'|false)`（只在 localhost）。
 - `issues` collection — 問題追蹤，一筆問題一份 doc（doc id `iss-…`），**不放 app/main**。透過 `window.__cloudIssues`：
   讀 `subscribe(cb, onErr)`（整個 collection onSnapshot）/ `getDoc(id)`；寫 `create(id, data)`（setDoc，只用在新建）/

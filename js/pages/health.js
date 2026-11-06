@@ -43,7 +43,7 @@ function _hlDeepFreeze(o) {
 //   健檢凍結自己的一份門檻，不讀淨利表的 getAnaThresh / getGrowthThresh（那邊被改時，健檢分數不該悄悄跟著變）。
 //   比率一律是小數（0.15＝15%）。zero＝零分線、full＝滿分線；zero > full 代表越低越好（同一支 _hlLinear 處理）。
 //   子指標 scored:false＝只顯示原始值、不計分（不進面向分數、不進主要扣分原因）。
-//   「📖 怎麼看這頁」的門檻數字從這張表產生（_hlGuideFullHtml），改這裡說明會自動跟著變。
+//   「📖 怎麼看這頁」的燈號、權重、級距、營收門檻從這張表產生（_hlGuideIntro／_hlGuideFullHtml），改這裡說明會自動跟著變。
 //   v3-2026-11（塊 B）：加「廣告效率」（蝦皮）、「商品結構」（蝦皮／MOMO／PChome）。這兩個面向的門檻是方案 §2-4／§2-5／§2-6 的【起始值】，
 //     calibrated:false ⇒ 畫面與說明標「起始值，待回測校準」；校準後拿掉旗標並升 version。獲利、成長的門檻不變（v2 校準值）。
 //   v4-2026-11（2026-11-02 審查決定，方案 §2-5、§2-7-2）：廣告效率、商品結構用真實資料回測校準，拿掉 calibrated:false。
@@ -647,13 +647,12 @@ function _hlShopeeStApply(subs, ch, m, snap) {
 // MOMO（甲配、乙配、MO+）的動銷率口徑（#416）：跟淨利表 MOMO 總覽同一套，畫面說明也用這句。
 const HL_MOMO_ST_FORMULA = '本期有銷售的商品頁 ÷（目前上架 ∪ 本期有銷售）';
 const HL_MOMO_ST_DESC = `同淨利表 MOMO 總覽：${HL_MOMO_ST_FORMULA}。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
-// 完整規則「動銷率・怎麼算」分平台（照程式實際算法：_hlShopeeStApply／_hlMomoStApply／_hlSellThrough＋profit.js __healthProductSnapshot 的 PChome sold＝hasBiz、active＝!discontinued）
+// 動銷率 ⓘ 說明分平台（照程式實際算法：_hlShopeeStApply／_hlMomoStApply／_hlSellThrough＋profit.js __healthProductSnapshot 的 PChome sold＝hasBiz、active＝!discontinued）
 const HL_ST_HOW_LINES = Object.freeze([
   '蝦皮＝洞察表整月商品表現，正常商品裡這個月有賣出的比例。',
   `MOMO＝同淨利表 MOMO 總覽，${HL_MOMO_ST_FORMULA}。`,
   'PChome＝本期有銷售的商品款數 ÷（目前沒停售 ∪ 本期有銷售的款數），轉單、寄倉合併；料號去掉最後一段規格碼算一款（雨衣四色算 1 個），料號不是「英文字母＋數字－數字」的各自算一款。',
 ]);
-const HL_ST_STATE_NOTE = '上架狀態是匯出當下／現在的狀態（蝦皮＝整月商品表現匯出當下，MOMO、PChome＝現在的上下架），不是當月的，舊月份只當參考。';
 // 把 MOMO 的動銷率子指標換成 momoPeriodTotals 的數字（純函式：只讀 snap.prod 的 st，由 profit.js 帶進來）。跟 minSold 脫鉤：只要這個月有商品層資料就算。
 //   商品層還沒好、這個月沒有銷售資料 ⇒ 不動，沿用 _hlStructureDim 給的狀態（載入中、尚未上傳…）。
 //   sellThroughPage 不再用（主數字本身就以商品頁計）；deadDupPages 保留；公司商品口徑只留在對照小字（_hlMomoPageNote）。
@@ -1220,9 +1219,16 @@ function _hlStdHistText(h, itemKey) {
     h.excluded.forEach(x => lines.push(`${_hlYmLabel(x.month)}　${x.reason}`));
   }
   const tip = lines.join('\n');
-  if (!h.n) return { line1: '—', line2: '0 個月', tip, ref: false };
-  if (h.refOnly) return { line1: `平均 ${_hlFmtPct(h.rate)}`, line2: `僅供參考・${small}・${h.n} 個月`, tip, ref: true };
-  return { line1: `平均 ${_hlFmtPct(h.rate)}`, line2: h.n === 1 ? '1 個月' : `${pct1(h.min)}～${pct1(h.max)}・${h.n} 個月`, tip, ref: false };
+  // 格子只放一行：平均（粗體）＋範圍（灰色小字）＋不是 6 個月才寫「n 個月」；原本格子裡的完整文字（line1／line2）放在提示最上面。
+  const nNote = h.n === HL_STD_HIST_N ? '' : `${h.n} 個月`;
+  const withFull = (l1, l2) => `${l1}\n${l2}\n\n${tip}`;
+  if (!h.n) return { line1: '—', line2: '0 個月', avg: '—', range: '', nNote: '0 個月', tip, ref: false };
+  if (h.refOnly) {
+    const l1 = `平均 ${_hlFmtPct(h.rate)}`, l2 = `僅供參考・${small}・${h.n} 個月`;
+    return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: '', nNote: '', refNote: '僅供參考', tip: withFull(l1, l2), ref: true };
+  }
+  const l1 = `平均 ${_hlFmtPct(h.rate)}`, l2 = h.n === 1 ? '1 個月' : `${pct1(h.min)}～${pct1(h.max)}・${h.n} 個月`;
+  return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: h.n === 1 ? '' : `${pct1(h.min)}–${pct1(h.max)}`, nNote, tip: withFull(l1, l2), ref: false };
 }
 // 動銷率「近 6 月」的 ⓘ 文案（依這一列的資料來源）。'c|通路 id' 或 't|類型'；這一列沒有商品資料 ⇒ ''。
 const HL_STD_BIAS_SHOPEE = '蝦皮的商品狀態是報表匯出當下的狀態，不是當月的。補傳的舊月份，在架數可能跟當時實際不同，月份越舊越不準，只當參考。';
@@ -1391,120 +1397,45 @@ function _hlRangeLabel(from, to) {
   return from.slice(0, 4) === to.slice(0, 4) ? `${_hlYmLabel(from)}～${to.slice(5)}` : `${_hlYmLabel(from)}～${_hlYmLabel(to)}`;
 }
 
-// 「看完整規則」表格（塊 2，#406）：三欄 指標｜怎麼算｜標準，每個指標名稱旁一個 ⓘ，點了在該列下方展開詳細算法與資料來源。
-//   🔴 分數線、權重、暫定、燈號、營收門檻一律從傳進來的規則（選定月份適用的那一版）產生，不在文字裡寫死。
-// 類型在這張表上的名稱＝types[*].label（跟主看板卡片同一套名稱）。
-function _hlGuideLineText(name, lines, tiers) {
-  return `${name}：` + lines.map((l, i) => `${_hlPctTrim(l)} 以上 ${tiers[i]} 分`).join('、') + '，未達 0 分';
-}
-// 一個計分項目的「標準」欄（純函式，回一行一字串）。同類型線都一樣合成一行寫類型名；通路自己覆蓋（而且跟類型不同）的另列那一家（同樣的線併一行）；
-//   整類型都被覆蓋成同一組也寫類型名。沒有線的通路收成最後一行「其他通路」；
-//   但動銷率要分開寫：類型本來就不算動銷率的（_hlNoSellThrough）寫「不算動銷率」。
-function _hlGuideLineRows(it, R) {
-  const T = R.score.tiers, rows = [], notCounted = [];
-  let none = false;
-  Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order).forEach(t => {
-    const chs = HEALTH_CHANNELS.filter(ch => ch.type === t);
-    const typeLines = it.lines && it.lines[t], typeSig = typeLines ? JSON.stringify(typeLines) : null;
-    const groups = new Map();
-    chs.forEach(ch => {
-      const l = _hlLinesFor(it, ch);
-      if (!l) {
-        if (it.key === 'sellThrough' && _hlNoSellThrough(t)) { if (notCounted.indexOf(R.types[t].label) < 0) notCounted.push(R.types[t].label); }
-        else none = true;
-        return;
-      }
-      const sig = JSON.stringify(l);
-      if (!groups.has(sig)) groups.set(sig, { lines: l, chs: [] });
-      groups.get(sig).chs.push(ch);
-    });
-    const isType = (sig, g) => sig === typeSig || g.chs.length === chs.length;
-    const typeName = R.types[t].label;
-    groups.forEach((g, sig) => { if (isType(sig, g)) rows.push(_hlGuideLineText(typeName, g.lines, T)); });
-    groups.forEach((g, sig) => { if (!isType(sig, g)) rows.push(_hlGuideLineText(g.chs.map(ch => ch.label).join('、'), g.lines, T)); });
-  });
-  if (none) rows.push('其他通路：標準未設定，不給分（不算 0 分）');
-  if (notCounted.length) rows.push(`${notCounted.join('、')}：不算動銷率`);
-  return rows;
-}
-// ⓘ 展開的「詳細算法與資料來源」（純函式，回一行一字串）。公式、資料來源、口徑說明都搬到這裡。
-function _hlGuideDetails(key, R) {
-  const pure = R.score.items.find(it => it.key === 'pureRate'), st = R.score.items.find(it => it.key === 'sellThrough');
-  if (key === 'pureRate') {
-    const def = R.profit.subs.find(x => x.key === 'pureRate');
-    const types = Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order);
-    const exType = pure ? types.find(t => pure.lines[t]) : null;
-    const ex = exType ? pure.lines[exType][1] : null;
-    const notes = [];
-    Object.keys(R.notes).forEach(g => Object.keys(R.notes[g]).forEach(k => notes.push(R.notes[g][k])));
-    return [
-      `${def.desc}。公式：${def.formula}（KPI 月結）。`,
-      '資料來源：KPI 月結裡各通路每個月的營收、商品成本、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
-      `營收未滿 ${_hlFmtMoney(R.minRev)} 的月份不評分（比率波動太大），但卡片仍以灰字顯示純利率、毛利率的數字，標「僅供參考」。`,
-      ex != null ? `比的時候用畫面上顯示的數字（小數一位）：畫面寫 ${(Math.round(ex * 1000) / 10).toFixed(1)}% 就算達到 ${_hlPctTrim(ex)} 那條線。` : '',
-      '這一項沒有分數（標準未設定、營收過小、KPI 還沒填、資料不足）時，整張卡沒有總分，卡片寫「未評分」和原因，不算 0 分。',
-      '不同通路的分數線、營收口徑都不同，跨類型的分數高低只供參考。',
-      ...notes,
-    ].filter(Boolean);
-  }
-  if (key === 'sellThrough') {
-    const wait = _hlWaitTypeLabels(R);
-    return [
-      st && st.provisional ? '標「暫定」：這組分數線之後還會再調。' : '',
-      '資料來源：蝦皮＝洞察表每月上傳的整月商品表現（狀態「正常」的商品算在架，數量看「數量(全部訂單)」）；MOMO＝商品主檔＋對帳，跟淨利表 MOMO 總覽同一套；PChome＝日曆月總表＋商品清單。',
-      'MOMO 細項動銷率下方的對照小字（以公司商品計）：原廠編號去掉最後一段規格碼，同款不同規格算 1 個，只顯示、不計分。',
-      `PChome 本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
-      wait.length ? `${wait.join('、')} 的動銷率要等商品資料載好，之前卡片寫「載入中…」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。手機不會自動載入商品資料，要按卡片裡的「載入商品資料」。` : '',
-      `沒有標準或這個月沒有資料時，總分＝${pure ? pure.label : '純利率'}分數，卡片寫原因，例如「動銷率標準未設定，暫時只看${pure ? pure.label : '純利率'}」。`,
-    ].filter(Boolean);
-  }
-  const g = R.profit.subs.find(x => x.key === 'grossRate');
-  return [`${g.desc}。公式：${g.formula}（KPI 月結）。`, '毛利率主要由各平台的價格結構決定，用來判斷要不要調價（例如進貨成本變貴時），不計分。', '卡片下面和細項的逐月變化表都看得到這個數字。'];
-}
+// 「看算法說明」折疊（預設收合）：5 點白話，粗體用 <b>。營收門檻、商品門檻、暫定、不算動銷率的類型都從規則產生，不寫死。
+//   分數線不在這裡寫（只在評分標準視窗看）。最上面一行「評分標準：X 起適用」隨選定月份變。
 function _hlGuideFullHtml(rules) {
-  const R = rules || HEALTH_RULES, e = escapeHtml, L = R.lights;
-  const row = (key, name, sub, how, stdHtml) => {
-    const id = `hl-gt-d-${key}`;
-    return `<tr class="hl-gt-row"><td class="hl-gt-name"><strong>${e(name)}</strong>${sub ? `（${e(sub)}）` : ''} <button type="button" class="hl-gt-i" data-hl-gt-info="${e(key)}" aria-expanded="false" aria-controls="${e(id)}" aria-label="${e(name)}的詳細算法與資料來源" title="詳細算法與資料來源">ⓘ</button></td>
-      <td>${Array.isArray(how) ? `<ul class="hl-gt-lines">${how.map(x => `<li>${e(x)}</li>`).join('')}</ul>` : e(how)}</td><td>${stdHtml}</td></tr>
-      <tr class="hl-gt-detail" id="${e(id)}" hidden><td colspan="3"><ul class="hl-gt-detail-list">${_hlGuideDetails(key, R).map(x => `<li>${e(x)}</li>`).join('')}</ul></td></tr>`;
-  };
-  const HOW = { pureRate: '純利 ÷ 營收，取 KPI 月結。', sellThrough: HL_ST_HOW_LINES.concat([HL_ST_STATE_NOTE]) };
-  const scored = R.score.items.map(it => row(it.key, it.label, `佔總分 ${Math.round(it.w * 100)}%${it.provisional ? '，暫定' : ''}`, HOW[it.key] || '',
-    `<ul class="hl-gt-lines">${_hlGuideLineRows(it, R).map(x => `<li>${e(x)}</li>`).join('')}</ul>`)).join('');
-  const gross = R.profit.subs.find(x => x.key === 'grossRate');
-  const pure = R.score.items.find(it => it.key === 'pureRate');
-  const total = R.score.items.map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('＋');
+  const R = rules || HEALTH_RULES, e = escapeHtml;
+  const st = R.score.items.find(it => it.key === 'sellThrough');
+  const noSt = Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order).filter(_hlNoSellThrough).map(t => R.types[t].label);
   const minRev = _hlFmtMoney(HEALTH_TAG_RULES.minRev).replace('$', '');
-  return `<p class="hl-gt-from">評分標準：${e(_hlYmLabel(R.from || R.firstMonth))} 起適用</p>
-    <table class="hl-gt"><thead><tr><th class="hl-gt-c1">指標</th><th class="hl-gt-c2">怎麼算</th><th class="hl-gt-c3">標準</th></tr></thead><tbody>${scored}${row('grossRate', gross.label, '', '（營收 − 商品成本）÷ 營收，取 KPI 月結。', e('只顯示、不計分（用來判斷要不要調價）'))}</tbody></table>
-    <p class="hl-gt-note">分數顏色：綠 ${L.green} 以上、黃 ${L.yellow}–${L.green - 1}、紅未滿 ${L.yellow}。</p>
-    <p class="hl-gt-note">${e(`沒有資料、標準未設定的通路不給分，不算 0 分；營收未滿 ${_hlFmtMoney(R.minRev)} 的通路也不給分，但卡片仍以灰字顯示數字供參考。總分＝${total}；只有${pure.label}有分數時，總分＝${pure.label}分數。`)}</p>
-    <p class="hl-gt-note">表現好商品、需注意商品只列本月或上月營收 ${e(minRev)} 元以上的商品。</p>
-    <p class="hl-gt-note">沒有分數的原因 <button type="button" class="hl-gt-i" data-hl-gt-info="noscore" aria-expanded="false" aria-controls="hl-gt-d-noscore" aria-label="沒有分數的原因" title="沒有分數的原因">ⓘ</button></p>
-    <ul class="hl-gt-detail-list hl-gt-noscore" id="hl-gt-d-noscore" hidden>${_hlUnratedHelpLines(R).map(x => `<li>${e(x)}</li>`).join('')}</ul>`;
+  const pts = [
+    '<b>純利率</b>＝純利 ÷ 營收；<b>毛利率</b>＝（營收 − 商品成本）÷ 營收。都取 KPI 月結（整月，跟財務對得上）。',
+    `<b>動銷率</b>＝這個月有賣出的商品 ÷ 在架商品。蝦皮用洞察表「整月商品表現」，MOMO、PChome 跟各自的淨利表同一套算法${noSt.length ? `；${e(noSt.join('、'))}不算動銷率` : ''}。`,
+    `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}`,
+    `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片會寫「未評分」和原因，不算 0 分。`,
+    `<b>表現好／需注意商品</b>只列本月或上月營收 ${e(minRev)} 元以上的商品。`,
+  ];
+  return `<p class="hl-gt-from">評分標準：${e(_hlYmLabel(R.from || R.firstMonth))} 起適用</p><ol class="hl-ga-list">${pts.map(x => `<li>${x}</li>`).join('')}</ol>`;
 }
-// 「📖 怎麼看這頁」第一層：7 行、每行 25 字左右的白話；燈號、權重、分數線、暫定項目、營收門檻都從規則產生
+// 「📖 怎麼看這頁」第一層：5 行白話；燈號、權重、分數級距、營收門檻都從規則產生。第 3 行後面的「看各通路分數線 →」由 _hlGuideModalHtml 接上。
 function _hlGuideIntro(rules) {
   const R = rules || HEALTH_RULES, L = R.lights, SC = R.score, T = SC.tiers;
   const w = [...new Set(SC.items.map(it => Math.round(it.w * 100)))];
-  const prov = SC.items.filter(it => it.provisional).map(it => it.label).join('、');
+  const pure = SC.items.find(it => it.key === 'pureRate');
+  const names = SC.items.map(it => it.label).join('、');
+  const share = w.length === 1 ? (SC.items.length === 2 ? `${names}各占一半` : `${names}各占 ${w[0]}%`) : SC.items.map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('＋');
   return [
-    `分數顏色：綠 ≥${L.green}、黃 ${L.yellow}–${L.green - 1}、紅 <${L.yellow}。`,
-    `只看${SC.items.map(it => it.label).join('、')}` + (w.length === 1 ? `，各占 ${w[0]}%。` : '。'),
-    `分數線：${T.join('／')}，沒達到就 0 分。`,
-    prov ? `${prov}標「暫定」；沒標準的寫「標準未設定」。` : '沒標準的項目寫「標準未設定」，不算分。',
-    '沒分數的卡寫「未評分」和原因，不算 0 分。',
-    `營收未滿 ${R.minRev / 10000} 萬的通路灰字顯示數字、不計分。`,
-    'MOMO 動銷率跟淨利表 MOMO 總覽同一套算法。',
+    `分數顏色：綠 ${L.green} 以上、黃 ${L.yellow}～${L.green - 1}、紅未滿 ${L.yellow}。`,
+    `總分＝${share}；只有${pure ? pure.label : '純利率'}有標準時，總分就是${pure ? pure.label : '純利率'}分數。`,
+    `每項分 ${T.join('／')} 三級，都沒達到是 0 分。`,
+    `沒分數的通路寫「未評分」，不算 0 分；營收未滿 ${R.minRev / 10000} 萬的通路數字是灰字，只供參考。`,
+    '毛利率只顯示、不計分。',
   ];
 }
-// 說明彈窗：第一層 7 行；第二層「看完整規則」預設收合（opts.openFull＝直接展開），內容＝_hlGuideFullHtml(rules)（一張表，門檻、權重都從傳進來的規則產生）。
+// 說明彈窗：第一層 5 行；「看算法說明」預設收合（opts.openFull＝直接展開），內容＝_hlGuideFullHtml(rules)。
+//   第 3 行（分數級距）後面接「看各通路分數線 →」：關掉這個視窗、用 _hlStdOpen 開評分標準視窗（_hlGuideBindInfo 綁的點擊）。
 //   樣式沿用 recon-guide（App.guideHtml 同一套 class），不改共用的 modal.js。
 function _hlGuideModalHtml(rules, opts) {
   const e = t => escapeHtml(t);
-  return `<div class="recon-guide hl-guide"><ul class="hl-guide-intro">${_hlGuideIntro(rules).map(x => `<li>${e(x)}</li>`).join('')}</ul>
-    <details class="hl-guide-more"${opts && opts.openFull ? ' open' : ''}><summary>看完整規則</summary><div class="hl-guide-full">${_hlGuideFullHtml(rules)}</div></details>
+  const lines = _hlGuideIntro(rules).map((x, i) => `<li>${e(x)}${i === 2 ? ' <button type="button" class="hl-guide-link" data-hl-guide-std>看各通路分數線 →</button>' : ''}</li>`);
+  return `<div class="recon-guide hl-guide"><ul class="hl-guide-intro">${lines.join('')}</ul>
+    <details class="hl-guide-more"${opts && opts.openFull ? ' open' : ''}><summary>看算法說明</summary><div class="hl-guide-full">${_hlGuideFullHtml(rules)}</div></details>
     <div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div></div>`;
 }
 
@@ -1946,15 +1877,6 @@ function _hlTrendHelpLines() {
     `持平＝比率差 ${_hlPctTrim(F.rate).replace('%', '')} 個百分點以內、金額差 ${_hlPctTrim(F.money)} 以內。▲ 變好、▼ 變差（廣告佔比越低越好，寫「改善／變差」）；計分項目後面接本月分數。`,
   ];
 }
-// 完整規則表下方 ⓘ「沒有分數的原因」：卡片上那行原因是什麼意思
-function _hlUnratedHelpLines(R) {
-  const S = _HL_STATUS_TEXT;
-  return [
-    `${S.nostd}：這類通路還沒有這一項的分數線。${S.insufficient}：KPI 還沒開始有資料的月份，或商品太少算不出來。`,
-    `營收未滿 ${_hlFmtMoney(R.minRev)}：當月營收太小，比率波動太大，不給分；卡片仍以灰字顯示純利率、毛利率的數字供參考。KPI 還沒填：這個月的 KPI 還沒填完，或還沒有商品資料。`,
-    `${S.closed}：關站月份起不評分。${S.loading}：商品資料還沒載好，到了自動重算。以上都不算 0 分。`,
-  ];
-}
 // 百分比去掉多餘的 .0（滿分標準用：24%、0.5%、62%）
 function _hlPctTrim(v) { return _hlFinite(v) ? String(Math.round(v * 1000) / 10) + '%' : '—'; }
 // 一格的內容：{ text, sub, cls }。沒資料一律狀態字或「—」，不顯示 0%。
@@ -2263,14 +2185,6 @@ function _hlTileHtml(r, prev, rank, open, snap) {
       ${_hlTilePartsHtml(r)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
-}
-// 哪些通路類型的總分要等商品層（v5）：有商品層、而且「不是純利率」的計分項目（動銷率）有分數線的通路（含通路自己的線）所屬的類型。從規則產生，不寫死。
-function _hlWaitTypeLabels(rules) {
-  const R = rules || HEALTH_RULES;
-  const types = [...new Set(HEALTH_CHANNELS
-    .filter(ch => ch.prod && !_hlStFromPerf(ch) && R.score.items.some(it => it.key !== 'pureRate' && _hlLinesFor(it, ch)))
-    .map(ch => ch.type))];
-  return types.sort((a, b) => (R.types[a].order - R.types[b].order)).map(t => R.types[t].label);
 }
 // 卡片分數下面一行（v5）：「純利 80 · 動銷 60」；動銷率在等商品層時「純利 80 · 動銷 載入中…」；
 //   只有純利率算分時寫出原因（_hlPureOnlyWhy）：「純利 80・動銷率標準未設定，暫時只看純利率」「純利 80・動銷率尚未上傳，暫時只看純利率」。
@@ -2677,14 +2591,13 @@ let _hlLast = null;   // 最近一次畫面用的 { month, snap }（畫圖用）
 function _hlSelectedRules() {
   return healthRulesForMonth(_hlState.month, _hlLast && _hlLast.snap && _hlLast.snap.healthRuleVersions);
 }
-// 說明表格的 ⓘ：點了展開／收起該列下方的詳細算法。彈窗不在 #main-content 裡（委派 _hlOnClick 收不到），開窗時綁在彈窗內容上；每次開窗內容都換新，不會重複綁。
+// 說明彈窗的「看各通路分數線 →」：關掉說明、開評分標準視窗（既有的 _hlStdOpen）。彈窗不在 #main-content 裡（委派 _hlOnClick 收不到），
+//   開窗時綁在彈窗內容上；每次開窗內容都換新，不會重複綁。
 function _hlGuideInfoClick(e) {
-  const btn = e.target.closest && e.target.closest('[data-hl-gt-info]');
+  const btn = e.target.closest && e.target.closest('[data-hl-guide-std]');
   if (!btn) return;
-  const row = document.getElementById(btn.getAttribute('aria-controls'));
-  if (!row) return;
-  row.hidden = !row.hidden;
-  btn.setAttribute('aria-expanded', row.hidden ? 'false' : 'true');
+  App.closeModal();
+  _hlStdOpen();
 }
 function _hlGuideBindInfo() {
   const box = document.querySelector('.hl-guide');
@@ -2894,12 +2807,17 @@ function _hlStdGroupHtml(key, lines, lock, disabled, hints, label) {
   return [0, 1, 2].map(i => `<td${i === 0 ? ' class="hl-std-gs"' : ''}><input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${hints ? _hlStdToPct(hints[i]) : ''}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}></td>`).join('') + _hlStdHistCellHtml(key);
 }
 // 「近 6 月」欄：只有文字，刻意不帶 data-hl-std-cell（存檔、_hlStdFormSig 都讀不到）。key＝'項目|t|類型' 或 '項目|c|通路 id'。
+//   一行：平均（粗體）＋範圍（灰色小字）＋「n 個月」（不是 6 個月才有）；窄的時候範圍可以換到第二行，平均本身不換行。還在等資料時沿用 line1／line2。
 function _hlStdHistView(key) {
   const i = key.indexOf('|'), itemKey = key.slice(0, i), histKey = key.slice(i + 1);
   const h = _hlStd.hist && _hlStd.hist[itemKey] && _hlStd.hist[itemKey][histKey], t = _hlStdHistText(h, itemKey);
   const bias = itemKey === 'sellThrough' && h && !h.wait ? _hlStdBiasText(histKey) : '';   // 還在等資料時沒有數字，不掛 ⓘ
   const info = bias ? ` <span class="hl-std-hist-info" title="${escapeHtml(bias)}" aria-label="${escapeHtml(bias)}">ⓘ</span>` : '';
-  return { t, html: `<div class="hl-std-hist-avg">${escapeHtml(t.line1)}</div><div class="hl-std-hist-sub">${escapeHtml(t.line2)}${info}</div>` };
+  const sub = x => (x ? ` <span class="hl-std-hist-sub">${escapeHtml(x)}</span>` : '');
+  const body = t.avg != null
+    ? `<span class="hl-std-hist-avg">${escapeHtml(t.avg)}</span>${sub(t.refNote)}${sub(t.range)}${sub(t.nNote)}`
+    : `<span class="hl-std-hist-avg">${escapeHtml(t.line1)}</span>${sub(t.line2)}`;
+  return { t, html: `<div class="hl-std-hist-line">${body}${info}</div>` };
 }
 function _hlStdHistCellHtml(key) {
   const { t, html } = _hlStdHistView(key);
@@ -2970,13 +2888,16 @@ function _hlStdBodyHtml() {
     : !_hlStdCloudReady() ? '評分標準還沒讀到，暫時不能修改（請重新整理後再試）' : '';
   const dis = off ? ' disabled' : '';
   return `<div data-hl-std-form>
+      <ol class="hl-std-how">
+        <li>選「從哪個月開始適用」，填各通路 100／80／60 分的門檻（%），按儲存。之前的月份照舊。</li>
+        <li>每類第一列是整類共用的線；展開「個別通路」只填要不一樣的那家，沒填就照整類。</li>
+        <li>整組留空＝標準未設定（不給分），三格要全填或全空。「近 6 月」是實際數字，訂線時參考。</li>
+      </ol>
       <label class="hl-std-field">從哪個月開始適用
         <select data-hl-std-from>${_hlStdMonths().map(m => `<option value="${m}"${m === from ? ' selected' : ''}>${escapeHtml(_hlYmLabel(m))}</option>`).join('')}</select></label>
       <div data-hl-std-notes>${notes.map(n => `<div class="hl-std-note">${escapeHtml(n)}</div>`).join('')}</div>
-      <div class="hl-std-lead">每類第一列是這類通路的標準；展開「個別通路」沒填就照用，填了只改那一家。</div>
       <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1" rowspan="2">通路類型</th>${items.map(it => `<th class="hl-std-gs" colspan="4">${escapeHtml(it.label)}（%）</th>`).join('')}</tr>
-        <tr>${items.map(() => [100, 80, 60].map((n, i) => `<th${i === 0 ? ' class="hl-std-gs"' : ''}>${n} 分</th>`).join('') + '<th>近 6 月</th>').join('')}</tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="hl-std-tip">整組留空＝標準未設定；三格要全填或全空。</div>
+        <tr>${items.map(() => [100, 80, 60].map((n, i) => `<th${i === 0 ? ' class="hl-std-gs"' : ''}>${n} 分</th>`).join('') + '<th class="hl-std-hist-th">近 6 月 平均・範圍</th>').join('')}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="hl-std-row">權重
         ${items.map(it => `<label class="hl-std-w">${escapeHtml(it.label)} <input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-w="${escapeHtml(it.key)}" value="${_hlStdToPct(it.w)}" aria-label="${escapeHtml(it.label)}權重（%）"${dis}> %<span class="hl-std-err" data-hl-std-err="w|${escapeHtml(it.key)}"></span></label>`).join('')}
         <span class="hl-std-err" data-hl-std-err="w"></span></div>
