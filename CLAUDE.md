@@ -132,6 +132,11 @@ commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**�
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
 **以工具實際印出的為準**：對不上先停手查是哪個物件沒被包到，不要直接改數字了事。
 
+⚠ **#436 第 ⑤ 塊（廣告調整封存）新增 `__cloudNotesArchive`**（寫入 `createMonth`、`commitDelete`、`restoreMonth`，讀 `getDoc`）→ 物件 +1、寫入方法 +3。
+同時 ④（optlog 搬家）也在加雲端物件，上面的 32 / 50 與 MUST 清單**以合併時防護碼實際輸出為準**，合併的人當場重數再改。
+離線實數（node 假 SDK、READ_OK 規則，只加這塊、不含 ④）：32 / 49 → 33 / 52（跟防護碼的差 1 同上）。
+MUST 清單要補 `['__cloudNotesArchive', 'createMonth']`、`['__cloudNotesArchive', 'commitDelete']`、`['__cloudNotesArchive', 'restoreMonth']`。
+
 **測完拆除順序（勿顛倒）：** 先關分頁 → 再停 server → 最後才刪掉
 `firebase.js` 裡的防護區塊。
 
@@ -194,6 +199,25 @@ ESM 有個致命陷阱必須牢記：
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
 - `app/profit_notes_2026`、`app/profit_notes_2026_2`（archive docs）— 舊月份的廣告調整（`ec_notes`），延後訂閱。
   `app/profit_2026_05` 是 2026/05 的舊報表封存，**已不載入，文件留著不刪**（那 4 份報表 `profits` 都有，畫面一直用 `profits` 那份；不要載回來，會把舊版填進記憶體）。
+- `notes_archive` collection — 廣告調整的新封存（#436 第 ⑤ 塊），**每通路每月一份**，doc id `{通路}__{YYYY-MM}`（例 `好麻吉__2026-09`）。上面兩片舊封存不動、維持唯讀照常讀，之後不再往裡面放。
+  形狀 `{ schema:1, shop, month:'YYYY-MM', state:'copied'|'done', notes:{ first|second|full: { 品號:{adjustments:[…]} } }, src:{ keys, sig, codes }, createdAt, createdBy, doneAt?, doneBy? }`，
+  只放 app/profit 原本有的那幾把。通路清單寫死在 firebase.js `NOTES_ARCHIVE_SHOPS`（四家＋測試通路），**新增蝦皮通路要加**。
+  - **讀取**：firebase.js 把每份展開回 `ec_notes|{通路}|{YYYY/MM}|{半月}` 併進 `_profitMem`（舊兩片 → 新封存 → app/profit），所以讀取端（淨利表、跨期次數、洞察表 `profitNoteHistoryFor`、工作日誌）都沒改。
+    訂閱跟舊兩片同一組：`__loadArchiveSubs`（進蝦皮個別通路、工作日誌、健檢；#436 ⑤ 起洞察表打開商品調整彈窗也會觸發）。整個 collection 一個監聽、開 `includeMetadataChanges`。
+    `__profitArchivesReady` 多一個條件：新封存最近一次快照來自伺服器、沒有訂閱錯誤、沒有不合法的文件（不合法的不併進畫面，寫入一律擋下）。
+  - **唯讀判斷**（profit.js `_notesWriteBlockReason`）：app/profit 有這把 ⇒ 放行，**但**封存已就緒而且這把在 `done` 的新封存裡 ⇒ 已封存（舊分頁寫回的殘留）。
+    `done` 的 key 又出現在 app/profit 時，畫面以封存為主、逐品號補上殘留多出來的紀錄（`naOverlay`，不刪任何東西），Console 警告一次。
+  - **寫入**：只有淨利表頂端「🗄 封存廣告調整」（profit.js `openNotesArchiveTool`，管理員才看得到；app/profit 快滿提醒卡也有「開啟封存工具」）。透過 `window.__cloudNotesArchive`，三支都是交易：
+    `createMonth`（文件不存在才建立，state `copied`；`done` 一律拒絕、`copied` 要帶 `replaceCopied`）、
+    `commitDelete`（同一個交易讀 app/profit 與封存，逐品號相同才用 FieldPath 刪 app/profit 那幾把、同時改成 `done`）、
+    `restoreMonth`（回搬：寫回 app/profit、刪封存；app/profit 已經有任何一把、或寫回後大小／索引 ≥ 90% 就不做）。
+    成功回 `{ ok:true }`，條件不符回 `{ ok:false, why }`（什麼都沒寫），被唯讀／本機防護擋下回 `undefined` → 一律 `r && r.ok`。
+    工具流程：0 檢查（只讀，「試跑」只做到這裡）→ 下載備份 JSON → 複製 → 讀回逐品號比對 → 刪舊欄位＋生效 → 最後讀回。任何一步不符就停、白話原因留在視窗。
+    檢查會擋：月份還沒結束（測試通路例外）、這台有沒同步的這個月調整、key 也在舊兩片、目標已是 `done`、內容不是物件、新文件超過上限 60%。
+    純函式（盤點、產生、比對、合併）在 firebase.js `NOTES_ARCHIVE_PURE_BEGIN/END`，對外是 `window.__notesArchivePure`；不用 app/profit 的 updateTime 當鎖（任何人改任何格都會變），改用交易內逐品號比對。
+  - 🔴 **第一次正式封存前要請大家重新整理**：舊分頁不訂閱新封存，被搬走的月份在舊分頁會整個消失、而且被當成可以改（寫回 app/profit 變殘留）。工具要勾「已請大家重新整理」才會封存。
+  - 🔴 **回滾**：先在工具裡對每個 `done` 月份按「回搬」，**全部回搬後才能還原程式**；順序反過來，舊程式看不到新封存，那些月份會從畫面消失、變成可以改。回搬會讓 app/profit 漲回來，超過 90% 會自動停。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__notesArchiveState()`、`__notesArchiveWhere(key)`、`__notesLocalDirtyKeys()`、`__profitDocStats({compute:true}).notesArchive`。
 - `app/growth_{通路}`（好麻吉 / 玩樂 / 森之旅 / 維克）— 商品調整（#436 第 ③ 塊，從 app/profit 的 `ec_notes|{通路}_growth` 搬出，每通路一份，開站就訂閱）。透過 `window.__cloudGrowth`：讀 `getDoc(shop, 'server')` / `subscribe`；寫只有 `writePaths(shop, pairs)`（逐品號 FieldPath；🔴 文件不存在就失敗、**不會自動建立**，所以不走 `kpiWriteTo`）。
   形狀 `{ items:{ 品號:{adjustments:[…]} }, migratedAt:數字, migratedBy, legacySeen:{ 品號:指紋 } }`。`_profitMem` 的 key 名不變（`ec_notes|{通路}_growth`），讀取端（淨利表、洞察表、工作日誌、匯出）都不用改。
   - **切換判斷**（每個通路各自，`window.__growthRoute(通路)`）：文件有數字 `migratedAt` ⇒ 讀寫都走新文件（`new`）；伺服器確認沒有這份文件 ⇒ 完全走 app/profit 舊欄位（`old`）；沒有文件但快照來自快取 ⇒ 不算數（`loading`）。測試通路沒列管（`none`），一律舊路徑。新增蝦皮通路要改 firebase.js `GROWTH_SHOPS`。

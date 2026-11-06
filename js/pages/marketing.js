@@ -1751,6 +1751,9 @@ Object.assign(App, {
         console.warn('[insight] profitNoteHistoryFor 尚未就緒，淨利表紀錄這次不顯示');
         return '';
       }
+      // #436 ⑤：舊月份的廣告調整在封存文件裡，進蝦皮通路或工作日誌才會訂閱；洞察表這裡也要觸發（只訂一次，到了下次開彈窗就看得到）。
+      //   要等 profit.js 載完（__profitReady）才訂，理由同 daily.js renderWeeklyCalendarTab 的註解。
+      try { if (window.__profitReady && typeof window.__loadArchiveSubs === 'function') window.__loadArchiveSubs(); } catch (e) {}
       let h; try { h = window.profitNoteHistoryFor(currentShop, code); }
       catch (e) { console.warn('[insight] 淨利表紀錄查詢失敗', e); return ''; }
       const nP = (h && h.period) || [], nG = (h && h.growth) || [];

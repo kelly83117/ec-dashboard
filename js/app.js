@@ -3775,7 +3775,15 @@ function __profitCapShow(s, level) {
   const a = document.createElement('div'); a.className = 'ls-warn-actions';
   const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '知道了';
   later.addEventListener('click', __profitCapHide);
-  a.append(later); el.append(t, p, a);
+  // #436 ⑤：管理員可以直接打開廣告調整一鍵封存（profit.js 要先載入）
+  const go = document.createElement('button'); go.type = 'button'; go.className = 'ls-warn-go'; go.textContent = '開啟封存工具';
+  go.addEventListener('click', () => {
+    __profitCapHide();
+    Promise.resolve(typeof window.__ensureProfit === 'function' ? window.__ensureProfit() : null)
+      .then(() => { if (typeof window.openNotesArchiveTool === 'function') window.openNotesArchiveTool(); })
+      .catch(e => { console.error('[淨利表雲端檔] 開啟封存工具失敗', e); });
+  });
+  a.append(go, later); el.append(t, p, a);
   document.body.appendChild(el);
 }
 function __profitCapSchedule() {
