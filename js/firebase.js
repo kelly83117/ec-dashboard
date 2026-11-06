@@ -172,10 +172,105 @@ try {
       // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
       // profitDataReady listener 已處理 onMonthChange；此處不重複觸發
     };
+    // ── app/profit 容量估算（#436 短期警報）──
+    //   只用 app/profit【自己的】原始快照（profitParts.current）與已載入的封存片，不另外讀 Firestore。
+    //   只有管理員才算：最後一個快照後 10 秒、再等瀏覽器閒置才算一次，結果快取。畫面提示在 js/app.js __profitCapCheck。
+    //   ⚠ 刻意不以 __cloud 開頭（同 __profitArchivesReady）：純讀取，不被防寫防護包、不算進 TEST_NOWRITE 物件數。
+    // PROFIT_DOC_MEASURE_BEGIN（node 驗證會擷取這段，改名要一起改 node 腳本）
+    //   依 Firestore 文件大小規則：字串＝UTF-8 位元組＋1；欄位名同；數字／時間戳 8；布林／null 1；
+    //   map＝Σ（欄位名＋值）；陣列＝Σ元素；文件＝路徑（每段 UTF-8＋1，再＋16）＋Σ頂層欄位＋32。
+    //   索引（自動單欄索引，未扣豁免＝上限估計）：不是 map、不是陣列的欄位 2 筆；陣列＝不重複元素數、不往下算；map 本身 0、往下算子欄位。
+    const PROFIT_DOC_LIMIT_BYTES = 1048576;
+    const PROFIT_DOC_LIMIT_IDX = 40000;
+    const _pdUtf8 = (s) => {
+      let n = 0;
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c < 0x80) n += 1;
+        else if (c < 0x800) n += 2;
+        else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) { const d = s.charCodeAt(i + 1); if (d >= 0xDC00 && d <= 0xDFFF) { n += 4; i++; } else n += 3; }
+        else n += 3;
+      }
+      return n;
+    };
+    const _pdIsTs = (v) => !!v && typeof v === 'object' && typeof v.toMillis === 'function' && typeof v.seconds === 'number';
+    const _pdValBytes = (v) => {
+      if (v === null || v === undefined) return 1;
+      const t = typeof v;
+      if (t === 'string') return _pdUtf8(v) + 1;
+      if (t === 'number') return 8;
+      if (t === 'boolean') return 1;
+      if (Array.isArray(v)) { let n = 0; for (const e of v) n += _pdValBytes(e); return n; }
+      if (_pdIsTs(v) || v instanceof Date) return 8;
+      if (t === 'object') { let n = 0; for (const k of Object.keys(v)) n += _pdUtf8(k) + 1 + _pdValBytes(v[k]); return n; }
+      return 8;
+    };
+    const _pdStable = (v) => {
+      if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+      if (_pdIsTs(v)) return 'ts:' + v.toMillis();
+      if (Array.isArray(v)) return '[' + v.map(_pdStable).join(',') + ']';
+      return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _pdStable(v[k])).join(',') + '}';
+    };
+    const _pdValIdx = (v) => {
+      if (Array.isArray(v)) { const s = new Set(); for (const e of v) s.add(_pdStable(e)); return s.size; }
+      if (v !== null && typeof v === 'object' && !_pdIsTs(v) && !(v instanceof Date)) { let n = 0; for (const k of Object.keys(v)) n += _pdValIdx(v[k]); return n; }
+      return 2;
+    };
+    const _pdNameBytes = (path) => String(path).split('/').reduce((n, seg) => n + _pdUtf8(seg) + 1, 0) + 16;
+    // data＝文件內容（plain object）；path＝'app/profit'。回 { bytes, ratio, idx, idxRatio, top:[{key,bytes,idx}]×10 }
+    const profitDocMeasure = (data, path) => {
+      const fields = [];
+      let bytes = _pdNameBytes(path) + 32, idx = 0;
+      Object.keys(data || {}).forEach(k => {
+        const b = _pdUtf8(k) + 1 + _pdValBytes(data[k]);
+        const x = _pdValIdx(data[k]);
+        bytes += b; idx += x;
+        fields.push({ key: k, bytes: b, idx: x });
+      });
+      fields.sort((a, b) => b.bytes - a.bytes);
+      const r3 = (x) => Math.round(x * 1000) / 1000;
+      return { bytes, ratio: r3(bytes / PROFIT_DOC_LIMIT_BYTES), idx, idxRatio: r3(idx / PROFIT_DOC_LIMIT_IDX), top: fields.slice(0, 10) };
+    };
+    // PROFIT_DOC_MEASURE_END
+    let profitDocStatsCache = null;     // 最近一次計算結果
+    let profitDocStatsDirty = true;     // 有新快照還沒算
+    let profitDocStatsTimer = null;
+    const _pdIsAdmin = () => { try { return !!(window.App && window.App.currentUser && window.App.currentUser.role === 'admin'); } catch (e) { return false; } };
+    const _pdCompute = () => {
+      const t0 = Date.now();
+      const main = profitDocMeasure(profitParts.current || {}, 'app/profit');
+      const archives = {};
+      PROFIT_ARCHIVE_DOCS.forEach(n => {
+        if (!Object.prototype.hasOwnProperty.call(profitParts.archives, n)) return;   // 封存組還沒載入 → 不報
+        const m = profitDocMeasure(profitParts.archives[n] || {}, 'app/' + n);
+        archives[n] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives });
+      profitDocStatsDirty = false;
+      try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
+      return profitDocStatsCache;
+    };
+    const _pdSchedule = () => {
+      profitDocStatsDirty = true;
+      if (!_pdIsAdmin()) return;
+      if (profitDocStatsTimer) clearTimeout(profitDocStatsTimer);
+      profitDocStatsTimer = setTimeout(() => {
+        profitDocStatsTimer = null;
+        const go = () => { if (_pdIsAdmin()) _pdCompute(); };
+        if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(go, { timeout: 5000 }); else setTimeout(go, 0);
+      }, 10000);
+    };
+    // 唯讀觀測點：回快取（還沒算過＝null）。opts.compute＝快取過期時當場算一次（只限管理員；app.js 登入後的檢查用）。
+    window.__profitDocStats = (opts) => {
+      if (opts && opts.compute && profitDocStatsDirty && _pdIsAdmin()) { try { _pdCompute(); } catch (e) { console.warn('[profit 容量] 計算失敗', e); } }
+      return profitDocStatsCache ? JSON.parse(JSON.stringify(profitDocStatsCache)) : null;
+    };
+
     // 輕量：app/profit 立刻訂閱（小檔案，不會卡住）
     onSnapshot(profitDocRef, snap => {
       profitParts.current = snap.exists() ? (snap.data() || {}) : {};
       mergeAndNotify();
+      _pdSchedule();
     }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
 
     // 重量：archive 分片（PROFIT_ARCHIVE_DOCS，見上方常數）跟 profits collection 延後訂閱
@@ -209,6 +304,7 @@ try {
           profitParts.archives[PROFIT_ARCHIVE_DOCS[idx]] = snap.exists() ? (snap.data() || {}) : {};
           profitArchiveMeta[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), exists: snap.exists(), fromCache: !!(snap.metadata && snap.metadata.fromCache) };   // 嚴格版 ready 用；不 includeMetadataChanges，只記每次資料快照附帶的 metadata
           mergeAndNotify();
+          _pdSchedule();   // 容量估算一併報封存片
         }, err => {
           profitArchiveErrors[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), code: (err && err.code) || '', message: String((err && err.message) || err) };
           console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
