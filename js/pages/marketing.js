@@ -1754,7 +1754,8 @@ Object.assign(App, {
       let h; try { h = window.profitNoteHistoryFor(currentShop, code); }
       catch (e) { console.warn('[insight] 淨利表紀錄查詢失敗', e); return ''; }
       const nP = (h && h.period) || [], nG = (h && h.growth) || [];
-      if (nP.length === 0 && nG.length === 0) return '';   // 整塊不顯示（維克沒有淨利表 → 這裡會是空）
+      const legacyWait = (h && h.legacyLoading) ? '<div style="margin-top:6px;font-size:11px;color:var(--text-muted)">舊報表紀錄載入中，可能還不完整</div>' : '';
+      if (nP.length === 0 && nG.length === 0) return legacyWait;   // 整塊不顯示（維克沒有淨利表 → 這裡會是空）
       const HALF_ZH = { first: '上半月', second: '下半月', full: '整月' };
       const row = (left, text) => `
         <div style="padding:7px 11px;background:#fffbeb;border-left:3px solid #b45309;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
@@ -1773,6 +1774,7 @@ Object.assign(App, {
           <label style="font-size:12px">淨利表紀錄<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px">（唯讀，來自淨利表的調整）</span></label>
           ${section('淨利表・商品調整', gRows)}
           ${section('淨利表・廣告調整／報表', pRows)}
+          ${legacyWait}
         </div>`;
     };
 

@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction, query, where, documentId, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -72,10 +72,10 @@ try {
 
   // ============== 淨利表獨立文件 app/profit（避免 app/main 撞 1MB 上限） ==============
   // app/profit 只放「當期」資料，舊月份分片出去避免單檔過大。分片名依資料種類分成兩式：
-  //   舊月份報表         → app/profit_YYYY_MM  （例 app/profit_2026_05）
+  //   舊月份報表         → 2026/05 曾封存在 app/profit_2026_05；現在報表一律以 profits collection 為準，那份文件留著但不載入（見 PROFIT_ARCHIVE_DOCS）
   //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
-  const PROFIT_ARCHIVE_DOCS = ['profit_2026_05', 'profit_notes_2026', 'profit_notes_2026_2'];
+  const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
     + '/databases/(default)/documents/app/profit';
@@ -183,7 +183,8 @@ try {
     // 在那之前，淨利表頁面如果有人開啟，會看到 loading 狀態
     //
     // 目前的分片與各自的用途：
-    //   app/profit_2026_05     2026/05 的報表封存。那批資料【只有這一份副本】，不能刪。
+    //   （app/profit_2026_05：2026/05 的舊報表封存，#428 起不再載入，文件留著不刪。那 4 份報表 profits collection 都有，畫面一直用 profits 那份；
+    //     封存有另一個版本，所以不是唯一副本。不能再載回來：mergeAndNotify 會在窗口外把舊版填進記憶體。兩邊的內容差異沒有比對過。）
     //   app/profit_notes_2026  2026 年舊月份的廣告調整（ec_notes|通路|月|半月）封存。
     //                          doc 名刻意帶 notes 是護欄：這片只放 ec_notes，不要把報表塞進來。
     //   app/profit_notes_2026_2 同上的第二片（2026-11-05 起）。第一片已撞 40,000 索引上限，不能再寫入；之後新封存的期別放這片。key 不可與第一片重複。
@@ -221,19 +222,46 @@ try {
     //   錯誤 callback 不設 → 維持 false（＝載入中，保守）。一旦收到過就維持 true（黏住）：本訂閱沒開 includeMetadataChanges，
     //   退回 false 之後「fromCache 轉回 false」這種純 metadata 變化不會再送快照，會卡在載入中直到下次資料變動。
     //   ⚠ 刻意不以 __cloud 開頭（同 __profitArchivesReady）：純讀取，不被 __installReadonlyCloudGuard 包、不算進 TEST_NOWRITE 物件數。
+    //   #428 起語意：「所有訂閱的通路，近月都收到過伺服器快照」。窗口外的月份不算在內，要用 js/profit.js 的 _reportMonthState。
     let profitsCollectionServerSeen = false;
     window.__profitsCollectionReady = () => profitsCollectionServerSeen;
+    // 只即時訂閱近 3 個月（#428 方案 A）：今天的月份往前到 M-2，上限不封頂（長開的分頁跨月也收得到新月份）。舊月份由 js/profit.js 的 _reportEnsure 按需讀。
+    //   ec|filemeta|* 沒有讀取端、不載；ectest|* 進測試通路才讀（_reportTestEnsure）。
+    //   ⚠ 通路清單寫死：新增蝦皮通路要加進來（同 INSIGHT_SHOPS、js/profit.js 的 SHOPS），漏了那個通路的近月就收不到。
+    const PROFITS_SUB_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];
+    const PROFITS_WINDOW_MONTHS = 3;
+    const profitsWindowFrom = () => {   // 'YYYY/MM'（台灣時間）
+      const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+      const g = t => +(p.find(x => x.type === t) || {}).value;
+      const t = g('year') * 12 + (g('month') - 1) - (PROFITS_WINDOW_MONTHS - 1);
+      return Math.floor(t / 12) + '/' + String(t % 12 + 1).padStart(2, '0');
+    };
+    const profitsSubState = {};   // 通路 → { serverSeen, fromCache, keys, error }，只給 Console 觀測
+    // Console 唯讀觀測：目前訂閱了哪些通路、哪些月份（不以 __cloud 開頭）
+    window.__profitsSubState = () => ({
+      from: window.__profitsWindowFrom || null,
+      ready: profitsCollectionServerSeen,
+      shops: Object.fromEntries(Object.entries(profitsSubState).map(([s, v]) => [s, { serverSeen: v.serverSeen, fromCache: v.fromCache, error: v.error, docs: v.keys.length, months: [...new Set(v.keys.map(k => k.split('|')[2]))].sort() }])),
+    });
     // ══ 蝦皮組成員①：profits collection（每月每賣場獨立 doc）。與 aff_rpt 同屬蝦皮組，由 __loadShopeeSubs 一起呼叫。══
     const __subProfits = () => {
       // profits collection (每月每賣場獨立 doc)
-      try {
-        const profitsColRef = collection(db, 'profits');
-        const fromDocId = id => id.replace(/__/g, '/');
-        onSnapshot(profitsColRef, snap => {
-          if (snap && snap.metadata && snap.metadata.fromCache === false) profitsCollectionServerSeen = true;   // #315 唯讀旗標，不影響下方任何邏輯
+      const fromDocId = id => id.replace(/__/g, '/');
+      const from = profitsWindowFrom();
+      window.__profitsWindowFrom = from;   // 訂閱實際用的起點：js/profit.js 的 _reportWindowFrom 讀它，長開的分頁跨月才不會跟實際訂閱對不上
+      const applyProfitsSnap = (shop, snap) => {
+          const st = profitsSubState[shop];
+          st.fromCache = !!(snap && snap.metadata && snap.metadata.fromCache);
+          if (snap && snap.metadata && snap.metadata.fromCache === false) {   // #315 唯讀旗標，不影響下方任何邏輯
+            st.serverSeen = true;
+            if (PROFITS_SUB_SHOPS.every(s => profitsSubState[s] && profitsSubState[s].serverSeen)) profitsCollectionServerSeen = true;
+          }
+          // 開了 includeMetadataChanges：只有 fromCache／待寫入狀態變了的快照，文件沒變，不用重算
+          if (snap && typeof snap.docChanges === 'function' && !snap.docChanges().length) return;
           Store._profitMem = Store._profitMem || {};
           const incoming = {};
           snap.forEach(d => { incoming[fromDocId(d.id)] = d.data(); });
+          st.keys = Object.keys(incoming);
           const oldMem = Store._profitMem;
           const changedShops = new Set();
           Object.keys(incoming).forEach(k => {
@@ -260,8 +288,20 @@ try {
             //   快照頻繁時（多人同步）會不斷把人踢出 MOMO/酷澎（2026-07-28 實際發生）。兩條訂閱都不 render 是刻意一致，不是漏改。
             window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
           }
-        }, err => { console.error('[profits collection subscribe 失敗]', err); });
-      } catch (e) { console.warn('profits collection subscribe failed', e); }
+      };
+      PROFITS_SUB_SHOPS.forEach(shop => {
+        profitsSubState[shop] = { serverSeen: false, fromCache: null, keys: [], error: null };
+        try {
+          const head = 'ec|' + shop + '|';
+          const q = query(collection(db, 'profits'), where(documentId(), '>=', head + from.replace('/', '__')), where(documentId(), '<', head + '\uf8ff'));
+          // 🔴 includeMetadataChanges 不能拿掉：文件已在 SDK 快取時第一個快照是 fromCache，之後翻成伺服器狀態但文件沒變，
+          //    不開就不會再送快照，__profitsCollectionReady 會永遠 false，產生報表會一直被擋。
+          onSnapshot(q, { includeMetadataChanges: true }, snap => applyProfitsSnap(shop, snap), err => {
+            profitsSubState[shop].error = String((err && err.message) || err);
+            console.error('[profits collection subscribe 失敗]', shop, err);
+          });
+        } catch (e) { console.warn('profits collection subscribe failed', shop, e); }
+      });
     };
 
     // ══ MOMO 組：products/origins/reconcile/s1103/stock/e001/cost（MOMO 任一分頁含總表都要全載→總表逐 SKU 加總才完整）══
@@ -587,6 +627,29 @@ try {
   // setReport 立刻建好（寫入用），讀取（getDoc / onSnapshot）才延後
   try {
     const toDocId = k => k.replace(/\//g, '__');
+    const fromDocId = id => id.replace(/__/g, '/');
+    // 全部報表的目錄（key → ts）：REST 投影查詢，只拿 ts，不載報表內容（111 份約 4 萬字元）。
+    //   ts 不是數字（filemeta 等）回 null。查詢失敗一律丟錯：呼叫端不能把「讀不到」當成「雲端沒有」。
+    const profitsTsIndex = async () => {
+      const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
+        + '/databases/(default)/documents:runQuery?key=' + firebaseConfig.apiKey;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'profits' }], select: { fields: [{ fieldPath: 'ts' }] } } })
+      });
+      if (!resp.ok) throw new Error('報表目錄讀取失敗：' + resp.status);
+      const rows = await resp.json();
+      const out = {};
+      rows.forEach(r => {
+        if (!r || !r.document) return;
+        const id = decodeURIComponent(String(r.document.name).split('/').pop());
+        const v = r.document.fields && r.document.fields.ts;
+        const ts = v && (v.integerValue !== undefined ? Number(v.integerValue) : v.doubleValue);
+        out[fromDocId(id)] = typeof ts === 'number' && !isNaN(ts) ? ts : null;
+      });
+      return out;
+    };
     window.__cloudProfitCol = {
       // 最後一道網：頂層非物件（陣列 / null / 損毀）→ 不 throw、不寫，回 reject 讓上層收進 failed 浮上來
       setReport: (key, value) => {
@@ -605,6 +668,32 @@ try {
       //   自動放行，本機一按「清除重傳」就會真的刪掉公司正式 Firestore 的報表。remove* 不在白名單
       //   → 會被換成 no-op，本機測試安全。
       removeReport: (key) => deleteDoc(doc(db, 'profits', toDocId(key))),
+      // ── 舊月份按需讀取（#428 方案 A 第 2 塊）──
+      //   🔴 兩個名字都必須在讀取白名單（READ_OK：getDoc / subscribe / getDocForShop / subscribeShop / forKey）內，
+      //     本機防護與唯讀守衛才會放行；換成其他名字會被換成 no-op，呼叫端會把「沒讀」當成「沒有資料」。
+      //   🔴 一律讀伺服器（FromServer）：這個專案沒開 persistence，離線時一般讀法可能回空快取，會被誤判成「雲端沒有」。
+      //     讀不到就丟錯，由呼叫端顯示失敗，不回空結果。
+      // 讀一份報表，回 Firestore 的 DocumentSnapshot（同其他 __cloud*.getDoc）。
+      getDoc: (key) => getDocFromServer(doc(db, 'profits', toDocId(key))),
+      // 讀一個通路的一段月份，回 { 報表 key: 資料 }。opts：
+      //   from／to：'YYYY/MM'，都含；沒給 from＝這個通路全部，沒給 to＝不封頂。
+      //   prefix：key 第一段，預設 'ec'；測試通路用 'ectest'（它的期別是日期，不看 from／to）。
+      //   tsOnly：true＝全部報表的目錄（見 profitsTsIndex），shop 傳 null。
+      //   ⚠ 上限用 \uf8ff，不能用 ~：通路名是中文，排序在 ~ 之後，'ectest|～ectest|~' 會查到 0 份。
+      getDocForShop: async (shop, opts) => {
+        const o = opts || {};
+        if (o.tsOnly) return profitsTsIndex();
+        if (!shop) throw new Error('getDocForShop：缺通路');
+        const badMonth = m => m !== undefined && !/^\d{4}\/\d{2}$/.test(m);
+        if (badMonth(o.from) || badMonth(o.to)) throw new Error('getDocForShop：月份格式不對');
+        const head = (o.prefix || 'ec') + '|' + shop + '|';
+        const lower = o.from ? head + toDocId(o.from) : head;
+        const upper = (o.to ? head + toDocId(o.to) : head) + '\uf8ff';
+        const snap = await getDocsFromServer(query(collection(db, 'profits'), where(documentId(), '>=', lower), where(documentId(), '<', upper)));
+        const out = {};
+        snap.forEach(d => { out[fromDocId(d.id)] = d.data(); });
+        return out;
+      },
     };
   } catch {}
 

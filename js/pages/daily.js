@@ -92,6 +92,13 @@ Object.assign(App, {
     const dateDisplay = viewDate.replace(/-/g, '/');
     if (!f.calMonth) f.calMonth = viewDate.slice(0, 7);
     const calMonth = f.calMonth;
+    // 舊月份要用才讀：看這個月時補讀該月和前 1 月（到了發 profitDataReady，下面的監聽會重畫）。開關關閉回 null。
+    const _winNeed = (typeof window.__dailyReportNeed === 'function') ? window.__dailyReportNeed(calMonth, _adjMissingPeriods(calMonth), _adjBlankNameShops(calMonth)) : null;
+    _adjNameWait = !_winNeed ? '' : _winNeed.nameLoading ? '品名載入中…' : _winNeed.nameFailed ? '品名讀取失敗' : '';
+    const _winNeedHtml = !_winNeed ? ''
+      : _winNeed.loading ? '<div style="margin-bottom:10px;padding:6px 12px;background:#eff6ff;border-radius:6px;font-size:13px;color:#1e40af">這個月的資料還在載入，標籤和舊紀錄可能還不完整</div>'
+      : _winNeed.failed.length ? '<div style="margin-bottom:10px;padding:6px 12px;background:#fef3c7;border-radius:6px;font-size:13px;color:#92400e">這個月的部分報表讀取失敗，標籤和舊紀錄可能不完整。 <button onclick="__reportRetryFailed()" style="margin-left:8px;cursor:pointer">重試</button></div>'
+      : '';
     const allProgressForCal = Store.get('ec.dailyProgress', {}) || {};
 
     // 老闆指派的任務：以卡片形式放在右邊待辦事項最上面，已完成的收進「歷史」
@@ -451,6 +458,7 @@ Object.assign(App, {
           <div style="font-size:18px;font-weight:700">${calY}年${calM}月</div>
           <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:20px;color:var(--text-muted);padding:2px 10px">›</button>
         </div>
+        ${_winNeedHtml}
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;font-size:13px;color:var(--text-muted);text-align:center;margin-bottom:10px">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
@@ -1580,7 +1588,7 @@ Object.assign(App, {
         <div class="adj-modal-item-hd">
           <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
-          <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+          <span class="adj-modal-name">${escapeHtml(r.name || _adjNameWait)}</span>
           <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
           ${whoTagHtml(whoOf.get(r))}
         </div>
@@ -1635,7 +1643,7 @@ Object.assign(App, {
     const crossProfitHtml = (r) => {
       const h = _crossProfitFor(r.shop, r.code);
       const nP = (h && h.period) || [], nG = (h && h.growth) || [];
-      if (nP.length === 0 && nG.length === 0) return '';
+      if (nP.length === 0 && nG.length === 0) return (h && h.legacyLoading) ? '<div class="adj-x-row"><span class="adj-x-text">舊報表紀錄載入中…</span></div>' : '';
       const row = (left, text) => `
         <div class="adj-x-row">
           <span class="adj-x-date">${escapeHtml(left)}</span>
@@ -1654,7 +1662,7 @@ Object.assign(App, {
         <div class="adj-modal-item-hd">
           <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
-          <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+          <span class="adj-modal-name">${escapeHtml(r.name || _adjNameWait)}</span>
           ${r.tagsHtml}
         </div>
         ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
@@ -2991,6 +2999,28 @@ function _crossProfitFor(shop, code) {
   catch (e) { console.warn('[daily] 淨利表紀錄查詢失敗', e); return { period: [], growth: [] }; }
 }
 
+// 窗口模式：這個月（YYYY-MM）的紀錄引用到哪些期別。落差超過 1 個月的特例要補讀，否則標籤會變成「未分類」。回 [[通路,'YYYY/MM']…]。
+// 這個月有紀錄查不到品名的通路（窗口模式才算）。
+function _adjBlankNameShops(calMonth) {
+  if (!(typeof window.__reportWindowOn === 'function' && window.__reportWindowOn())) return [];
+  const pre = String(calMonth).replace('-', '/'), idx = getAdjIndex(), out = new Set();
+  Object.keys(idx).forEach(d => {
+    if (d.indexOf(pre) !== 0) return;
+    idx[d].forEach(r => { if (!r.name && r.code) out.add(r.shop); });
+  });
+  return [...out];
+}
+// 窗口模式品名還在讀：彈窗不留空白。開關關閉時一律是空字串，跟改版前相同。
+let _adjNameWait = '';
+function _adjMissingPeriods(calMonth) {
+  if (!(typeof window.__reportWindowOn === 'function' && window.__reportWindowOn())) return [];
+  const pre = String(calMonth).replace('-', '/'), idx = getAdjIndex(), out = [];
+  Object.keys(idx).forEach(d => {
+    if (d.indexOf(pre) !== 0) return;
+    idx[d].forEach(r => { if (r.period) out.push([r.shop, String(r.period).split('|')[0]]); });
+  });
+  return out;
+}
 let _adjIndexCache = null;
 let _adjLabelsReady = false;
 // collectAdjustments() 要掃 ~26000 列，只在首次呼叫時跑一次，之後查表 O(1)。
