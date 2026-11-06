@@ -1560,8 +1560,8 @@ function _notesUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_note
 //    封存分片未 ready（嚴格版：伺服器快照未到）    → 擋「載入中」
 //    封存 ready 且 key 在封存分片                → 擋「已封存」
 //    封存 ready 且兩邊都沒有                      → 放行（全新期別的第一筆）
-//  ⚠ 只套用四段 key：shopKey 形如「通路|月|半月」（split('|') 恰 3 段）。商品調整 _growth（無 '|'）與
-//    舊式單段 key 一律回 null、行為不變 —— 它們不分期別，不會被封存。
+//  ⚠ 封存規則只套用四段 key：shopKey 形如「通路|月|半月」（split('|') 恰 3 段）。舊式單段 key 一律回 null —— 不分期別，不會被封存。
+//    商品調整 _growth（無 '|'）也不會被封存，只有「新文件狀態未知、舊欄位也不在」時回載入中（#436，見函式開頭）。
 //  ⚠ 三支判斷函式掛在 window、由 js/firebase.js 定義（本檔比它先執行）→ 必須在呼叫當下讀 window 並檢查 typeof，
 //    不可在模組頂層解構。函式不存在時擋下（fail-closed）：分不清「沒連上」與「封存」，寧可讓使用者稍後再試。
 //  ⚠ 已知代價：開站後 app/profit 首批快照到達前（實測數秒內），連當期也會顯示「載入中」；全新期別的第一筆
@@ -1575,6 +1575,13 @@ const _NOTES_BLOCK_LOADING='資料載入中，請稍候幾秒再試。';
 const _NOTES_BLOCK_ERROR='封存資料載入失敗，請重新整理頁面；若持續發生請聯絡管理員。';
 function _notesArchiveHasErrors(){ try{ const e=(typeof window.__profitArchiveErrors==='function')?window.__profitArchiveErrors():null; return !!(e&&Object.keys(e).length>0); }catch{ return false; } }
 function _notesWriteBlockReason(shopKey){
+  // 商品調整（#436）：新文件的第一份快照還沒到、舊欄位也不在 ＝ 可能已搬、記憶體還沒資料。這時 getNotes 會退回讀本機舊版，
+  //   在舊版上編輯再推，會把那個品號蓋回舊內容，所以先擋。舊欄位在（還沒搬）或狀態已知就放行，行為跟搬之前相同。
+  if(typeof shopKey==='string' && shopKey.indexOf('|')<0 && /_growth$/.test(shopKey)){
+    const _r=typeof window.__growthRoute==='function'?window.__growthRoute(shopKey.replace(/_growth$/,'')):'none';
+    if((_r==='loading'||_r==='error') && !(typeof window.__profitCurrentHas==='function'&&window.__profitCurrentHas('ec_notes|'+shopKey))) return _NOTES_BLOCK_LOADING;
+    return null;
+  }
   if(typeof shopKey!=='string' || shopKey.split('|').length!==3) return null;
   const k='ec_notes|'+shopKey;
   const ok=typeof window.__profitCurrentHas==='function' && typeof window.__profitArchivesReady==='function' && typeof window.__profitArchiveHas==='function';
@@ -1599,7 +1606,7 @@ function _notesWriteBlockReason(shopKey){
 //     'defer' 需要「靜默略過且不算失敗」，在函式內做不到；且預覽端不跑 syncNotesMerge，只能在組裝層鏡像。
 // 第 4 塊：彈窗／格子的呈現模式，只是 _notesWriteBlockReason 的映射（判準只有一份）。
 //   'edit'（放行）｜'archived'（唯讀：隱藏輸入列、不烘 ✎ ×、顯示說明）｜'error'（訂閱失敗：同 archived 的唯讀呈現、紅底說明）｜
-//   'loading'（B-(1)：輸入照常顯示，只多一行淡色說明；送出時由第 2 塊閘門再判）。_growth／非四段 key 恆 'edit'。
+//   'loading'（B-(1)：輸入照常顯示，只多一行淡色說明；送出時由第 2 塊閘門再判）。非四段 key 恆 'edit'；_growth 也是，只有新文件狀態未知、舊欄位也不在時是 'loading'（#436）。
 function _notesPopupMode(shopKey){
   const r=_notesWriteBlockReason(shopKey);
   if(r===null) return 'edit';
@@ -1694,6 +1701,16 @@ async function syncNotesMerge(fullKey, label){
   //   momoMergeByKey(cloud, local, []) 回傳完全等於 cloud → 推上去看起來成功、實際上一個字都沒上去。
   const dirty=_notesItemsDirtyGet(fullKey);
   if(dirty===null) throw new Error('品號待同步註冊表（ec_notes_items_dirty）損毀，已中止合併，以免整包覆蓋蓋掉同事的更新。本次未推送，你的調整還在本機 → 請先匯出備份；清掉該註冊表之後，這些編輯需要重做一次才會被登記。');
+  // ── 商品調整已搬到 app/growth_{通路}（#436）：每次都重讀伺服器決定路徑。讀不到就 throw（進 failed、dirty 留著），🔴 絕不退回寫舊欄位 ──
+  const _gShop=typeof window.__growthShopOfKey==='function'?window.__growthShopOfKey(fullKey):null;
+  if(_gShop){
+    const _gResidue=typeof window.__growthResidueKeys==='function'&&window.__growthResidueKeys().includes(fullKey);
+    if(dirty.length>0||_gResidue){   // dirty 空又沒有待補寫 → 交給下面的 (b) 報錯，不多讀
+      const _gs=await window.__cloudGrowth.getDoc(_gShop,'server');
+      const _gd=(_gs&&_gs.exists&&_gs.exists())?(_gs.data()||{}):null;
+      if(_gd&&typeof _gd.migratedAt==='number') return _syncGrowthDoc(fullKey,_L,_gShop,_gd,dirty);
+    }
+  }
   // ── (b) dirty 是空陣列 → 跳過推送並回報，不推一份等同雲端的資料 ──
   //   正常流程不會出現（saveNotes 同時寫兩份 dirty）。走到這裡代表兩份不同步，
   //   最可能是 _notesItemsDirtyAdd 當時寫入失敗（localStorage 配額滿 / 被擋，當下有紅字）。
@@ -1804,6 +1821,59 @@ async function syncNotesMerge(fullKey, label){
   //   這把 key 會落到 failed → key 級不清、品號級已清 → 下次同步 dirty 變成 []，
   //   只能靠上面 (b) 接住並報錯。不要搬回來。
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}   // 比照 momoSyncOptlog 尾端：合併後工作日誌計數跟著更新
+  return keptFromCloud;
+}
+// 已搬通路的推送（#436）：跟上面同一套「只在 dirty 的品號表態」，差別只有寫入位置與寫法。
+//   gd＝剛從伺服器讀到的新文件。逐品號 FieldPath 寫入 items.{品號}，不讀整份再蓋整份。
+//   舊欄位如果有新文件沒看過的品號（舊分頁寫的）：把新文件沒有的紀錄補進來、更新 legacySeen 指紋，不刪任何東西；
+//   同一個品號我這次也改了的話，我的內容為主，舊分頁多的紀錄補到尾端（刪光也一樣留著）。
+//   回傳值與失敗處理同 syncNotesMerge（throw → failed、兩份 dirty 都不清）。
+async function _syncGrowthDoc(fullKey,label,shop,gd,dirty){
+  const pure=window.__growthPure;
+  if(gd.items!==undefined && (gd.items===null||typeof gd.items!=='object'||Array.isArray(gd.items))) throw new Error('雲端這把'+label+'不是物件（型別異常），已中止合併，以免寫壞雲端。');
+  const ps=await window.__cloudProfit.getDoc();   // 舊欄位現值（舊分頁可能又寫過）
+  if(!(ps&&ps.exists&&ps.exists())) throw new Error('讀不到雲端 app/profit（doc 不存在或讀取失敗），已中止合併。本次未推送，資料還在本機，請稍後再按同步重試。');
+  const oldField=(ps.data()||{})[fullKey];
+  const cloudMap=JSON.parse(JSON.stringify(gd.items||{}));   // 深拷貝理由同 syncNotesMerge (d)
+  let localMap=readNotesForPush(fullKey);
+  if(localMap===null||localMap===undefined) localMap={};
+  if(typeof localMap!=='object'||Array.isArray(localMap)) throw new Error('本機這把'+label+'不是物件（可能損毀），已中止合併，以免把壞資料推上雲端。');
+  const ov=pure.overlay(cloudMap, oldField, gd.legacySeen||{});
+  const merged=momoMergeByKey(ov.value, localMap, dirty);
+  const touched=new Set(dirty.map(String));
+  const dels=window.__cloudGrowth.DELETE;
+  Object.keys(ov.residue).forEach(c=>{
+    const r=ov.residue[c];
+    if(r.extras.length){ merged[c]=pure.addExtras(merged[c], r.extras); touched.add(String(c)); }
+  });
+  const pairs=[];
+  touched.forEach(c=>{
+    const seg=momoFsSafeKey(c);
+    pairs.push(Object.prototype.hasOwnProperty.call(merged,c) ? [['items',seg], momoFsSanitizeDeep(merged[c])] : [['items',seg], dels]);
+  });
+  Object.keys(ov.residue).forEach(c=>{ pairs.push([['legacySeen',momoFsSafeKey(c)], ov.residue[c].sig]); });
+  if(!pairs.length) throw new Error('這把'+label+'沒有要寫入的品號，本次未推送。');
+  const r=await window.__cloudGrowth.writePaths(shop,pairs);
+  if(!(r&&r.ok)) throw new Error('寫入被擋下（唯讀帳號或本機防護），雲端沒有變動，資料還在本機。');
+  // 讀回比對這次寫的品號；對不上就當失敗，dirty 留著，下次重推（別人剛好同時改同一品號時也會走到這裡，重推無害）
+  const vs=await window.__cloudGrowth.getDoc(shop,'server');
+  const vd=(vs&&vs.exists&&vs.exists())?(vs.data()||{}):null;
+  if(!vd) throw new Error('寫入後讀不到 app/growth_'+shop+'，請重新整理後確認。');
+  const bad=pairs.filter(([segs,v])=>{
+    if(segs[0]!=='items') return false;
+    const got=(vd.items||{})[segs[1]];
+    return v===dels ? got!==undefined : pure.canon(got)!==pure.canon(v);
+  }).map(([segs])=>segs[1]);
+  if(bad.length) throw new Error('寫入後讀回比對不一致（品號 '+bad.slice(0,5).join('、')+'），請稍後再按同步重試。');
+  const extraN=Object.values(ov.residue).reduce((s,x)=>s+x.extras.length,0);
+  if(Object.keys(ov.residue).length) console.warn('[商品調整] '+shop+'：已把 app/profit 舊欄位 '+Object.keys(ov.residue).length+' 個品號的異動補寫進新文件（補了 '+extraN+' 筆紀錄），舊欄位沒有刪除。');
+  const dirtySet=new Set(dirty.map(String));
+  let keptFromCloud=0;
+  Object.keys(cloudMap).forEach(c=>{ if(!dirtySet.has(String(c)) && !Object.prototype.hasOwnProperty.call(localMap,c)) keptFromCloud++; });
+  try{ localStorage.setItem(fullKey,JSON.stringify(merged)); }catch(e){ console.error('[syncNotesMerge] merged 回寫 localStorage 失敗（雲端已經是 merged，本機會 stale 到下次重整）：',fullKey,e); }
+  try{ if(Store._profitMem) Store._profitMem[fullKey]=merged; }catch{}
+  try{ if(Store._mem && Store._mem[fullKey]!==undefined) Store._mem[fullKey]=merged; }catch{}
+  try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
   return keptFromCloud;
 }
 // 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
@@ -2811,6 +2881,8 @@ function _sweepAllLocalReportsIntoPending(){
     }
   }catch{}
   if(_REPORT_DIRTY_GATE){ try{ _reportDirtyCollect(); }catch(e){ console.error('[報表登記] 收集待推失敗',e); } }
+  // 商品調整（#436）：已搬通路的舊欄位有新東西（舊分頁寫的）→ 列入待推，syncNotesMerge 會補寫進新文件。還沒搬的通路這支回空。
+  try{ if(typeof window.__growthResidueKeys==='function') window.__growthResidueKeys().forEach(k=>_pendingSyncKeys.add(k)); }catch{}
   // MOMO 月對帳／運費：只撿「本機待推註冊表」（存檔才登記、推成功才清；上面 localStorage 迴圈刻意跳過這兩類）。
   //   本機已經沒有這把 key 的值（被清掉）→ 從註冊表拿掉，不留一個永遠讀不到的懸空待推。
   try{
@@ -19902,6 +19974,17 @@ async function momoOpenSyncPreview(shop, opts){
   let cloud={};
   try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
   catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
+  // 商品調整（#436）：已搬的通路改比對 app/growth_{通路}（含舊欄位還沒補寫的部分），與 syncNotesMerge 同一個基準。
+  //   還沒搬的通路 cloud[key] 維持 app/profit 舊欄位，預覽跟搬之前相同。讀不到就停在這裡（同上方 app/profit）。
+  try{
+    for(const it of items){
+      const _gs=typeof window.__growthShopOfKey==='function'?window.__growthShopOfKey(it.key):null;
+      if(!_gs) continue;
+      const _sn=await window.__cloudGrowth.getDoc(_gs,'server');
+      const _d=(_sn&&_sn.exists&&_sn.exists())?(_sn.data()||{}):null;
+      if(_d&&typeof _d.migratedAt==='number') cloud[it.key]=window.__growthPure.overlay(_d.items||{}, cloud[it.key], _d.legacySeen||{}).value;
+    }
+  }catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取商品調整的雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
   // MOMO 商品主檔改讀 momo_products collection（每賣場一 doc），與寫入 __cloudMomo.setShop 同源；
   //   併發 getDoc（只讀真正 pending 的賣場）→ 延遲≈一次來回；沿用已在 READ_OK 白名單的 getDoc，不動防護碼。
   //   cloud doc 是 { shop, items:[...] }，取 .items 比對（不是整個 doc）。單一賣場讀失敗只標該列無法比對，不讓整個預覽掛掉。

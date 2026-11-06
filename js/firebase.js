@@ -75,6 +75,7 @@ try {
   //   舊月份報表         → 2026/05 曾封存在 app/profit_2026_05；現在報表一律以 profits collection 為準，那份文件留著但不載入（見 PROFIT_ARCHIVE_DOCS）
   //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
+  const GROWTH_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];   // 商品調整獨立文件 app/growth_{通路} 列管的通路（#436）；沒列的一律走 app/profit 舊欄位
   const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
@@ -136,6 +137,98 @@ try {
     //   刻意不另設「app/profit 首批已到」狀態：它只會讓提示文字更細，不改變任何放行／擋下結果
     //   （首批未到 → false → 由封存 ready 判斷接手；離線 fromCache 空快照也是 false → 方向正確）。同樣不回傳內容。
     window.__profitCurrentHas = (key) => Object.prototype.hasOwnProperty.call(profitParts.current || {}, key);
+
+    // ══════ 商品調整獨立文件 app/growth_{通路}（#436 第 ③ 塊）══════
+    //   切換判斷（每個通路）：文件有數字 migratedAt ＝ 讀寫都走新文件；伺服器確認沒有這份文件 ＝ 完全走 app/profit 舊欄位。
+    //   _profitMem 的 key 名維持 ec_notes|{通路}_growth，讀取端都不用改。寫入見 js/profit.js syncNotesMerge。
+    //   舊欄位還在 / 又出現（舊分頁寫的）的處理靠 legacySeen（品號 → 舊欄位內容的指紋）：
+    //     指紋相同 ＝ 已經看過，忽略（不能只看「新文件沒有」，否則新文件刪掉的紀錄會一直復活）；
+    //     指紋不同 ＝ 舊分頁動過：把新文件沒有的紀錄補進顯示，下次同步寫進新文件並更新指紋。不刪任何東西。
+    // GROWTH_PURE_BEGIN（node 驗證會擷取這段，改名要一起改 node 腳本；搬家腳本的指紋必須跟 growthSig 同一套）
+    const growthCanon = (v) => {
+      if (Array.isArray(v)) return '[' + v.map(growthCanon).join(',') + ']';
+      if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + growthCanon(v[k])).join(',') + '}';
+      return JSON.stringify(v === undefined ? null : v);
+    };
+    // FNV-1a 32 位元（UTF-16 碼元）→ 8 碼十六進位。撞號的後果只是漏補一個品號，機率可忽略。
+    const growthSig = (v) => {
+      const s = growthCanon(v);
+      let h = 0x811c9dc5;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+      return (h >>> 0).toString(16).padStart(8, '0');
+    };
+    const growthAdjList = (entry) => {
+      if (typeof entry === 'string') return [{ date: '', text: entry }];
+      return (entry && Array.isArray(entry.adjustments)) ? entry.adjustments : [];
+    };
+    // 把 extras 裡 entry 沒有的紀錄補到尾端。回新物件，不動傳入的 entry。
+    const growthAddExtras = (entry, extras) => {
+      const list = growthAdjList(entry);
+      const have = new Set(list.map(growthCanon));
+      const add = (extras || []).filter(a => !have.has(growthCanon(a)));
+      const base = (entry && typeof entry === 'object' && !Array.isArray(entry)) ? entry : {};
+      return Object.assign({}, base, { adjustments: list.concat(add) });
+    };
+    // items＝新文件內容、old＝app/profit 舊欄位（可能 undefined）、seen＝legacySeen。
+    //   回 { value:合併後的內容（新物件）, residue:{ 品號:{ sig, extras } } }；residue 空 ＝ 舊欄位沒有新東西。
+    const growthOverlay = (items, old, seen) => {
+      const value = Object.assign({}, items || {});
+      const residue = {};
+      const sn = seen || {};
+      if (old && typeof old === 'object' && !Array.isArray(old)) {
+        Object.keys(old).forEach(code => {
+          const sig = growthSig(old[code]);
+          if (sn[code] === sig) return;
+          const cur = growthAdjList(value[code]);
+          const have = new Set(cur.map(growthCanon));
+          const extras = growthAdjList(old[code]).filter(a => !have.has(growthCanon(a)));
+          residue[code] = { sig, extras };
+          if (extras.length) value[code] = growthAddExtras(value[code], extras);
+        });
+      }
+      return { value, residue };
+    };
+    // GROWTH_PURE_END
+    window.__growthPure = { sig: growthSig, canon: growthCanon, overlay: growthOverlay, addExtras: growthAddExtras };
+    const growthKey = (shop) => 'ec_notes|' + shop + '_growth';
+    const growthParts = {};   // 通路 → { state:'loading'|'old'|'new', items, seen, raw, residue, error }
+    GROWTH_SHOPS.forEach(s => { growthParts[s] = { state: 'loading', items: null, seen: null, raw: null, residue: {}, error: null }; });
+    // 這把 key 是不是列管通路的商品調整；是就回通路名。測試通路等沒列管的回 null（一律走舊路徑）。
+    window.__growthShopOfKey = (k) => {
+      const m = /^ec_notes\|(.+)_growth$/.exec(String(k));
+      return (m && GROWTH_SHOPS.includes(m[1])) ? m[1] : null;
+    };
+    const growthIsNewKey = (k) => { const s = window.__growthShopOfKey(k); return !!(s && growthParts[s].state === 'new'); };
+    // 唯讀觀測點（刻意不以 __cloud 開頭，同 __profitArchivesReady）。'none'＝沒列管；'error'＝訂閱失敗。
+    window.__growthRoute = (shop) => {
+      const p = growthParts[shop];
+      if (!p) return 'none';
+      return (p.state === 'loading' && p.error) ? 'error' : p.state;
+    };
+    // 舊欄位有新東西、等下次同步補寫的 key（只回 key 名）
+    window.__growthResidueKeys = () => GROWTH_SHOPS.filter(s => growthParts[s].state === 'new' && Object.keys(growthParts[s].residue).length).map(growthKey);
+    window.__growthState = () => Object.fromEntries(GROWTH_SHOPS.map(s => {
+      const p = growthParts[s];
+      return [s, { route: window.__growthRoute(s), codes: p.items ? Object.keys(p.items).length : 0, residue: Object.keys(p.residue), error: p.error }];
+    }));
+    // 把新文件 + 舊欄位算成顯示內容，有變才寫 _profitMem。回 true＝變了（呼叫端負責發事件）。
+    const growthSync = (shop) => {
+      const p = growthParts[shop];
+      if (p.state !== 'new') return false;
+      const k = growthKey(shop);
+      const ov = growthOverlay(p.items, profitParts.current[k], p.seen);
+      p.residue = ov.residue;
+      const codes = Object.keys(ov.residue);
+      if (codes.length) {
+        const tag = codes.map(c => c + ':' + ov.residue[c].sig).join(',');
+        if (p.warned !== tag) { p.warned = tag; console.warn('[商品調整] ' + shop + '：app/profit 舊欄位有新文件沒看過的品號（可能是舊分頁寫的），已合併進顯示，下次同步會補寫進新文件：', codes); }
+      }
+      if (window.__profitShouldSkipCloudOverwrite && window.__profitShouldSkipCloudOverwrite(k)) return false;
+      // 用 growthCanon 比：伺服器每次傳來的 map key 順序不固定（實測），順序不同不算變動
+      if (Store._profitMem[k] !== undefined && growthCanon(ov.value) === growthCanon(Store._profitMem[k])) return false;
+      Store._profitMem[k] = ov.value;
+      return true;
+    };
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
@@ -147,6 +240,7 @@ try {
       Object.keys(data).forEach(k => {
         if (k.startsWith('ec|')) return; // 舊版報表殘留 key，跳過
         if (k.startsWith('ec_momo_products|')) return; // MOMO 商品主檔以 momo_products collection 為準，不在此比對（遷移過渡）
+        if (growthIsNewKey(k)) return; // 已搬的商品調整以 app/growth_{通路} 為準，下方 growthSync 處理
         if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
           const shop = k.split('|')[1];
           if (shop) changedShops.add(shop);
@@ -155,6 +249,7 @@ try {
       // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）與 MOMO 商品主檔（ec_momo_products|）
       //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
+        if (growthIsNewKey(k)) return;   // 已搬的商品調整：舊欄位不直接覆蓋，由 growthSync 合併
         // ec_pchome_products / ec_pchome_recon 已搬到 app/pchome_products / app/pchome_recon 獨立 doc
         //   （照 ec_momo_products 搬 collection 的先例）：新 doc 權威，app/profit 舊欄位只當【遷移過渡的 fallback】
         //   —— 只在新 doc 尚未填該 key（Store._profitMem 還沒值）時才填入，避免 app/profit echo 蓋掉新 doc 的值。
@@ -168,6 +263,8 @@ try {
           Store._profitMem[k] = data[k];
         }
       });
+      // 已搬的通路：舊欄位可能剛被舊分頁寫入，重算一次。通路名維持 key 的第二段（玩樂_growth），跟搬之前發的事件相同。
+      GROWTH_SHOPS.forEach(s => { if (growthSync(s)) changedShops.add(s + '_growth'); });
       window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
       // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
       // profitDataReady listener 已處理 onMonthChange；此處不重複觸發
@@ -245,7 +342,14 @@ try {
         const m = profitDocMeasure(profitParts.archives[n] || {}, 'app/' + n);
         archives[n] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
       });
-      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives });
+      const growth = {};   // 商品調整獨立文件（還沒搬、還沒收到快照的通路不報）
+      GROWTH_SHOPS.forEach(s => {
+        const raw = growthParts[s].raw;
+        if (!raw) return;
+        const m = profitDocMeasure(raw, 'app/growth_' + s);
+        growth[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth });
       profitDocStatsDirty = false;
       try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
       return profitDocStatsCache;
@@ -272,6 +376,42 @@ try {
       mergeAndNotify();
       _pdSchedule();
     }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
+
+    // 商品調整文件的快照入口（訂閱在本檔下方 __cloudGrowth 建好之後；物件要用到 KPI_DELETE，不能放在這裡）。
+    //   data＝文件內容（不存在＝null）。
+    window.__growthApplySnap = (shop, data, meta) => {
+      const p = growthParts[shop];
+      if (!p) return;
+      const fromCache = !!(meta && meta.fromCache);
+      const prev = p.state;
+      p.error = null;
+      if (data && typeof data.migratedAt === 'number') {
+        p.state = 'new';
+        p.items = (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) ? data.items : {};
+        p.seen = (data.legacySeen && typeof data.legacySeen === 'object') ? data.legacySeen : {};
+        p.raw = data;
+      } else if (data) {
+        // 文件在、沒有 migratedAt：不算搬完，照舊走 app/profit
+        if (!p.warnedNoMark) { p.warnedNoMark = true; console.warn('[商品調整] app/growth_' + shop + ' 存在但沒有 migratedAt，照舊使用 app/profit 舊欄位'); }
+        p.state = 'old'; p.items = null; p.seen = null; p.residue = {}; p.raw = data;
+      } else if (!fromCache) {
+        p.state = 'old'; p.items = null; p.seen = null; p.residue = {}; p.raw = null;
+      } else {
+        return;   // 沒有文件、資料來自快取：離線時 SDK 會送這種快照，不能當成「確定沒有」，維持原狀態
+      }
+      _pdSchedule();
+      if (p.state === 'new') {
+        if (growthSync(shop)) window.dispatchEvent(new CustomEvent('profitDataReady', { detail: { changedShops: [shop + '_growth'] } }));
+      } else if (prev === 'new') {
+        // 回搬（migratedAt 被移除）：把舊欄位放回顯示
+        mergeAndNotify();
+      }
+    };
+    window.__growthSubError = (shop, err) => {
+      const p = growthParts[shop];
+      if (p) p.error = String((err && err.message) || err);
+      console.error('[商品調整] app/growth_' + shop + ' 訂閱失敗：', err);
+    };
 
     // 重量：archive 分片（PROFIT_ARCHIVE_DOCS，見上方常數）跟 profits collection 延後訂閱
     // 等首頁渲染完成 + 使用者第一次切換到淨利表 才載入
@@ -1337,6 +1477,79 @@ try {
     window.__cloudFridayRecon.subscribe(data => { window.__fridayReconCloudLatest = data; if (typeof window.__fridayApplyCloudRecon === 'function') window.__fridayApplyCloudRecon(data); },
       e => console.error('[friday_recon] 訂閱失敗：', e));
   } catch (e) { console.error('[friday_recon] 訂閱失敗：', e); }
+
+  // ============== 商品調整 app/growth_{通路}（#436 第 ③ 塊；從 app/profit 的 ec_notes|{通路}_growth 搬出） ==============
+  //   結構：{ items:{ 品號:{adjustments:[…]} }, migratedAt:數字, migratedBy, legacySeen:{ 品號:指紋 } }。
+  //   文件只由搬家腳本建立；沒有 migratedAt 就不算搬完，讀寫都照舊走 app/profit（切換判斷見上方 __growthRoute）。
+  //   寫入只有 writePaths：FieldPath 逐品號寫。🔴 刻意不走 kpiWriteTo（它遇到文件不存在會自動建空文件；
+  //     自動建的文件沒有 migratedAt，那個通路會被靜默切回舊路徑）。這裡文件不存在就失敗。
+  //   成功回 { ok:true }；被唯讀 / 本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe。⚠ 新增這顆後本機防護物件數 31 → 32、寫入方法 +1（見 CLAUDE.md）。
+  const growthRef = (shop) => {
+    if (!GROWTH_SHOPS.includes(shop)) throw new Error('不是列管的通路：' + shop);
+    return doc(db, 'app', 'growth_' + shop);
+  };
+  window.__cloudGrowth = {
+    DELETE: KPI_DELETE,
+    // getDoc(shop, 'server')：強制讀伺服器現值（離線會丟錯，不吃快取）。同步一律用這個決定路徑。
+    getDoc: (shop, src) => src === 'server' ? getDocFromServer(growthRef(shop)) : getDoc(growthRef(shop)),
+    // 🔴 includeMetadataChanges 不能拿掉：沒開 persistence，離線可能先送 fromCache 的空快照，要等翻成伺服器狀態才知道文件真的不存在。
+    subscribe: (shop, cb, onErr) => onSnapshot(growthRef(shop), { includeMetadataChanges: true },
+      snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
+    writePaths: (shop, pairs) => kpiUpdate(growthRef(shop), pairs).then(() => ({ ok: true })),
+  };
+  GROWTH_SHOPS.forEach(shop => {
+    try {
+      window.__cloudGrowth.subscribe(shop, (data, meta) => { if (window.__growthApplySnap) window.__growthApplySnap(shop, data, meta); },
+        e => { if (window.__growthSubError) window.__growthSubError(shop, e); });
+    } catch (e) { console.error('[商品調整] 訂閱失敗：', shop, e); }
+  });
+  // 本機測試：把某通路換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
+  //   __growthMock('維克')＝用目前畫面內容當新文件；__growthMock('維克', { residueCode:'品號' })＝假裝舊欄位那個品號被舊分頁動過，且最後一筆新文件沒有；
+  //   __growthMock('維克', false)＝收掉（重新整理才會回到真實狀態）；__growthMock('維克', 'doc')＝看假文件內容。
+  window.__growthMock = (() => {
+    const H = location.hostname;
+    if (H !== 'localhost' && H !== '127.0.0.1') return () => { console.warn('__growthMock 只在 localhost 可用'); };
+    const docs = {};
+    let real = null;
+    const snapOf = (d) => ({ exists: () => !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) });
+    const install = () => {
+      if (real) return;
+      const cg = window.__cloudGrowth;
+      real = { getDoc: cg.getDoc, writePaths: cg.writePaths };
+      cg.getDoc = (shop, src) => docs[shop] ? Promise.resolve(snapOf(docs[shop])) : real.getDoc(shop, src);
+      cg.writePaths = (shop, pairs) => {
+        if (!docs[shop]) return real.writePaths(shop, pairs);
+        pairs.forEach(([segs, v]) => {
+          let o = docs[shop];
+          segs.slice(0, -1).forEach(s => { o = o[s] = o[s] || {}; });
+          if (v === cg.DELETE) delete o[segs[segs.length - 1]]; else o[segs[segs.length - 1]] = JSON.parse(JSON.stringify(v));
+        });
+        console.log('%c[growth mock] 假寫入（只在記憶體）', 'color:#2563eb', shop, pairs.map(p => p[0].join('.')));
+        window.__growthApplySnap(shop, JSON.parse(JSON.stringify(docs[shop])), { fromCache: false });
+        return Promise.resolve({ ok: true });
+      };
+    };
+    return (shop, opt) => {
+      if (opt === 'doc') return docs[shop] ? JSON.parse(JSON.stringify(docs[shop])) : null;
+      if (opt === false) { delete docs[shop]; console.log('[growth mock] 已收掉 ' + shop + '，重新整理才會回到真實狀態'); return; }
+      install();
+      const pure = window.__growthPure;
+      const cur = JSON.parse(JSON.stringify((Store._profitMem || {})['ec_notes|' + shop + '_growth'] || {}));
+      const seen = {};
+      Object.keys(cur).forEach(c => { seen[c] = pure.sig(cur[c]); });
+      const d = { items: cur, migratedAt: Date.now(), migratedBy: 'mock', legacySeen: seen };
+      if (opt && opt.residueCode) {
+        const c = opt.residueCode;
+        if (d.items[c] && Array.isArray(d.items[c].adjustments) && d.items[c].adjustments.length) { d.items[c].adjustments.pop(); d.legacySeen[c] = 'mock0000'; }
+        else console.warn('[growth mock] 這個品號沒有紀錄：', c);
+      }
+      docs[shop] = d;
+      window.__growthApplySnap(shop, JSON.parse(JSON.stringify(d)), { fromCache: false });
+      console.log('%c[growth mock] ' + shop + ' 已切到假文件（' + Object.keys(cur).length + ' 個品號）', 'color:#2563eb;font-weight:700');
+      return d;
+    };
+  })();
 
   window.dispatchEvent(new Event('cloudStoreReady'));
 

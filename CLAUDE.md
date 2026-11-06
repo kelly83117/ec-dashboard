@@ -62,8 +62,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：31 個物件 / 49 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 31**（2026-11-04 KPI FriDay 主站加 `__cloudFridayRecon`（寫入只有 `writePaths`）→ 30 變 31、方法 48 變 49——**防護碼實測**（floor 31、MUST 補 `['__cloudFridayRecon','writePaths']`）。
+   **「TEST_NOWRITE v2 已啟用：32 個物件 / 50 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 32**（2026-11-06 #436 商品調整加 `__cloudGrowth`（寫入只有 `writePaths`）→ 31 變 32、方法 49 變 50——**防護碼實測**（floor 32）。
+   防護碼正本是 `C:\Users\keani\ec-tools\nowrite.txt`，`ec-tools.ps1` 檢查它必須剛好 **106 行**，加項目要接在既有行上。下面寫的 floor 31、MUST 清單是同日才真的補進檔案（之前檔案裡下限還是 5）。
+   再之前：2026-11-04 KPI FriDay 主站加 `__cloudFridayRecon`（寫入只有 `writePaths`）→ 30 變 31、方法 48 變 49——**防護碼實測**（floor 31、MUST 補 `['__cloudFridayRecon','writePaths']`）。
    再之前：2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
    同日離線實數（假 SDK、READ_OK 規則）是 30 / 47，比推算少 1（差 1 從 2026-10-27 就有），方法數以防護碼實際輸出為準。
    再之前：2026-11-04 KPI 博客來加 `__cloudBooksRecon`（寫入只有 `writePaths`）→ 28 變 29、
@@ -88,7 +90,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 31 / 49 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 32 / 50 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -106,12 +108,12 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
    `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`、`['__cloudFridayRecon', 'writePaths']`，
-   物件下限改 31，否則新物件沒有 fail-loud 保護。
+   還有 `['__cloudGrowth', 'writePaths']`，物件下限改 32，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 31** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 32** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -124,7 +126,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 31）。
+不要相信文件上的數字（包括上面那個 32）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -192,6 +194,14 @@ ESM 有個致命陷阱必須牢記：
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
 - `app/profit_notes_2026`、`app/profit_notes_2026_2`（archive docs）— 舊月份的廣告調整（`ec_notes`），延後訂閱。
   `app/profit_2026_05` 是 2026/05 的舊報表封存，**已不載入，文件留著不刪**（那 4 份報表 `profits` 都有，畫面一直用 `profits` 那份；不要載回來，會把舊版填進記憶體）。
+- `app/growth_{通路}`（好麻吉 / 玩樂 / 森之旅 / 維克）— 商品調整（#436 第 ③ 塊，從 app/profit 的 `ec_notes|{通路}_growth` 搬出，每通路一份，開站就訂閱）。透過 `window.__cloudGrowth`：讀 `getDoc(shop, 'server')` / `subscribe`；寫只有 `writePaths(shop, pairs)`（逐品號 FieldPath；🔴 文件不存在就失敗、**不會自動建立**，所以不走 `kpiWriteTo`）。
+  形狀 `{ items:{ 品號:{adjustments:[…]} }, migratedAt:數字, migratedBy, legacySeen:{ 品號:指紋 } }`。`_profitMem` 的 key 名不變（`ec_notes|{通路}_growth`），讀取端（淨利表、洞察表、工作日誌、匯出）都不用改。
+  - **切換判斷**（每個通路各自，`window.__growthRoute(通路)`）：文件有數字 `migratedAt` ⇒ 讀寫都走新文件（`new`）；伺服器確認沒有這份文件 ⇒ 完全走 app/profit 舊欄位（`old`）；沒有文件但快照來自快取 ⇒ 不算數（`loading`）。測試通路沒列管（`none`），一律舊路徑。新增蝦皮通路要改 firebase.js `GROWTH_SHOPS`。
+  - **寫入**：`syncNotesMerge` 每次都重讀伺服器決定路徑，🔴 讀不到就算失敗、絕不退回寫舊欄位（代價：沒搬的通路離線時同步商品調整也會失敗）。已搬的通路走 `_syncGrowthDoc`：只寫 dirty 的品號，寫完讀回比對。
+  - **舊欄位還在 / 又出現**（舊分頁寫的）靠 `legacySeen` 判斷：指紋相同＝看過，忽略；不同＝把新文件沒有的紀錄合併進顯示、Console 警告、下次同步補寫進新文件並更新指紋。不刪任何東西（舊分頁的刪除不會生效、改字會留兩筆）。🔴 **不能只看「新文件沒有」**：新文件刪掉的紀錄會一直復活。
+  - **搬家**：Console 腳本在 `ec-backup\04_工具與文件\growth搬家\`（不進 repo），一次一個通路；步驟 4 刪舊欄位才省到空間。指紋共用 `window.__growthPure.sig`（純函式在 firebase.js `GROWTH_PURE_BEGIN`）。
+  - 🔴 **回滾**：先對每個已搬的通路跑回搬（步驟 6），**全部回搬後才能還原程式**；順序反過來，舊程式看不到新文件，商品調整會從畫面消失。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__growthState()`、`__profitDocStats({compute:true}).growth`。本機測試 `__growthMock('維克')`、`__growthMock('維克',{residueCode:'品號'})`（只在 localhost、資料只在記憶體）。
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
