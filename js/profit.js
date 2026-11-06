@@ -4255,10 +4255,11 @@ window.addEventListener('profitDataReady', (e)=>{
 
 // ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
 (function backfillProfitToCloud(){
-  // #436 停用：本機沒有旗標時，會把「app/profit 目前沒有」的本機 key 整欄推回 app/profit——已封存到 profit_notes_* 的廣告調整、
-  //   已搬到其他文件的資料都會被塞回來（空間滿的電腦寫不進旗標，每次開站都會跑）。下方本體與註解保留給回溯用，不要再打開。
-  return;
-  // eslint-disable-next-line no-unreachable
+  // #436 停用寫入、改成【試跑模式】：本機沒有旗標時，原本會把「app/profit 目前沒有」的本機 key 整欄推回 app/profit——
+  //   已封存到 profit_notes_* 的廣告調整、已搬到其他文件的資料都會被塞回來（空間滿的電腦寫不進旗標，每次開站都會跑）。
+  //   現在照原本邏輯算出「會推哪些 key」，但不呼叫任何寫入（app/profit 的 setField、app/main 的 removeFields 都不呼叫），
+  //   只 console.warn 一次，清單放在 window.__backfillWouldPush（字串陣列）；原本會從 app/main 刪的欄位放在 window.__backfillWouldRemoveFromMain。
+  //   旗標 ec.profit_backfilled_v3 的寫入維持原樣（跑完才寫，所以每台電腦只報一次）。🔴 不要把寫入改回來。
   const FLAG='ec.profit_backfilled_v3';
   const PREFIXES=['ec|','ec_edits|','ec_notes|','ec_ana_','ec_growth_','ec_hcols|'];
   function isProfitKey(k){ return PREFIXES.some(p=>k.startsWith(p)); }
@@ -4277,16 +4278,13 @@ window.addEventListener('profitDataReady', (e)=>{
 
       // 2) 從 app/main 搬到 app/profit（雲端為主，覆蓋本地）
       const fromMain = Object.keys(mainData).filter(isProfitKey);
-      let moved = 0;
+      const wouldPush = [];   // #436 試跑：原本會呼叫 __cloudProfit.setField 的 key（依原本順序：先 app/main 搬來的，再本機的）
       for(const k of fromMain){
         if(profitData[k]!==undefined) continue; // app/profit 已有，不蓋
-        try{ await window.__cloudProfit.setField(k, mainData[k]); moved++; }catch(e){ console.warn('搬移失敗', k, e); }
+        wouldPush.push(k);   // 原本：await window.__cloudProfit.setField(k, mainData[k])
       }
-      // 搬完後刪除 app/main 的舊欄位，釋放 1MB 額度
-      if(fromMain.length>0){
-        try{ await window.__cloudStore.removeFields(fromMain); console.log('[淨利表] 已從 app/main 清掉', fromMain.length, '個淨利表欄位'); }
-        catch(e){ console.warn('清掉 app/main 失敗', e); }
-      }
+      // 原本：搬完後 __cloudStore.removeFields(fromMain) 刪除 app/main 的舊欄位 → 試跑不刪，只記下來
+      window.__backfillWouldRemoveFromMain = fromMain.slice();
 
       // 3) 本地有但雲端兩邊都沒有的 → 推到 app/profit
       try{ _reportCacheFlush('backfill'); }catch(e){}   // 先把延後寫入寫掉，下面讀到的 localStorage 才是最新的
@@ -4295,25 +4293,25 @@ window.addEventListener('profitDataReady', (e)=>{
         const k=localStorage.key(i);
         if(k && isProfitKey(k)) localKeys.push(k);
       }
-      let pushed=0;
       for(const k of localKeys){
         if(profitData[k]!==undefined || mainData[k]!==undefined) continue;
         try{
           // ec| 報表快取可能是 LZ1 壓縮格式 → 走共用解碼；其他前綴照舊 JSON.parse。
+          // （#436 試跑：這行從 console.warn 降成 console.log，整個試跑只留最後那一則 warn）
           // 🔴 型別守衛：__cloudProfit.setField 沒有 setReport 那種「非物件就 reject」的保護，
           //   ec| 的值不是純物件（解不開＝null、字串、陣列…）一律跳過，絕不把壓縮字串推上雲端。
           const raw=localStorage.getItem(k);
           const val=k.startsWith('ec|')?_reportCacheParse(raw):JSON.parse(raw);
           if(k.startsWith('ec|')&&!(val!==null&&typeof val==='object'&&!Array.isArray(val))){
-            console.warn('[淨利表] backfill v3 略過 '+k+'：本機值不是物件（可能是壓縮格式解不開或資料損毀），不推上雲端');
+            console.log('[淨利表] backfill v3 略過 '+k+'：本機值不是物件（可能是壓縮格式解不開或資料損毀），不推上雲端');
             continue;
           }
-          await window.__cloudProfit.setField(k,val);
-          pushed++;
+          wouldPush.push(k);   // 原本：await window.__cloudProfit.setField(k,val)
         }catch{}
       }
 
-      console.log(`[淨利表] backfill v3 完成：從 main 搬 ${moved} 筆、本地新推 ${pushed} 筆`);
+      window.__backfillWouldPush = wouldPush;
+      console.warn('[#436] 舊遷移已停用，原本會推 '+wouldPush.length+' 把：'+(wouldPush.length?wouldPush.slice(0,20).join(', ')+(wouldPush.length>20?' …（只列前 20 把，完整清單見 window.__backfillWouldPush）':''):'（無）'));
       try{localStorage.setItem(FLAG,'1');}catch{}
     }catch(err){ console.warn('[淨利表] backfill v3 失敗', err); }
   }
