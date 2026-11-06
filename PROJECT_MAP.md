@@ -82,6 +82,7 @@ escapeHtml…）、全站設定常數（`OFFICE_CONFIG`、`PLATFORMS`…），�
 `app/profit` 文件、`profits` collection、archive docs），訂閱快照並寫入
 `Store._profitMem`，就緒後 dispatch `cloudStoreReady` 事件。
 商品調整已搬的通路走 `window.__cloudGrowth`（`app/growth_{通路}`，開站就訂閱，一樣寫進 `Store._profitMem`；切換判斷 `__growthRoute`）。
+MOMO 優化紀錄已搬的店走 `window.__cloudOptlog`（`app/optlog_{店}`，開站就訂閱；切換判斷 `__optlogRoute`，合併與寫入在 profit.js `_optlogApply`、`_syncOptlogDoc`）。
 另提供唯讀觀測函式 `__profitArchivesReady()` / `__profitsCollectionReady()`（不以 `__cloud` 開頭、不算進 TEST_NOWRITE 物件數）。
 **注意：** 唯一含第三方 `import` 的檔，必須最後載入（觸發 `app.js` 啟動）。
 

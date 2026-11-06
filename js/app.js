@@ -3725,6 +3725,29 @@ const PROFIT_CAP_DAY_KEY = 'ec.profitCapWarnDay';
 let __profitCapShownDay = '';      // 黃卡：ec.profitCapWarnDay 寫不進去時，靠這個做到同分頁同日一次
 let __profitCapRedShown = false;   // 紅卡：每次開站（每個分頁）一次
 // 檢查一次。opts：{ stats（測試用，直接給數字）, ignoreDay }。回傳 { shown, level, reason, stats }，不丟錯。
+// 商品調整、優化紀錄的獨立文件（app/growth_*、app/optlog_*）門檻比 app/profit 低：這些文件會一直長，要早點知道。
+const PROFIT_CAP_DOC_WARN = 0.70;
+const PROFIT_CAP_DOC_RED = 0.90;
+// 回 [{ name, label, ratio, idxRatio, bytes, idx, level }]，只列到門檻的文件，紅的排前面。
+function __profitCapDocs(s) {
+  const out = [];
+  const add = (group, shop, d) => {
+    if (!d || typeof d.ratio !== 'number') return;
+    const w = Math.max(d.ratio, typeof d.idxRatio === 'number' ? d.idxRatio : 0);
+    const level = w >= PROFIT_CAP_DOC_RED ? 'red' : (w >= PROFIT_CAP_DOC_WARN ? 'warn' : '');
+    if (level) out.push(Object.assign({}, d, { name: 'app/' + group + '_' + shop, label: (group === 'growth' ? '商品調整' : '優化紀錄') + '（' + shop + '）', level }));
+  };
+  Object.keys(s.growth || {}).forEach(k => add('growth', k, s.growth[k]));
+  Object.keys(s.optlog || {}).forEach(k => add('optlog', k, s.optlog[k]));
+  return out.sort((a, b) => (a.level === b.level ? 0 : (a.level === 'red' ? -1 : 1)));
+}
+function __profitCapLevel(s) {
+  const main = Math.max(typeof s.ratio === 'number' ? s.ratio : 0, typeof s.idxRatio === 'number' ? s.idxRatio : 0);
+  const docs = __profitCapDocs(s);
+  if (main >= PROFIT_CAP_RED || docs.some(d => d.level === 'red')) return 'red';
+  if (main >= PROFIT_CAP_WARN || docs.length) return 'warn';
+  return '';
+}
 window.__profitCapCheck = function (opts) {
   opts = opts || {};
   try {
@@ -3733,14 +3756,14 @@ window.__profitCapCheck = function (opts) {
     if (u.role !== 'admin') return { shown: false, reason: '不是管理員' };
     const s = opts.stats || (typeof window.__profitDocStats === 'function' ? window.__profitDocStats({ compute: true }) : null);
     if (!s || typeof s.ratio !== 'number') return { shown: false, reason: '還沒有數字' };
-    const worst = Math.max(s.ratio, typeof s.idxRatio === 'number' ? s.idxRatio : 0);
-    if (worst >= PROFIT_CAP_RED) {
+    const worst = __profitCapLevel(s);
+    if (worst === 'red') {
       if (__profitCapRedShown) return { shown: false, level: 'red', reason: '這次開站提醒過', stats: s };
       __profitCapRedShown = true;
       __profitCapShow(s, 'red');
       return { shown: true, level: 'red', reason: '', stats: s };
     }
-    if (worst >= PROFIT_CAP_WARN) {
+    if (worst === 'warn') {
       const today = __lsTaipeiDay();
       if (!opts.ignoreDay) {
         let saved = ''; try { saved = localStorage.getItem(PROFIT_CAP_DAY_KEY) || ''; } catch (e) {}
@@ -3764,13 +3787,25 @@ function __profitCapShow(s, level) {
   el.className = 'ls-warn profit-cap-warn' + (level === 'red' ? ' profit-cap-warn--red' : '');
   el.setAttribute('role', level === 'red' ? 'alert' : 'status');
   const t = document.createElement('div'); t.className = 'ls-warn-title';
-  t.textContent = (level === 'red' ? '淨利表雲端檔快滿了' : '淨利表雲端檔空間偏高');
+  const docs = __profitCapDocs(s);
+  const mainHit = Math.max(s.ratio, typeof s.idxRatio === 'number' ? s.idxRatio : 0) >= PROFIT_CAP_WARN;
+  // 文案只在 app/profit 到門檻時講「淨利表雲端檔」；只有獨立文件到門檻時標題換成通用的。
+  t.textContent = mainHit ? (level === 'red' ? '淨利表雲端檔快滿了' : '淨利表雲端檔空間偏高') : (level === 'red' ? '雲端文件快滿了' : '雲端文件空間偏高');
   const p = document.createElement('div'); p.className = 'ls-warn-text';
-  const top = (s.top && s.top[0]) ? s.top[0] : null;
-  let msg = '淨利表雲端檔已用 ' + pct(s.ratio) + '%（約 ' + kb(s.bytes) + ' KB）';
-  if (typeof s.idxRatio === 'number' && s.idxRatio >= PROFIT_CAP_WARN) msg += '，索引已用 ' + pct(s.idxRatio) + '%（' + s.idx + ' 筆）';
-  if (top) msg += '，最大的是 ' + top.key + '（約 ' + kb(top.bytes) + ' KB）';
-  msg += '，請通知 Keani 處理';
+  const parts = [];
+  if (mainHit) {
+    const top = (s.top && s.top[0]) ? s.top[0] : null;
+    let m = '淨利表雲端檔已用 ' + pct(s.ratio) + '%（約 ' + kb(s.bytes) + ' KB）';
+    if (typeof s.idxRatio === 'number' && s.idxRatio >= PROFIT_CAP_WARN) m += '，索引已用 ' + pct(s.idxRatio) + '%（' + s.idx + ' 筆）';
+    if (top) m += '，最大的是 ' + top.key + '（約 ' + kb(top.bytes) + ' KB）';
+    parts.push(m);
+  }
+  docs.forEach(d => {
+    let m = d.label + ' ' + d.name + ' 已用 ' + pct(d.ratio) + '%（約 ' + kb(d.bytes) + ' KB）';
+    if (typeof d.idxRatio === 'number' && d.idxRatio >= PROFIT_CAP_DOC_WARN) m += '，索引已用 ' + pct(d.idxRatio) + '%（' + d.idx + ' 筆）';
+    parts.push(m);
+  });
+  const msg = parts.join('；') + '，請通知 Keani 處理';
   p.textContent = msg;
   const a = document.createElement('div'); a.className = 'ls-warn-actions';
   const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '知道了';

@@ -76,6 +76,9 @@ try {
   //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
   const GROWTH_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];   // 商品調整獨立文件 app/growth_{通路} 列管的通路（#436）；沒列的一律走 app/profit 舊欄位
+  // MOMO 優化紀錄獨立文件 app/optlog_{店} 列管的店（#436 第 ④ 塊）：ec_momo_optlog|{店} 的 {店} 實際會出現的名字（含補成本寫入的 PChome、博客來、FriDay、酷澎及酷澎兩家）。
+  //   🔴 新增會寫優化紀錄的店要加進來；沒列的照舊寫 app/profit，資料不會掉，profit.js 開站與同步時會 Console 警告。
+  const OPTLOG_SHOPS = ['甲配', '乙配', 'MO+麻吉', 'MO+森之旅', 'MO+玩樂', 'PChome', '博客來', 'FriDay', '酷澎', '麻吉', '露營館'];
   const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
@@ -217,8 +220,10 @@ try {
       if (p.state !== 'new') return false;
       const k = growthKey(shop);
       const ov = growthOverlay(p.items, profitParts.current[k], p.seen);
-      p.residue = ov.residue;
-      const codes = Object.keys(ov.residue);
+      // 只有真的有紀錄要補才算殘留。內容都在新文件裡（步驟 4 清 legacySeen 後舊快照晚到，或舊分頁寫回一樣的內容）不警告、不列入待補寫；
+      //   指紋不用另外補寫：刪紀錄一定走同步，_syncGrowthDoc 會在同一次寫入更新這些品號的指紋，所以不會復活。
+      p.residue = Object.fromEntries(Object.entries(ov.residue).filter(([, r]) => r.extras.length));
+      const codes = Object.keys(p.residue);
       if (codes.length) {
         const tag = codes.map(c => c + ':' + ov.residue[c].sig).join(',');
         if (p.warned !== tag) { p.warned = tag; console.warn('[商品調整] ' + shop + '：app/profit 舊欄位有新文件沒看過的品號（可能是舊分頁寫的），已合併進顯示，下次同步會補寫進新文件：', codes); }
@@ -229,6 +234,45 @@ try {
       Store._profitMem[k] = ov.value;
       return true;
     };
+    // ══════ MOMO 優化紀錄獨立文件 app/optlog_{店}（#436 第 ④ 塊）══════
+    //   切換判斷同商品調整：文件有數字 migratedAt ＝ 讀寫都走新文件；伺服器確認沒有這份文件 ＝ 走 app/profit 舊欄位。
+    //   這裡只管文件狀態。合併、殘留判斷都在 js/profit.js（momoMergeOptlog 只有一份）；只有 profit.js 會讀優化紀錄，所以它載入時才把資料放進記憶體（_optlogApply）。
+    //   舊欄位又出現（舊分頁寫的）靠紀錄 id 與墓碑判斷，不用 legacySeen：新文件沒有、也沒有墓碑的紀錄才算殘留。
+    const optlogKey = (shop) => 'ec_momo_optlog|' + shop;
+    const optlogDelKey = (shop) => 'ec_momo_optlog_del|' + shop;
+    const optlogParts = {};   // 店 → { state:'loading'|'old'|'new', items, tomb, raw, error, oldSeen }
+    OPTLOG_SHOPS.forEach(s => { optlogParts[s] = { state: 'loading', items: null, tomb: null, raw: null, error: null, oldSeen: '' }; });
+    const optlogIsNewKey = (k) => {
+      const m = /^ec_momo_optlog(?:_del)?\|(.+)$/.exec(String(k));
+      return !!(m && OPTLOG_SHOPS.includes(m[1]) && optlogParts[m[1]].state === 'new');
+    };
+    const optlogOldSig = (shop) => JSON.stringify([profitParts.current[optlogKey(shop)], profitParts.current[optlogDelKey(shop)]]);
+    const optlogNotify = (shop) => { try { if (window.__optlogApplyCloud) window.__optlogApplyCloud(shop); } catch (e) { console.error('[優化紀錄] 套用失敗：', shop, e); } };
+    // 以下都是唯讀觀測點（刻意不以 __cloud 開頭，同 __growthRoute）。
+    window.__optlogListed = (shop) => OPTLOG_SHOPS.includes(shop);
+    window.__optlogShops = () => OPTLOG_SHOPS.slice();
+    // 'old'／'new'；'none'＝沒列管；'loading'＝還不知道；'error'＝訂閱失敗。
+    window.__optlogRoute = (shop) => {
+      const p = optlogParts[shop];
+      if (!p) return 'none';
+      return (p.state === 'loading' && p.error) ? 'error' : p.state;
+    };
+    // 這家的優化紀錄已經從雲端到位了嗎（工作日誌只有全部到位才算次數，見 profit.js momoUpdateDailyProgress）。
+    window.__optlogReady = (shop) => {
+      const r = window.__optlogRoute(shop);
+      if (r === 'new') return true;
+      return (r === 'old' || r === 'none') && !!profitParts.gotFirst;
+    };
+    window.__optlogDocView = (shop) => {
+      const p = optlogParts[shop];
+      return { route: window.__optlogRoute(shop), items: p ? p.items : null, tomb: p ? p.tomb : null, oldField: profitParts.current[optlogKey(shop)], oldTomb: profitParts.current[optlogDelKey(shop)] };
+    };
+    window.__optlogState = () => Object.fromEntries(OPTLOG_SHOPS.map(s => {
+      const p = optlogParts[s];
+      let entries = 0;
+      if (p.items) Object.values(p.items).forEach(a => { if (Array.isArray(a)) entries += a.length; });
+      return [s, { route: window.__optlogRoute(s), skus: p.items ? Object.keys(p.items).length : 0, entries, tomb: p.tomb ? Object.keys(p.tomb).length : 0, oldField: Object.prototype.hasOwnProperty.call(profitParts.current, optlogKey(s)), residue: window.__optlogResidueCount ? window.__optlogResidueCount(s) : null, error: p.error }];
+    }));
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
@@ -241,6 +285,7 @@ try {
         if (k.startsWith('ec|')) return; // 舊版報表殘留 key，跳過
         if (k.startsWith('ec_momo_products|')) return; // MOMO 商品主檔以 momo_products collection 為準，不在此比對（遷移過渡）
         if (growthIsNewKey(k)) return; // 已搬的商品調整以 app/growth_{通路} 為準，下方 growthSync 處理
+        if (optlogIsNewKey(k)) return; // 已搬的優化紀錄以 app/optlog_{店} 為準，下方 optlogNotify 處理
         if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
           const shop = k.split('|')[1];
           if (shop) changedShops.add(shop);
@@ -250,6 +295,7 @@ try {
       //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
         if (growthIsNewKey(k)) return;   // 已搬的商品調整：舊欄位不直接覆蓋，由 growthSync 合併
+        if (optlogIsNewKey(k)) return;   // 已搬的優化紀錄：舊欄位不直接覆蓋，由 profit.js _optlogApply 合併
         // ec_pchome_products / ec_pchome_recon 已搬到 app/pchome_products / app/pchome_recon 獨立 doc
         //   （照 ec_momo_products 搬 collection 的先例）：新 doc 權威，app/profit 舊欄位只當【遷移過渡的 fallback】
         //   —— 只在新 doc 尚未填該 key（Store._profitMem 還沒值）時才填入，避免 app/profit echo 蓋掉新 doc 的值。
@@ -265,6 +311,13 @@ try {
       });
       // 已搬的通路：舊欄位可能剛被舊分頁寫入，重算一次。通路名維持 key 的第二段（玩樂_growth），跟搬之前發的事件相同。
       GROWTH_SHOPS.forEach(s => { if (growthSync(s)) changedShops.add(s + '_growth'); });
+      // 已搬的店：舊欄位有變動（舊分頁寫回、或搬家刪掉）才重算一次。
+      OPTLOG_SHOPS.forEach(s => {
+        const p = optlogParts[s];
+        if (p.state !== 'new') return;
+        const sig = optlogOldSig(s);
+        if (sig !== p.oldSeen) { p.oldSeen = sig; optlogNotify(s); }
+      });
       window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
       // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
       // profitDataReady listener 已處理 onMonthChange；此處不重複觸發
@@ -349,7 +402,14 @@ try {
         const m = profitDocMeasure(raw, 'app/growth_' + s);
         growth[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
       });
-      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth });
+      const optlog = {};   // 優化紀錄獨立文件（同上）
+      OPTLOG_SHOPS.forEach(s => {
+        const raw = optlogParts[s].raw;
+        if (!raw) return;
+        const m = profitDocMeasure(raw, 'app/optlog_' + s);
+        optlog[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog });
       profitDocStatsDirty = false;
       try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
       return profitDocStatsCache;
@@ -373,6 +433,7 @@ try {
     // 輕量：app/profit 立刻訂閱（小檔案，不會卡住）
     onSnapshot(profitDocRef, snap => {
       profitParts.current = snap.exists() ? (snap.data() || {}) : {};
+      if (snap.exists() || !(snap.metadata && snap.metadata.fromCache)) profitParts.gotFirst = true;   // 沒開 persistence：離線的快取快照是空的，不算收到（優化紀錄 __optlogReady 用）
       mergeAndNotify();
       _pdSchedule();
     }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
@@ -411,6 +472,34 @@ try {
       const p = growthParts[shop];
       if (p) p.error = String((err && err.message) || err);
       console.error('[商品調整] app/growth_' + shop + ' 訂閱失敗：', err);
+    };
+    // 優化紀錄文件的快照入口（判斷同上方商品調整）。data＝文件內容（不存在＝null）。
+    window.__optlogApplySnap = (shop, data, meta) => {
+      const p = optlogParts[shop];
+      if (!p) return;
+      const fromCache = !!(meta && meta.fromCache);
+      const prev = p.state;
+      p.error = null;
+      const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+      if (data && typeof data.migratedAt === 'number') {
+        p.state = 'new'; p.items = isMap(data.items) ? data.items : {}; p.tomb = isMap(data.tomb) ? data.tomb : {}; p.raw = data;
+        p.oldSeen = optlogOldSig(shop);
+      } else if (data) {
+        if (!p.warnedNoMark) { p.warnedNoMark = true; console.warn('[優化紀錄] app/optlog_' + shop + ' 存在但沒有 migratedAt，照舊使用 app/profit 舊欄位'); }
+        p.state = 'old'; p.items = null; p.tomb = null; p.raw = data;
+      } else if (!fromCache) {
+        p.state = 'old'; p.items = null; p.tomb = null; p.raw = null;
+      } else {
+        return;   // 沒有文件、資料來自快取：不能當成「確定沒有」，維持原狀態
+      }
+      _pdSchedule();
+      if (prev === 'new' && p.state !== 'new') mergeAndNotify();   // 回搬：把舊欄位放回顯示
+      optlogNotify(shop);
+    };
+    window.__optlogSubError = (shop, err) => {
+      const p = optlogParts[shop];
+      if (p) p.error = String((err && err.message) || err);
+      console.error('[優化紀錄] app/optlog_' + shop + ' 訂閱失敗：', err);
     };
 
     // 重量：archive 分片（PROFIT_ARCHIVE_DOCS，見上方常數）跟 profits collection 延後訂閱
@@ -1504,6 +1593,74 @@ try {
         e => { if (window.__growthSubError) window.__growthSubError(shop, e); });
     } catch (e) { console.error('[商品調整] 訂閱失敗：', shop, e); }
   });
+  // ============== MOMO 優化紀錄 app/optlog_{店}（#436 第 ④ 塊；從 app/profit 的 ec_momo_optlog|{店}、ec_momo_optlog_del|{店} 搬出） ==============
+  //   結構：{ items:{ 品號:[紀錄] }, tomb:{ 紀錄身分:{at,by} }, migratedAt:數字, migratedBy }。
+  //   文件只由搬家腳本建立；沒有 migratedAt 就不算搬完，讀寫都照舊走 app/profit（切換判斷見上方 __optlogRoute）。
+  //   寫入只有 writePaths：逐品號、逐墓碑 FieldPath 寫。🔴 刻意不走 kpiWriteTo，理由同 __cloudGrowth：文件不存在就失敗，不自動建立。
+  //   成功回 { ok:true }；被唯讀 / 本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe。⚠ 新增這顆後本機防護物件數 32 → 33、寫入方法 +1（見 CLAUDE.md）。
+  const optlogRef = (shop) => {
+    if (!OPTLOG_SHOPS.includes(shop)) throw new Error('不是列管的店：' + shop);
+    return doc(db, 'app', 'optlog_' + shop);
+  };
+  window.__cloudOptlog = {
+    DELETE: KPI_DELETE,
+    // getDoc(shop, 'server')：強制讀伺服器現值（離線會丟錯，不吃快取）。同步一律用這個決定路徑。
+    getDoc: (shop, src) => src === 'server' ? getDocFromServer(optlogRef(shop)) : getDoc(optlogRef(shop)),
+    // 🔴 includeMetadataChanges 不能拿掉，理由同 __cloudGrowth.subscribe。
+    subscribe: (shop, cb, onErr) => onSnapshot(optlogRef(shop), { includeMetadataChanges: true },
+      snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
+    writePaths: (shop, pairs) => kpiUpdate(optlogRef(shop), pairs).then(() => ({ ok: true })),
+  };
+  OPTLOG_SHOPS.forEach(shop => {
+    try {
+      window.__cloudOptlog.subscribe(shop, (data, meta) => { if (window.__optlogApplySnap) window.__optlogApplySnap(shop, data, meta); },
+        e => { if (window.__optlogSubError) window.__optlogSubError(shop, e); });
+    } catch (e) { console.error('[優化紀錄] 訂閱失敗：', shop, e); }
+  });
+  // 本機測試：把某家換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
+  //   __optlogMock('乙配')＝用目前的紀錄當新文件；__optlogMock('乙配', { residueSku:'品號' })＝假裝舊欄位那個品號多一筆新文件沒有的紀錄（舊分頁寫的）；
+  //   __optlogMock('乙配', 'doc')＝看假文件內容；__optlogMock('乙配', false)＝收掉（重新整理才會回到真實狀態）。
+  window.__optlogMock = (() => {
+    const H = location.hostname;
+    if (H !== 'localhost' && H !== '127.0.0.1') return () => { console.warn('__optlogMock 只在 localhost 可用'); };
+    const docs = {};
+    let real = null;
+    const snapOf = (d) => ({ exists: () => !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) });
+    const install = () => {
+      if (real) return;
+      const co = window.__cloudOptlog;
+      real = { getDoc: co.getDoc, writePaths: co.writePaths };
+      co.getDoc = (shop, src) => docs[shop] ? Promise.resolve(snapOf(docs[shop])) : real.getDoc(shop, src);
+      co.writePaths = (shop, pairs) => {
+        if (!docs[shop]) return real.writePaths(shop, pairs);
+        pairs.forEach(([segs, v]) => {
+          let o = docs[shop];
+          segs.slice(0, -1).forEach(s => { o = o[s] = o[s] || {}; });
+          if (v === co.DELETE) delete o[segs[segs.length - 1]]; else o[segs[segs.length - 1]] = JSON.parse(JSON.stringify(v));
+        });
+        console.log('%c[optlog mock] 假寫入（只在記憶體）', 'color:#2563eb', shop, pairs.map(p => p[0].join('.')));
+        window.__optlogApplySnap(shop, JSON.parse(JSON.stringify(docs[shop])), { fromCache: false });
+        return Promise.resolve({ ok: true });
+      };
+    };
+    return (shop, opt) => {
+      if (opt === 'doc') return docs[shop] ? JSON.parse(JSON.stringify(docs[shop])) : null;
+      if (opt === false) { delete docs[shop]; console.log('[optlog mock] 已收掉 ' + shop + '，重新整理才會回到真實狀態'); return; }
+      install();
+      const clone = (v) => JSON.parse(JSON.stringify(v || {}));
+      const d = { items: clone((Store._profitMem || {})['ec_momo_optlog|' + shop]), tomb: clone((Store._profitMem || {})['ec_momo_optlog_del|' + shop]), migratedAt: Date.now(), migratedBy: 'mock' };
+      if (opt && opt.residueSku) {
+        const a = d.items[opt.residueSku];
+        if (Array.isArray(a) && a.length) { a.pop(); if (!a.length) delete d.items[opt.residueSku]; }
+        else console.warn('[optlog mock] 這個品號沒有紀錄：', opt.residueSku);
+      }
+      docs[shop] = d;
+      window.__optlogApplySnap(shop, JSON.parse(JSON.stringify(d)), { fromCache: false });
+      console.log('%c[optlog mock] ' + shop + ' 已切到假文件（' + Object.keys(d.items).length + ' 個品號）', 'color:#2563eb;font-weight:700');
+      return d;
+    };
+  })();
   // 本機測試：把某通路換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
   //   __growthMock('維克')＝用目前畫面內容當新文件；__growthMock('維克', { residueCode:'品號' })＝假裝舊欄位那個品號被舊分頁動過，且最後一筆新文件沒有；
   //   __growthMock('維克', false)＝收掉（重新整理才會回到真實狀態）；__growthMock('維克', 'doc')＝看假文件內容。

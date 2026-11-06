@@ -1718,6 +1718,8 @@ async function syncNotesMerge(fullKey, label){
   //     ok 會有這把 key、彈窗顯示成功、__lastSyncReport 乾淨，但使用者的編輯一次都沒上去。
   //   ⚠ 訊息尾端那句是 2026-09-03 補的：這次災情裡使用者看到 (b) 完全無法自救，
   //     我方遠端查了三輪才定位。訊息要能讓下一個踩到的人自己走出來。
+  //   已搬的商品調整：沒有品號要推、也沒有殘留 ＝ 這次沒事可做，不算失敗（殘留的快照一到就清掉，待推卻留著，不擋會每次同步都紅字，直到重新整理）。
+  if(dirty.length===0 && _gShop && window.__growthRoute(_gShop)==='new') return 0;
   if(dirty.length===0) throw new Error('這把'+_L+'被標記為待同步，但沒有任何品號被登記，無法判斷該合併哪些品號 → 本次未推送（刻意不推一份等同雲端的資料）。多半是先前 localStorage 寫入失敗；請重新編輯一次該品號再同步。若剛存檔就看到此訊息，多半是儲存空間不足導致品號登記失敗 —— 重打該格再同步即可。');
   // ── (c) 讀不到雲端 doc → 中止，【不】推整份上去 ──
   //   ⚠ momoSyncCostByOrigin 有一段 `cloudEmpty ? Object.keys(localMap) : dirty` 的「首次上雲推整份」，
@@ -1852,7 +1854,7 @@ async function _syncGrowthDoc(fullKey,label,shop,gd,dirty){
     pairs.push(Object.prototype.hasOwnProperty.call(merged,c) ? [['items',seg], momoFsSanitizeDeep(merged[c])] : [['items',seg], dels]);
   });
   Object.keys(ov.residue).forEach(c=>{ pairs.push([['legacySeen',momoFsSafeKey(c)], ov.residue[c].sig]); });
-  if(!pairs.length) throw new Error('這把'+label+'沒有要寫入的品號，本次未推送。');
+  if(!pairs.length) return 0;   // dirty 空、殘留也已經消失（舊快照晚到才列入待推的）＝沒事可做，不算失敗
   const r=await window.__cloudGrowth.writePaths(shop,pairs);
   if(!(r&&r.ok)) throw new Error('寫入被擋下（唯讀帳號或本機防護），雲端沒有變動，資料還在本機。');
   // 讀回比對這次寫的品號；對不上就當失敗，dirty 留著，下次重推（別人剛好同時改同一品號時也會走到這裡，重推無害）
@@ -2883,6 +2885,8 @@ function _sweepAllLocalReportsIntoPending(){
   if(_REPORT_DIRTY_GATE){ try{ _reportDirtyCollect(); }catch(e){ console.error('[報表登記] 收集待推失敗',e); } }
   // 商品調整（#436）：已搬通路的舊欄位有新東西（舊分頁寫的）→ 列入待推，syncNotesMerge 會補寫進新文件。還沒搬的通路這支回空。
   try{ if(typeof window.__growthResidueKeys==='function') window.__growthResidueKeys().forEach(k=>_pendingSyncKeys.add(k)); }catch{}
+  // 優化紀錄（#436 第 ④ 塊）：同上。上面那條「localStorage 有就撿」的 key 也一樣由 momoSyncOptlog 決定路徑，已搬的店只寫新文件。
+  try{ window.__optlogResidueKeys().forEach(k=>_pendingSyncKeys.add(k)); }catch{}
   // MOMO 月對帳／運費：只撿「本機待推註冊表」（存檔才登記、推成功才清；上面 localStorage 迴圈刻意跳過這兩類）。
   //   本機已經沒有這把 key 的值（被清掉）→ 從註冊表拿掉，不留一個永遠讀不到的懸空待推。
   try{
@@ -19942,6 +19946,7 @@ function _momoCollectPending(shop){
     else if(cupIsReportKey(pk)){ const pp=pk.split('|'); val=cupLoadReport(pp[1],pp[2]); }   // 酷澎報表：與 push（cupLoadReport）同源
     else if(cupIsMsfKey(pk)){ const pp=pk.split('|'); val=cupLoadReturns(pp[1],pp[2]); }     // 酷澎退貨：與 push（cupLoadReturns）同源
     else if(cupIsNoteKey(pk)){ val=cupNoteForPush(pk)||{}; }                                  // 酷澎備註：與 push（cupNoteForPush，_mem→localStorage）同源
+    else if(pk.startsWith('ec_momo_optlog|')){ val=_optlogLocalForPush(pk.slice('ec_momo_optlog|'.length)); }   // 優化紀錄：與 push（momoSyncOptlog）同源
     else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
     const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_c1105_ship|')?'MOMO訂單數(KPI)' : pk.startsWith('ec_momo_moplus_orders|')?'MO+訂單數(KPI)' : pk.startsWith('ec_momo_moplus_unreg|')?'MO+未建檔統計(KPI)' :pk.startsWith('ec_momo_rent|')?'MOMO倉租' : pk.startsWith('ec_momo_f1102|')?'MOMO寄倉庫存' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : cupIsReportKey(pk)?'酷澎報表' : cupIsMsfKey(pk)?'酷澎退貨' : cupIsNoteKey(pk)?'酷澎備註' : '其他設定';
@@ -19984,7 +19989,16 @@ async function momoOpenSyncPreview(shop, opts){
       const _d=(_sn&&_sn.exists&&_sn.exists())?(_sn.data()||{}):null;
       if(_d&&typeof _d.migratedAt==='number') cloud[it.key]=window.__growthPure.overlay(_d.items||{}, cloud[it.key], _d.legacySeen||{}).value;
     }
-  }catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取商品調整的雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
+    // 優化紀錄（#436 第 ④ 塊）：同上。墓碑一起換，下面算 willMerge 會用。
+    for(const it of items){
+      if(!String(it.key).startsWith('ec_momo_optlog|')) continue;
+      const _os=it.key.slice('ec_momo_optlog|'.length);
+      if(!_optlogListed(_os)) continue;
+      const _sn=await window.__cloudOptlog.getDoc(_os,'server');
+      const _d=(_sn&&_sn.exists&&_sn.exists())?(_sn.data()||{}):null;
+      if(_d&&typeof _d.migratedAt==='number'){ const _abs=_optlogAbsorbOld(_d.items, _d.tomb, cloud[it.key], cloud[momoOptlogDelKey(_os)]); cloud[it.key]=_abs.merged; cloud[momoOptlogDelKey(_os)]=_abs.tomb; }
+    }
+  }catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取商品調整或優化紀錄的雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
   // MOMO 商品主檔改讀 momo_products collection（每賣場一 doc），與寫入 __cloudMomo.setShop 同源；
   //   併發 getDoc（只讀真正 pending 的賣場）→ 延遲≈一次來回；沿用已在 READ_OK 白名單的 getDoc，不動防護碼。
   //   cloud doc 是 { shop, items:[...] }，取 .items 比對（不是整個 doc）。單一賣場讀失敗只標該列無法比對，不讓整個預覽掛掉。
@@ -21182,12 +21196,18 @@ function momoMergeOptlog(cloud, local, tomb){
 // optlog 同步（read-merge-write）：讀雲端 optlog 欄＋雲端墓碑 → 墓碑取聯集 → 合併（濾掉墓碑）→ optlog、墓碑都寫回雲端 + 本機更新成合併結果（不重 _markPending）。回 addedFromCloud。
 async function momoSyncOptlog(shop){
   const k=momoOptlogKey(shop), dk=momoOptlogDelKey(shop);
+  // 已搬到 app/optlog_{店}（#436 第 ④ 塊）：每次都重讀伺服器決定路徑。讀不到就 throw（進 failed、pending 留著），🔴 絕不退回寫舊欄位
+  if(_optlogListed(shop)){
+    const _os=await window.__cloudOptlog.getDoc(shop,'server');
+    const _od=(_os&&_os.exists&&_os.exists())?(_os.data()||{}):null;
+    if(_od&&typeof _od.migratedAt==='number') return _syncOptlogDoc(shop,_od);
+  }else if(typeof window.__optlogListed==='function') console.warn('[優化紀錄] '+shop+' 不在 firebase.js OPTLOG_SHOPS，照舊寫 app/profit');
   const snap=await window.__cloudProfit.getDoc();
   const cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
   const cloudOpt=(cd[k]&&typeof cd[k]==='object')?cd[k]:{};
   const cloudDel=(cd[dk]&&typeof cd[dk]==='object'&&!Array.isArray(cd[dk]))?cd[dk]:{};
   const tomb=Object.assign({}, cloudDel, momoLoadOptlogDel(shop));   // 墓碑聯集（只增不減）
-  const { merged, addedFromCloud, affectedDates }=momoMergeOptlog(cloudOpt, momoLoadOptlog(shop)||{}, tomb);
+  const { merged, addedFromCloud, affectedDates }=momoMergeOptlog(cloudOpt, _optlogLocalForPush(shop), tomb);
   await window.__cloudProfit.setField(k, momoFsSanitizeDeep(merged));   // 寫回合併結果（雲端）
   if(Object.keys(tomb).length) await window.__cloudProfit.setField(dk, momoFsSanitizeDeep(tomb));   // 墓碑寫回（空的不建欄位）
   // 本機三鏡像同步成合併結果（否則下次同步又出現差異）；⚠ 不 _markPending（剛推完、避免立刻又進待推）
@@ -21196,6 +21216,127 @@ async function momoSyncOptlog(shop){
   try{ if(Store._mem) Store._mem[k]=merged; }catch{}
   momoSaveOptlogDel(shop, tomb);
   try{ momoUpdateDailyProgress({silent:true, dates:[momoNowParts().date, ...affectedDates]}); }catch(e){}   // 工作日誌 counts：今天照舊 + 因墓碑／雲端較新編輯改到的日期逐日重算
+  return addedFromCloud;
+}
+// ══════ 優化紀錄獨立文件 app/optlog_{店}（#436 第 ④ 塊）。文件狀態在 firebase.js（__optlogRoute），合併一律走上面的 momoMergeOptlog。══════
+function _optlogListed(shop){ return typeof window.__optlogListed==='function' && window.__optlogListed(shop) && !!window.__cloudOptlog; }
+function _optlogIsMap(v){ return !!v && typeof v==='object' && !Array.isArray(v); }
+// 同步要推的本機內容＝記憶體 ∪ localStorage。
+//   🔴 不能只讀 momoLoadOptlog：它先回雲端來的 _profitMem，新增後沒同步就重新整理的紀錄只在 localStorage，只讀記憶體就會被合併結果蓋掉。
+function _optlogLocalForPush(shop){
+  const mem=momoLoadOptlog(shop)||{};
+  let ls=null; try{ const raw=localStorage.getItem(momoOptlogKey(shop)); if(raw) ls=JSON.parse(raw); }catch{}
+  if(!_optlogIsMap(ls)) return mem;
+  return momoMergeOptlog(ls, mem, momoLoadOptlogDel(shop)).merged;
+}
+// 兩份紀錄陣列內容是否相同（不管順序：雲端舊資料不一定排序過，順序不同不算要寫）。
+function _optlogSameList(a,b){
+  const norm=x=>(Array.isArray(x)?x:[]).map(e=>momoOptlogTombId(e)+'\u0000'+_momoStableStr(e)).sort().join('\u0001');
+  return norm(a)===norm(b);
+}
+// 新文件 + 舊欄位 → 合併結果。舊欄位裡新文件沒有、也沒有墓碑的紀錄才算殘留（舊分頁寫的），所以舊快照晚到不會誤報。
+//   回 { merged, tomb, skus:有差異的品號, newTomb:新文件還沒有的墓碑, affectedDates }。
+function _optlogAbsorbOld(items, docTomb, oldField, oldTomb){
+  const it=_optlogIsMap(items)?items:{}, dt=_optlogIsMap(docTomb)?docTomb:{};
+  const tomb=Object.assign({}, dt, _optlogIsMap(oldTomb)?oldTomb:{});
+  const r=momoMergeOptlog(it, _optlogIsMap(oldField)?oldField:{}, tomb);
+  const skus=[...new Set([...Object.keys(it),...Object.keys(r.merged)])].filter(s=>!_optlogSameList(it[s],r.merged[s]));
+  return { merged:r.merged, tomb, skus, newTomb:Object.keys(tomb).filter(id=>!dt[id]), affectedDates:r.affectedDates };
+}
+const _optlogResidue=new Map();   // 店 → 等下次同步補寫的數量（品號＋墓碑）；只在記憶體
+window.__optlogResidueCount=shop=>_optlogResidue.get(shop)||0;
+window.__optlogResidueKeys=()=>[..._optlogResidue.keys()].map(momoOptlogKey);
+// 把 firebase.js 的文件狀態放進記憶體。文件快照、舊欄位變動、profit.js 載入時都會呼叫。
+function _optlogApply(shop){
+  const v=window.__optlogDocView(shop), k=momoOptlogKey(shop), dk=momoOptlogDelKey(shop);
+  if(v.route==='new'){
+    const abs=_optlogAbsorbOld(v.items, v.tomb, v.oldField, v.oldTomb);
+    const n=abs.skus.length+abs.newTomb.length;
+    if(n){
+      const tag=abs.skus.join(',')+'|'+abs.newTomb.join(',');
+      if(_optlogApply._warned[shop]!==tag){ _optlogApply._warned[shop]=tag; console.warn('[優化紀錄] '+shop+'：app/profit 舊欄位有新文件沒有的內容（可能是舊分頁寫的），已合併進顯示，下次同步會補寫進新文件：',abs.skus,abs.newTomb); }
+      _optlogResidue.set(shop,n);
+    }else _optlogResidue.delete(shop);
+    const tombAll=Object.assign({}, abs.tomb, momoLoadOptlogDel(shop));
+    const cur=Store._profitMem[k];
+    // 本機有待推 → 合併，不跳過也不覆蓋：跳過的話記憶體會一直缺雲端的紀錄，工作日誌次數就會算錯。沒有待推 → 雲端為準。
+    const next=momoMergeOptlog(abs.merged, _pendingSyncKeys.has(k)&&_optlogIsMap(cur)?cur:{}, tombAll).merged;
+    const changed=cur===undefined||_momoStableStr(cur)!==_momoStableStr(next);
+    Store._profitMem[k]=next; Store._profitMem[dk]=tombAll;
+    if(Store._mem&&Store._mem[k]!==undefined) Store._mem[k]=next;
+    if(changed){ try{ window.dispatchEvent(new CustomEvent('profitDataReady',{detail:{changedShops:[shop]}})); }catch{} }
+  }else _optlogResidue.delete(shop);
+  _optlogHydrateOnce(shop);
+  _optlogDpFlush();
+}
+_optlogApply._warned={};
+// 重新整理後，localStorage 可能還有沒同步的紀錄（雲端到位後 _profitMem 是雲端版）。每個分頁每家補回記憶體一次並列入待推；
+//   不補的話下一次 momoSaveOptlog 會拿雲端版覆蓋 localStorage，那些紀錄就不見了。
+const _optlogHydrated=new Set();
+function _optlogHydrateOnce(shop){
+  if(_optlogHydrated.has(shop)||typeof window.__optlogReady!=='function'||!window.__optlogReady(shop)) return;
+  _optlogHydrated.add(shop);
+  try{
+    const k=momoOptlogKey(shop), raw=localStorage.getItem(k); if(!raw) return;
+    const ls=JSON.parse(raw); if(!_optlogIsMap(ls)) return;
+    const cur=Store._profitMem[k], tomb=momoLoadOptlogDel(shop);
+    const m=momoMergeOptlog(_optlogIsMap(cur)?cur:{}, ls, tomb);
+    const base=_optlogIsMap(cur)?cur:{};
+    if([...new Set([...Object.keys(base),...Object.keys(m.merged)])].some(s=>!_optlogSameList(base[s],m.merged[s]))){
+      Store._profitMem[k]=m.merged;
+      if(Store._mem&&Store._mem[k]!==undefined) Store._mem[k]=m.merged;
+      _markPending(k);
+      console.warn('[優化紀錄] '+shop+'：本機有還沒同步的紀錄，已列入待推');
+    }
+  }catch(e){ console.warn('[優化紀錄] 讀本機紀錄失敗：',shop,e); }
+}
+// 工作日誌只有在「所有家的紀錄都從雲端到位」才算次數（見 momoUpdateDailyProgress）。沒有雲端層（離線 fallback）照舊。
+function _optlogDpReady(){ return typeof window.__optlogReady!=='function' || MOMO_OPTLOG_DP_SHOPS.every(s=>window.__optlogReady(s)); }
+let _optlogDpWanted=null;   // 還沒到位時被要求重算的 { dates:Set, push:bool }；到位後補算一次
+function _optlogDpFlush(){
+  if(!_optlogDpWanted||!_optlogDpReady()) return;
+  const w=_optlogDpWanted; _optlogDpWanted=null;
+  try{ momoUpdateDailyProgress({silent:true, dates:[...w.dates], pushToCloud:w.push}); }catch(e){ console.warn('[優化紀錄] 補算工作日誌失敗',e); }
+}
+// 已搬的店的推送：讀新文件 → 併舊欄位殘留 → 併本機 → 只寫有變的品號與墓碑 → 讀回比對。throw → failed、pending 留著。回 addedFromCloud。
+async function _syncOptlogDoc(shop, od){
+  const k=momoOptlogKey(shop), dk=momoOptlogDelKey(shop);
+  if(od.items!==undefined&&!_optlogIsMap(od.items)) throw new Error('雲端優化紀錄 '+shop+' 不是物件（型別異常），已中止合併，以免寫壞雲端。');
+  const ps=await window.__cloudProfit.getDoc();   // 舊欄位現值（舊分頁可能又寫過）
+  if(!(ps&&ps.exists&&ps.exists())) throw new Error('讀不到雲端 app/profit（doc 不存在或讀取失敗），已中止合併。本次未推送，資料還在本機，請稍後再按同步重試。');
+  const pd=ps.data()||{};
+  const cloudItems=JSON.parse(JSON.stringify(od.items||{})), docTomb=_optlogIsMap(od.tomb)?od.tomb:{};
+  const abs=_optlogAbsorbOld(cloudItems, docTomb, pd[k], pd[dk]);
+  const tomb=Object.assign({}, abs.tomb, momoLoadOptlogDel(shop));
+  const { merged, addedFromCloud, affectedDates }=momoMergeOptlog(abs.merged, _optlogLocalForPush(shop), tomb);
+  const dels=window.__cloudOptlog.DELETE;
+  const pairs=[];
+  [...new Set([...Object.keys(cloudItems),...Object.keys(merged)])].forEach(s=>{
+    if(_optlogSameList(cloudItems[s],merged[s])) return;
+    pairs.push(merged[s]?[['items',momoFsSafeKey(s)], momoFsSanitizeDeep(merged[s])]:[['items',momoFsSafeKey(s)], dels]);
+  });
+  Object.keys(tomb).forEach(id=>{ if(!docTomb[id]) pairs.push([['tomb',momoFsSafeKey(id)], momoFsSanitizeDeep(tomb[id])]); });
+  if(pairs.length){
+    const r=await window.__cloudOptlog.writePaths(shop,pairs);
+    if(!(r&&r.ok)) throw new Error('寫入被擋下（唯讀帳號或本機防護），雲端沒有變動，資料還在本機。');
+    // 讀回比對；對不上就當失敗，pending 留著，下次重推（union 合併，重推無害）
+    const vs=await window.__cloudOptlog.getDoc(shop,'server');
+    const vd=(vs&&vs.exists&&vs.exists())?(vs.data()||{}):null;
+    if(!vd) throw new Error('寫入後讀不到 app/optlog_'+shop+'，請重新整理後確認。');
+    const bad=pairs.filter(([segs,v])=>{
+      const got=(vd[segs[0]]||{})[segs[1]];
+      if(v===dels) return got!==undefined;
+      return segs[0]==='items'?!_optlogSameList(got,v):got===undefined;
+    }).map(([segs])=>segs[1]);
+    if(bad.length) throw new Error('寫入後讀回比對不一致（'+bad.slice(0,5).join('、')+'），請稍後再按同步重試。');
+  }
+  if(abs.skus.length||abs.newTomb.length) console.warn('[優化紀錄] '+shop+'：已把 app/profit 舊欄位的異動補寫進新文件（'+abs.skus.length+' 個品號、'+abs.newTomb.length+' 筆墓碑），舊欄位沒有刪除。');
+  // 本機三鏡像同步成合併結果；⚠ 不 _markPending（同舊路徑）
+  try{ localStorage.setItem(k,JSON.stringify(merged)); }catch{}
+  try{ if(Store._profitMem) Store._profitMem[k]=merged; }catch{}
+  try{ if(Store._mem) Store._mem[k]=merged; }catch{}
+  momoSaveOptlogDel(shop, tomb);
+  try{ momoUpdateDailyProgress({silent:true, dates:[momoNowParts().date, ...abs.affectedDates, ...affectedDates]}); }catch(e){}
   return addedFromCloud;
 }
 // 一次性遷移：把前後雙底線的舊合成 key（__master_import__/__sync_new__）改成合法形式（Firestore 拒 __..__ → 同步炸）。
@@ -21372,6 +21513,13 @@ function momoUpdateDailyProgress(opts){
   opts=opts||{};
   if(!(window.Store&&Store.get)) return;
   const today=momoNowParts().date;
+  // 🔴 優化紀錄還沒全部從雲端到位 → 不算也不寫：這裡算出來的會把當天的 momo-summary 換掉，再整份推上雲（#436 第 ④ 塊）。到位後 _optlogDpFlush 補算一次。
+  if(!_optlogDpReady()){
+    if(!_optlogDpWanted){ _optlogDpWanted={dates:new Set(),push:false}; console.warn('[優化紀錄] 雲端資料還沒到位，工作日誌次數等到位後再算'); }
+    ((opts.dates&&opts.dates.length)?opts.dates:[today]).forEach(d=>{ if(d) _optlogDpWanted.dates.add(d); });
+    if(opts.pushToCloud) _optlogDpWanted.push=true;
+    return;
+  }
   // opts.dates：要重算的日期清單（刪除/編輯過去日期的紀錄用）；沒給 → 只算今天（既有呼叫端行為不變）
   const dates=(opts.dates&&opts.dates.length)?[...new Set(opts.dates.filter(Boolean))]:[today];
   if(!dates.length) return;
@@ -21428,7 +21576,7 @@ function momoOpenDpDetail(person, date, combo){
   const body = rows.length ? rows.map(r=>`<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start">
       <span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">${esc(r.time)}</span>
       <div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><b>${esc(r.name||r.sku)}</b> <span style="color:#9ca3af;font-family:monospace">${esc(r.sku)}</span></div>${r.note?`<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">${esc(r.note)}</div>`:''}</div>
-    </div>`).join('') : '<div style="padding:14px 2px;color:#9ca3af;font-size:12px">找不到對應紀錄（可能已刪除或改期）</div>';
+    </div>`).join('') : `<div style="padding:14px 2px;color:#9ca3af;font-size:12px">${_optlogDpReady()?'找不到對應紀錄（可能已刪除或改期）':'優化紀錄載入中，請稍後再開一次'}</div>`;
   let ov=document.getElementById('momo-dp-detail-ov');
   if(!ov){ ov=document.createElement('div'); ov.id='momo-dp-detail-ov'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -33831,4 +33979,15 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }
+// 優化紀錄（#436 第 ④ 塊）：profit.js 是動態載入，文件快照可能先到，這裡補套用一次。之後由 firebase.js 呼叫 __optlogApplyCloud。
+try{
+  if(typeof window.__optlogShops==='function'){
+    window.__optlogApplyCloud=_optlogApply;
+    window.__optlogAbsorbOld=_optlogAbsorbOld;   // 純函式，回搬與清殘留腳本用（唯讀，不以 __cloud 開頭）
+    const _unlisted=MOMO_OPTLOG_DP_SHOPS.filter(s=>!window.__optlogListed(s));
+    if(_unlisted.length) console.warn('[優化紀錄] 這些店不在 firebase.js OPTLOG_SHOPS，照舊寫 app/profit：',_unlisted);
+    window.__optlogShops().forEach(_optlogApply);
+    window.addEventListener('profitDataReady',()=>{ window.__optlogShops().forEach(_optlogHydrateOnce); _optlogDpFlush(); });
+  }
+}catch(e){ console.error('[優化紀錄] 開頁處理失敗',e); }
 try{ if(_REPORT_WINDOW_GATE) _reportCloudIndex(); }catch(e){ console.error('[報表窗口] 讀取目錄失敗',e); }
