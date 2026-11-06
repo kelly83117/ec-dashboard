@@ -1709,6 +1709,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-side-item:hover{border-color:#c7d2fe;}
 .km-side-item.active{border-color:var(--primary);background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary);}
 .km-side-name{font-weight:700;color:#374151;flex:1;white-space:nowrap;}
+/* 側欄填寫進度徽章一律靠右對齊（2026-11-06）：名稱已 flex:1 會把徽章推到右邊，這裡再明確把徽章 margin-left:auto，
+   不論名稱長短、不論是否有其他元素，所有通路的徽章右緣都對齊。 */
+.km-side-item .km-badge{margin-left:auto;}
 .km-fill-main{min-width:0;}
 .km-fill-title{display:flex;align-items:baseline;gap:10px;font-size:15px;font-weight:800;color:#1a1a2e;margin-bottom:10px;}
 .km-fill-title .km-dot{align-self:center;width:10px;height:10px;}
@@ -1816,7 +1819,30 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-anom-item{padding:2px 0;border:none;background:none;text-align:left;font-size:12px;color:var(--text);cursor:pointer;line-height:1.5;}
 .km-anom-item:hover{color:var(--primary);text-decoration:underline;}
 .km-anom-item-w{font-weight:700;}
-.km-side-anom{font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;border:1px solid var(--warn);background:var(--warn-soft);color:var(--text);white-space:nowrap;}
+/* 警示清單每一列：原因（可點＝聚焦該格）＋右側「確認無誤」綠色按鈕（2026-11-06）。只用 :root 變數＋既有色。 */
+.km-anom-li{display:flex;align-items:center;gap:8px;list-style:none;flex-wrap:wrap;}
+.km-anom-li .km-anom-item{flex:1 1 220px;}
+.km-anom-reason{flex:0 1 200px;min-width:120px;padding:3px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:var(--text);}
+.km-anom-reason:focus{outline:none;border-color:var(--primary);}
+.km-anom-ok{flex-shrink:0;padding:3px 10px;border:1px solid #10b981;background:var(--success-soft,#d1fae5);color:#047857;font-size:11.5px;font-weight:700;border-radius:999px;cursor:pointer;white-space:nowrap;}
+.km-anom-ok:hover{background:#10b981;color:#fff;}
+/* 側欄「這個通路有 N 格要確認」的計數徽章（2026-11-06）：拿掉 ⚠ 三角形，改成乾淨的圓形琥珀計數（只用 :root 變數）。 */
+.km-side-anom{min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;line-height:1;border-radius:999px;border:1px solid var(--warn);background:var(--warn-soft);color:#92400e;font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* 異常警示（2026-11-06 改版）：填寫模式改用整格底色取代原本的 ⚠／🔴🟡 小標籤——對齊、明顯、不撐寬欄。
+   琥珀＝要再確認（含 R8 純利率跟上月差很多）；紅＝本月純利為負（R8）。原因放該格 title。只用 :root 變數。 */
+.km-ftable td.km-anom-cell{background:var(--warn-soft);}
+.km-ftable td.km-anom-cell-red{background:var(--danger-soft);}
+/* 已確認的格子：不再是警示，改成右上角淡淡的綠色 ✓（原因／誰確認的放該格 title）。 */
+.km-ftable td.km-anom-ok-cell{position:relative;}
+.km-ftable td.km-anom-ok-cell::after{content:'✓';position:absolute;top:1px;right:3px;font-size:10px;line-height:1;color:#10b981;opacity:.7;pointer-events:none;}
+/* 被標記的可編輯格：輸入框透明融入底色、邊框用警示色；聚焦時恢復白底看得清楚。 */
+.km-ftable td.km-anom-cell .km-in,.km-ftable td.km-anom-cell-red .km-in{background:transparent;}
+.km-ftable td.km-anom-cell .km-in{border-color:var(--warn);}
+.km-ftable td.km-anom-cell-red .km-in{border-color:var(--danger);}
+.km-ftable td.km-anom-cell .km-in:focus,.km-ftable td.km-anom-cell-red .km-in:focus{background:var(--surface,#fff);}
+/* 月結表各通路表「較上月」純利率格：本月純利為負整格紅底、變化≥門檻整格黃底（只用 :root 變數）。 */
+.kc-c.km-rate-neg{background:var(--danger-soft);}
+.kc-c.km-rate-chg{background:var(--warn-soft);}
 /* #330 塊 2：蝦皮共同費用（含稅格）輸入框下方那一行（_kpiCommonTaxSubHtml）。版位沿用 .km-sublabel（「自動」標籤那一排），
    但共同費用列是 colspan 寬格、輸入框靠左 → 改成靠左對齊輸入框的文字起點。
    一律佔一行高（舊月份沒字也是），打字預覽出現時列高不跳。預覽只在這格聚焦時顯示，失焦自動退回「含稅 X」。 */
