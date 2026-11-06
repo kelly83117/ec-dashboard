@@ -3770,7 +3770,7 @@ function __profitCapShow(s, level) {
   let msg = '淨利表雲端檔已用 ' + pct(s.ratio) + '%（約 ' + kb(s.bytes) + ' KB）';
   if (typeof s.idxRatio === 'number' && s.idxRatio >= PROFIT_CAP_WARN) msg += '，索引已用 ' + pct(s.idxRatio) + '%（' + s.idx + ' 筆）';
   if (top) msg += '，最大的是 ' + top.key + '（約 ' + kb(top.bytes) + ' KB）';
-  msg += '，請通知 Gini 處理';
+  msg += '，請通知 Keani 處理';
   p.textContent = msg;
   const a = document.createElement('div'); a.className = 'ls-warn-actions';
   const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '知道了';
