@@ -12558,7 +12558,7 @@ function _kpiMomoAutoPlan(month,row,opts){
       const it=base('cost');
       if(!mc)Object.assign(it,wait(why));
       else Object.assign(it,{status:'write',val:Math.round(mc.cost),src:'moplus-origins:'+mc.src,
-        comp:'Σ 對帳明細數量（依原廠編號）× 成本表成本：'+fmtN(mc.qty)+' 件'+(mc.missQty?'，其中缺成本 '+fmtN(mc.missQty)+' 件不算':''),
+        comp:'Σ 對帳明細數量（依原廠編號）× 成本表成本：'+fmtN(mc.qty)+' 件'+(mc.filledQty?'，其中 '+fmtN(mc.filledQty)+' 件原廠編號由商品主檔補（對帳明細空白）':'')+(mc.missQty?'，其中缺成本 '+fmtN(mc.missQty)+' 件不算':''),
         compNote:'成本未稅、數量＝對帳數量（對帳明細「數量」，排除回收確認與運費列；只算已建檔品號）',
         warn:mc.miss, unreg:mc.unreg, unregMissing:!mc.unreg});
       push(it);
@@ -12583,15 +12583,16 @@ function _kpiMoPlusCost(ms,month){
   let cost=0,qty=0,missQty=0;const miss={};
   Object.keys(doc.skus).forEach(sku=>Object.values(doc.skus[sku]||{}).forEach(c=>Object.keys((c&&c.o)||{}).forEach(o=>{
     const q=Number(c.o[o])||0;if(!q)return;qty+=q;
-    const cc=(o!==MOMO_NO_ORIGIN&&cm[o]!=null&&cm[o]!=='')?Number(cm[o]):NaN;
-    if(isFinite(cc)){cost+=q*cc;return;}
-    missQty+=q;const k=sku+'\u0001'+o;(miss[k]=miss[k]||{sku,origin:o===MOMO_NO_ORIGIN?'':o,qty:0}).qty+=q;
+    const oc=momoMoPlusOriginCost(cm,o);   // 組合原廠編號（E187-04+E187-05）＝各組成成本相加；任一組成查不到 → 整筆缺成本
+    if(oc.cost!=null){cost+=q*oc.cost;return;}
+    missQty+=q;oc.missing.forEach(mo=>{const k=sku+'\u0001'+mo;(miss[k]=miss[k]||{sku,origin:(mo===MOMO_NO_ORIGIN?'':mo),qty:0}).qty+=q;});   // 缺成本清單列「缺的那個組成」
   })));
   // 未建檔品號（不在商品主檔、沒進 o → 沒算成本）：上傳對帳明細時存在 ec_momo_moplus_unreg|店|月（2026-10-01 起）；只列數量 > 0 的
   let unreg=null;const ur=momoLoadMoPlusUnreg(ms,month);
   if(ur&&ur.skus){const list=Object.entries(ur.skus).map(([sku,q])=>({sku,qty:Number(q)||0})).filter(x=>x.qty>0).sort((a,b)=>b.qty-a.qty);
     unreg={n:list.length,qty:list.reduce((a,x)=>a+x.qty,0),list};}
-  return{cost,qty,missQty,miss:Object.values(miss).sort((a,b)=>b.qty-a.qty),src,unreg};
+  const filledQty=Object.values(doc.originFilled||{}).reduce((a,x)=>a+(Number(x)||0),0);   // 原廠編號空白、由商品主檔補回的件數（上傳時記在 origins doc）
+  return{cost,qty,missQty,filledQty,miss:Object.values(miss).sort((a,b)=>b.qty-a.qty),src,unreg};
 }
 const _KPI_AUTO_STATUS={write:['會寫入','km-au-w'],same:['相同，不寫','km-au-s'],keep:['已手填，不覆蓋','km-au-s'],wait:['等上傳','km-au-x'],reupload:['需重新上傳對帳單','km-au-x']};
 // 有黃色警示的列（MO+ 商品成本：缺成本／未建檔品號／舊月份沒有未建檔統計）→ 預設不勾
@@ -17555,7 +17556,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
       // 退貨率＝回收確認 qty ÷ (已送達+回收確認)。本期銷量 qty 已排除回收確認（＝已送達）→ 分母＝qty+retQty（值與含回收確認時相同、語意正確）。
       //   舊 doc 無 ret 欄→retKnown false→null(「—」需重傳)。
       returnRate: retKnown ? ((qty+retQty)>0?Math.round((retQty/(qty+retQty))*1000)/10:0) : null, retQty, retKnown,
-      coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins,
+      coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins, noOriginQty:Math.abs(Number(originsQty[MOMO_NO_ORIGIN])||0),   // 本期原廠編號仍空白（補不回來）的件數 → 成本欄 ⚠
       latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
       listPrice:lp.listPrice, listIsManual:lp.isManual, listManualScope:lp.manualScope, listPriceMaster:lp.masterListPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale,
       feeRate:momoFeeLowerBound(fr), _feeStatus:fr.status, _feeCand:(fr.cand||[]), _feeReason:(fr.reason||null), _feeCur:(fr.cur||null), moPlus:true
@@ -19088,6 +19089,17 @@ function momoMoPlusOriginsKey(shop, src){ return 'ec_momo_moplus_origins|'+shop+
 // ⚠ 空原廠編號的列一律歸此哨兵 key（不用 ''、不靜默丟）：量仍計入期別總量，查無成本＝缺成本。
 //   名稱需過 Firestore 全部 key 規則：非空、非前後雙底線、無保留字元、不撞真實編號格式(H###-##)。→ 'NO_ORIGIN'。
 const MOMO_NO_ORIGIN='NO_ORIGIN';
+// ── 組合原廠編號（兩入組等複合規格）：origins 的原廠編號 key 可以是「E187-04+E187-05」（各組成排序後用 + 連接；件數仍記 1 件、不拆）。
+//   查成本一律走這個函式：拆開各自查成本表、相加；任一組成查不到 → 整筆算缺成本，missing 列出缺的那個組成（不是組合鍵）。
+//   一般原廠編號（不含 +）→ 行為跟原本完全相同。⚠ 若真實原廠編號本身含「+」會被誤拆（目前成本表沒有含 + 的原廠編號）。
+function momoMoPlusOriginParts(o){ const s=String(o==null?'':o); return s.indexOf('+')>=0 ? s.split('+').map(x=>x.trim()).filter(Boolean) : [s]; }
+function momoMoPlusOriginCost(costMap, o){   // → {cost:number|null, missing:[原廠編號…]}（空 origin / NO_ORIGIN → missing:[o]）
+  const s=String(o==null?'':o);
+  if(s===''||s===MOMO_NO_ORIGIN) return {cost:null, missing:[s]};
+  let sum=0; const miss=[];
+  momoMoPlusOriginParts(s).forEach(x=>{ const c=costMap?costMap[x]:null; if(c!=null&&c!==''&&isFinite(Number(c))) sum+=Number(c); else miss.push(x); });
+  return {cost:miss.length?null:sum, missing:miss};
+}
 const MOMO_UNMATCHED_BLOCK_RATIO=0.5;   // MO+ 對帳明細未建檔防呆門檻：未建檔 SKU 佔比 > 此值 → 擋下（多半是「先傳對帳明細、後匯商品主檔」的順序錯，會半殘）
 // ══════ 單一權威：Firestore map-key(field name) 檢核/修正。所有寫 Firestore 的路徑寫入前都走它，杜絕「key 被拒」再發生 ══════
 //   已查官方文件（firebase.google.com/docs/firestore/quotas「Constraints on field names」）：map-key 規則**只有**
@@ -19327,18 +19339,73 @@ function momoFeeRateAccumulatePairs(monthsData){
   const nps=[...new Set(pairs.map(p=>p[0]))].sort((a,b)=>a-b);
   return { status: nps.length===1?'unique':'multi', cand:nps };
 }
+// ══════ MO+ 對帳明細「商品原廠編號」空白 → 解析時用商品主檔補回 ══════
+//   規則（照順序）：① (商品編號, 規格1, 規格2) 對商品主檔規格層（momoLoadMoPlusMaster 的 specs）唯一對到 → 用它的原廠編號；
+//   ② 對不到 → 該商品在主檔只有一個原廠編號 → 用它；③ 還是不行 → 維持 MOMO_NO_ORIGIN（缺成本照列）。
+//   規格比對兩邊都過 momoMoPlusNorm；主檔規格欄的「無」＝沒有規格，跟對帳明細空白視為相同（同 specLabel 的處理）。
+//   只補空白的列；原本就有原廠編號的列一律不動。不改成本表、不改毛利公式。補回的件數存在 origins doc 的 originFilled（sku→件數）。
+function _moSpecNorm(s){ const n=momoMoPlusNorm(s); return n==='無'?'':n; }
+function momoMoPlusOriginFillCtx(shop){
+  const md=(function(){ try{ return momoLoadMoPlusMaster(shop); }catch(e){ return null; } })(), mp=(md&&md.products)||{}, pm={};
+  try{ momoLoadProducts(shop).forEach(p=>{ pm[p.sku]=p; }); }catch(e){}
+  const cache={};
+  const info=sku=>{
+    if(cache[sku]) return cache[sku];
+    const m=mp[sku], specs=(m&&Array.isArray(m.specs))?m.specs.map(x=>({a:_moSpecNorm(x.spec1), b:_moSpecNorm(x.spec2), o:String(x.origin||'').trim()})):[];
+    const all=new Set(); specs.forEach(x=>{ if(x.o) all.add(x.o); });
+    if(m&&Array.isArray(m.origins)) m.origins.forEach(o=>{ if(o) all.add(String(o).trim()); });
+    if(!all.size && pm[sku]){ const q=pm[sku]; ((q.origins&&q.origins.length)?q.origins:(q.origin?[q.origin]:[])).forEach(o=>{ if(o) all.add(String(o).trim()); }); }   // 主檔沒這個商品 → 退回商品檔的原廠編號
+    return (cache[sku]={specs, all:[...all]});
+  };
+  const uniq=(it,a,b)=>{ const hit=[...new Set(it.specs.filter(x=>x.a===a && x.b===b && x.o).map(x=>x.o))]; return hit.length===1?hit[0]:null; };
+  return function(sku, spec1, spec2){   // → {origin, how:'spec'|'single'|'combo', parts?} 或 null（補不回來）
+    const it=info(sku), a=_moSpecNorm(spec1), b=_moSpecNorm(spec2);
+    const lit=uniq(it,a,b); if(lit) return {origin:lit, how:'spec'};   // 整段規格文字直接對到（主檔規格本身就叫「黃色+綠色」也走這裡）
+    // 複合規格（兩入組：規格含「+」）→ 拆開逐一對主檔，每個組成都唯一對到 → 原廠編號記成組合鍵（排序、+ 連接）；任一組成對不到 → 補不回來（不退回「商品只有一個原廠編號」）
+    const rawA=String(spec1==null?'':spec1), rawB=String(spec2==null?'':spec2), plusA=rawA.indexOf('+')>=0, plusB=rawB.indexOf('+')>=0;
+    if(plusA||plusB){
+      if(plusA&&plusB) return null;   // 兩個規格欄都含 + → 組合方式不明，不猜
+      const comps=(plusA?rawA:rawB).split('+').map(x=>_moSpecNorm(x)).filter(x=>x!=='');
+      if(comps.length<2) return null;
+      const parts=[]; for(const c of comps){ const o=plusA?uniq(it,c,b):uniq(it,a,c); if(!o) return null; parts.push(o); }
+      parts.sort();
+      return {origin:parts.join('+'), how:'combo', parts};
+    }
+    if(it.all.length===1) return {origin:it.all[0], how:'single'};
+    return null;
+  };
+}
+// 上傳預覽用：原廠編號空白的列（只算會進 origins doc 的列：非運費、已建檔、非回收確認、期別正常）→ 件數統計與仍缺清單
+function momoMoPlusOriginFillScan(parsed, shop){
+  const has=new Set(momoLoadProducts(shop).map(p=>p.sku)), resolve=momoMoPlusOriginFillCtx(shop);
+  const out={blank:0, filled:0, remain:0, remainList:[], filledList:[]}, rem={}, fil={};
+  (parsed.lines||[]).forEach(ln=>{
+    if(ln.freight||ln.origin||!has.has(ln.sku)) return;
+    if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period)||ln.status==='回收確認') return;
+    const q=Number(ln.qty)||0; if(!q) return;
+    out.blank+=q;
+    const r=resolve(ln.sku, ln.spec1, ln.spec2), spec=[ln.spec1,ln.spec2].filter(x=>x&&x!=='無').join('/')||'（無規格）';
+    const key=ln.sku+'\u0001'+spec+'\u0001'+(r?r.origin:'');
+    if(r){ out.filled+=q; (fil[key]=fil[key]||{sku:ln.sku,name:ln.name||'',spec,origin:r.origin,how:r.how,parts:r.parts||null,qty:0}).qty+=q; }
+    else { out.remain+=q; (rem[key]=rem[key]||{sku:ln.sku,name:ln.name||'',spec,qty:0}).qty+=q; }
+  });
+  out.remainList=Object.values(rem).sort((a,b)=>b.qty-a.qty); out.filledList=Object.values(fil).sort((a,b)=>b.qty-a.qty);
+  return out;
+}
 function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
   const has=new Set(momoLoadProducts(shop).map(p=>p.sku));
   const gated=pd=>allowedPeriods && !allowedPeriods.has(pd);
-  const skus={};
+  const skus={}, fillMap={}, fillOrigin=momoMoPlusOriginFillCtx(shop);
   (parsed.lines||[]).forEach(ln=>{
     if(ln.freight) return;                                        // 運費列不進 SKU（B 另計於 freight）
     if(!has.has(ln.sku)) return;                                  // 只收已建檔（與 momoBuildMoPlusPlan 一致）
     if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period)) return;
     if(gated(ln.period)) return;                                  // 期別閘門：與 products 同步
     const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0, c:0, b:0, ret:0};
-    const origin=ln.origin||MOMO_NO_ORIGIN;                        // 空 origin 歸哨兵 key（Firestore 不接受 '' key）→ 量計入、查無成本＝缺成本
-    if(ln.status!=='回收確認') cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);   // per-原廠編號 銷量（退貨不進 → COGS/本期銷量＝已送達；與 products cell 一致）
+    let origin=ln.origin, filled=false;
+    if(!origin){ const fr=fillOrigin(ln.sku, ln.spec1, ln.spec2); if(fr){ origin=fr.origin; filled=true; } }   // 原廠編號空白 → 用商品主檔補（規格唯一 → 商品只有一個原廠編號）
+    origin=origin||MOMO_NO_ORIGIN;                                 // 空 origin 歸哨兵 key（Firestore 不接受 '' key）→ 量計入、查無成本＝缺成本
+    if(ln.status!=='回收確認'){ cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0); if(filled) fillMap[ln.sku]=(fillMap[ln.sku]||0)+(Number(ln.qty)||0); }   // per-原廠編號 銷量（退貨不進 → COGS/本期銷量＝已送達；與 products cell 一致）
     cell.d+=Number(ln.D)||0;                                      // 手續費 D（逐列實際，含回收確認的手續費反轉/退貨運費相關）
     cell.c+=Number(ln.C)||0;                                      // 代扣運費 C（逐列精算、掛商品列，比照 D）
     cell.b+=Number(ln.bAlloc)||0;                                 // 運費代收 B（按同訂單商品營收攤到本列，攤估）
@@ -19359,7 +19426,8 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     if(!cur || ln.orderDate>cur.d) latestSale[ln.sku]={ sp:Math.round(Number(ln.price)||0), d:ln.orderDate };   // 下單日較晚 → 更新
   });
   const fc=momoBuildFeeCandidates(parsed.lines);   // 成交費率：該來源月 per-SKU 候選集（配對模型 NP/PR + 舊 17 相容）+ 無解 + 未涵蓋月份
-  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale,
+  Object.keys(fillMap).forEach(k=>{ fillMap[k]=Math.round(fillMap[k]); });
+  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale, ...(Object.keys(fillMap).length?{originFilled:fillMap}:{}),   // originFilled：原廠編號空白、由主檔補回的件數（sku→件數），KPI 預覽註記用
     feeCand:fc.cand, feeNosol:fc.nosol,                                    // 舊 17-費率（相容/rollback）
     feeNp:fc.np, feeNpNosol:fc.npNosol, feePr:fc.pr, feePrNosol:fc.prNosol, // 配對模型（重傳後啟用）
     feeUncovered:fc.uncoveredMonths }, skuN:Object.keys(skus).length };
@@ -19474,7 +19542,7 @@ function momoMoPlusPrefixFee(shop, origin){
 // 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
 function momoMoPlusBestOriginForSku(shop, sku){
   const ot=momoMoPlusIndexCached(shop).originTot[sku]; if(!ot) return null;
-  let best=null, max=-1; Object.keys(ot).sort().forEach(o=>{ if(o && o!==MOMO_NO_ORIGIN && ot[o]>max){ max=ot[o]; best=o; } });   // 空 origin / 哨兵不當「銷售最多規格」；key 先排序再用嚴格 > → 銷量平手時固定取原廠編號字串最小的（不再看載入順序，代表規格才穩定）
+  let best=null, max=-1; Object.keys(ot).sort().forEach(o=>{ if(o && o!==MOMO_NO_ORIGIN && String(o).indexOf('+')<0 && ot[o]>max){ max=ot[o]; best=o; } });   // 組合鍵（兩入組）不對應單一規格 → 不參選   // 空 origin / 哨兵不當「銷售最多規格」；key 先排序再用嚴格 > → 銷量平手時固定取原廠編號字串最小的（不再看載入順序，代表規格才穩定）
   return best;
 }
 function momoMoPlusIndexCached(shop){
@@ -19574,8 +19642,8 @@ function momoMoPlusMarginCalc(inp){   // 純函式：{qty, revA, originsQty:{ori
   let costedAbs=0, allAbs=0, cogs=0; const missingOrigins=[];
   Object.keys(originsQty).forEach(o=>{
     const q=Number(originsQty[o])||0, aq=Math.abs(q); allAbs+=aq;
-    const c=(o!=='' && costMap[o]!=null && costMap[o]!=='') ? Number(costMap[o]) : null;   // 空原廠編號或查不到 → 無成本
-    if(c==null){ if(aq>0) missingOrigins.push(o||'(空原廠編號)'); }
+    const oc=momoMoPlusOriginCost(costMap, o), c=oc.cost;   // 空原廠編號或查不到 → 無成本；組合原廠編號（E187-04+E187-05）＝各組成成本相加、任一組成缺 → 整筆缺
+    if(c==null){ if(aq>0) oc.missing.forEach(mo=>{ const nm=mo||'(空原廠編號)'; if(missingOrigins.indexOf(nm)<0) missingOrigins.push(nm); }); }
     else { costedAbs+=aq; cogs+=q*c; }   // cogs 用帶號 qty（退貨→負→自動抵）
   });
   const coverage = allAbs>0 ? costedAbs/allAbs : 1;            // 涵蓋率用絕對量（避免退貨負量把比例弄壞）；無量→視為完整
@@ -20673,7 +20741,8 @@ function momoRenderProfitBody(shop, tableOnly){
           unitCostMulti=(origs.length>1 && new Set(origs.map(o=>Number(_cm[o]))).size>1);   // 多原廠且成本不同→cell 加 tooltip 註明
         }
       } else if(Number(p.cost)>0){ unitCost=Number(p.cost); }
-      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, unitCost, unitCostMulti, stock:_st, stockRaw:_stRaw, _prev:prev,
+      const refCost=(_mp && p.origin && Number(_cm[p.origin])>0)?Number(_cm[p.origin]):null;   // 本期有「無原廠編號」件數時，成本欄顯示的參考成本（主檔主原廠的成本）
+      return { sku:p.sku||'', origin:p.origin||'', refCost, name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, unitCost, unitCostMulti, stock:_st, stockRaw:_stRaw, _prev:prev,
         stockSrc:(_f1102?'f1102':'moplus'), f1102Intransit:(_f1102Rec?_f1102Rec.intransit:null), f1102At:_f1102At, f1102Covered:(_f1102?!!_f1102Rec:null) };   // 庫存來源：乙配 F1102 寄倉可賣量／其餘 莫筆克×比例。tooltip 用 intransit＋資料時間
 
     });
@@ -20853,6 +20922,11 @@ function momoRenderProfitBody(shop, tableOnly){
         // 多解（常態）：淡色範圍 + 「待收斂」小標；tooltip 列全部候選 + 排序依下界說明
         const tip=`尚未收斂，可能費率：${cand.map(x=>x+'%').join('、')}\n（跨月交集後仍多解；更多月份資料會收斂。此欄排序依下界 ${lo}%。）`;
         return `<td style="text-align:right;color:#6b7280" title="${String(tip).replace(/"/g,'&quot;')}">${lo}–${hi}%<div class="mm-cell-tag">待收斂</div></td>`;   // 「待收斂」降第二行（.mm-cell-tag，沿用 #179）→ 費率數字獨佔第一行右緣對齊
+      }
+      if(c.k==='unitCost' && r.moPlus && r.noOriginQty>0){   // MO+：本期有訂單沒有原廠編號（商品主檔也補不回來）→ 成本欄顯示參考成本＋⚠，不要看起來像成本齊全
+        const _ref=(r.refCost!=null?r.refCost:r.unitCost);
+        const _tip=('本期 '+Math.round(r.noOriginQty)+' 件訂單無原廠編號、成本未計入淨利；'+(_ref!=null?('顯示的 '+momoMoney(_ref)+' 是主檔 '+(r.refCost!=null?String(r.origin||''):'')+' 的參考成本'):'主檔也查不到可參考的成本')).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${_tip}">${_ref!=null?momoMoney(_ref):'—'} <span style="color:#d97706">⚠</span></td>`;
       }
       if(c.k==='unitCost'){   // 成本欄：缺=null→「—」（口徑同缺成本警示、非 0）；MO+ 多原廠成本不同→tooltip 註明顯示主原廠
         if(r.unitCost==null) return `<td style="text-align:right;color:#c7cad1" title="${r.moPlus?'原廠編號查無莫筆克成本表':'尚未填成本'}（缺成本，口徑同缺成本警示）">—</td>`;
@@ -24539,6 +24613,15 @@ function momoRenderMoPlusPreview(shop){
   const plan=_moPlusUpPlan, sp=plan&&plan.shops[shop];
   const matchedN=sp?sp.matched.length:0, unmatchedN=sp?sp.unmatched.length:0, missN=(p.missingOrigin||[]).length;
   const fr=p.freight||{totalIn:0,totalOut:0,rows:0};
+  let fillHtml=''; try{
+    const fs2=momoMoPlusOriginFillScan(p, shop);
+    if(fs2.blank>0){
+      const row=(x,ok)=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:2px 6px;font-family:monospace">${esc(x.sku)}</td><td style="padding:2px 6px">${esc(x.name||'')}</td><td style="padding:2px 6px">${esc(x.spec)}</td><td style="padding:2px 6px;text-align:right">${x.qty}</td><td style="padding:2px 6px">${ok?(x.how==='combo'?'複合規格：'+esc((x.parts||[]).join('＋'))+'（'+({2:'兩',3:'三',4:'四'}[(x.parts||[]).length]||(x.parts||[]).length)+'入，成本相加）':esc(x.origin)+'（'+(x.how==='spec'?'規格對到':'商品只有一個原廠編號')+'）'):'<span style="color:#dc2626">仍缺</span>'}</td></tr>`;
+      fillHtml=`<div style="background:${fs2.remain?'#fffbeb':'#ecfdf5'};border:1px solid ${fs2.remain?'#fde68a':'#a7f3d0'};border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;line-height:1.7">
+        原廠編號空白 <b>${fs2.blank}</b> 件：已由主檔補回 <b>${fs2.filled}</b> 件、仍缺 <b style="color:${fs2.remain?'#d97706':'#6b7280'}">${fs2.remain}</b> 件
+        <details style="margin-top:4px"><summary style="cursor:pointer;color:#6b7280">展開明細</summary><table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:2px 6px">商品編號</th><th style="padding:2px 6px">商品名稱</th><th style="padding:2px 6px">規格</th><th style="padding:2px 6px;text-align:right">件數</th><th style="padding:2px 6px">補回結果</th></tr></thead><tbody>${fs2.filledList.map(x=>row(x,true)).join('')}${fs2.remainList.map(x=>row(x,false)).join('')}</tbody></table></details></div>`;
+    }
+  }catch(e){ try{ console.warn('[MO+ origin fill preview]', e); }catch{} }
   prev.innerHTML=`
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px">
       <div style="font-weight:700;margin-bottom:8px">解析結果 · 來源鍵 ${esc(p.srcCode)}</div>
@@ -24548,6 +24631,7 @@ function momoRenderMoPlusPreview(shop){
         <div>已建檔商品 SKU <b>${matchedN}</b>${unmatchedN?` · <span style="color:#d97706">未建檔 ${unmatchedN}</span>`:''}</div>
         <div title="商品列本身缺原廠編號的 distinct 商品編號（不是 P4「缺成本」；缺成本＝原廠編號查不到成本表，P4 另算）">商品列缺原廠編號 <b style="color:${missN?'#d97706':'#6b7280'}">${missN}</b></div>
       </div>
+      ${fillHtml}
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#075985;line-height:1.6">
         🚚 <b>運費已獨立</b>（不進 SKU 維度、不標缺成本）：收入 B <b>$${fr.totalIn.toLocaleString()}</b>（${fr.rows} 筆運費列）／成本 C <b>$${fr.totalOut.toLocaleString()}</b>（掛在商品列）／淨 <b>$${(fr.totalIn-fr.totalOut).toLocaleString()}</b>。
         <span style="color:#0c4a6e">⚠ 收入(B)與成本(C)分屬不同列——P3b 毛利會「成對抽離」，不會只抽收入把商品毛利做低。</span>
@@ -30456,7 +30540,7 @@ Object.assign(window, {
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusKpiOnlyToggle,momoMoPlusKpiOnlyApply,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,momoMoPlusBatchRun,momoMoPlusBatchClear,
   momoParseE001,momoLoadE001,momoLoadE001Doc,momoSaveE001Doc,momoListE001Docs,momoClearE001,momoSettledPeriods,momoE001File,momoE001Remove,momoE001Generate,momoE001Apply,momoE001Clear,momoE001BlockHTML,momoMoPlusEstFeeRate,momoMoPlusE001Ctx,momoAllPeriods,
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
-  momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
+  momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusOriginFillCtx,momoMoPlusOriginFillScan,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,MOMO_FEE_PAIRS,MOMO_ANNOUNCED_FEE_TABLE,momoMoPlusFeeAnomalySummary,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
