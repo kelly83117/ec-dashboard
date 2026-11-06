@@ -2757,7 +2757,8 @@
 .hl-std-field { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .hl-std-field select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; }
 .hl-std-note { margin-top: 6px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 12px; }
-.hl-std-lead { margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+/* 視窗最上方 3 行用法 */
+.hl-std-how { margin: 0 0 10px; padding-left: 20px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
 .hl-std-wrap { margin-top: 6px; max-width: 100%; overflow-x: auto; }
 .hl-std-tbl { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px; }
 .hl-std-tbl th, .hl-std-tbl td { padding: 6px; text-align: left; vertical-align: top; white-space: normal; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; }
@@ -2773,17 +2774,17 @@
 .hl-std-in::placeholder { color: var(--text-muted); opacity: 0.6; }
 .hl-std-in:disabled, .hl-std-notein:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
 .hl-std-tbl .hl-std-lock { color: var(--text-muted); font-size: 12px; }
+/* 「近 6 月 平均・範圍」：一行＝平均（粗體）＋範圍、n 個月（灰色小字）；每段各自不換行，窄的時候範圍整段換到第二行 */
+.hl-std-tbl .hl-std-hist-th { white-space: nowrap; }
+.hl-std-hist-line { line-height: 1.5; }
 .hl-std-hist-avg, .hl-std-hist-sub { white-space: nowrap; }
 .hl-std-hist-avg { font-size: 12px; font-weight: 600; color: var(--text); }
 .hl-std-hist-sub { font-size: 11px; color: var(--text-muted); }
 .hl-std-hist-info { cursor: help; }
-.hl-std-tbl .hl-std-hist-ref { min-width: 118px; }
 /* 營收未滿 3 萬的灰字參考數字：評分標準視窗「近 6 月」、卡片底部三欄（.hl-tile-met-ref，下面一行「僅供參考」）、指標逐月變化表（.hl-mc-ref）共用 */
 .hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v, .hl-mt-tbl .hl-mc-ref { font-weight: 400; color: var(--text-muted); }
-.hl-std-hist-ref .hl-std-hist-sub { white-space: normal; }
 .hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
 .hl-std-err:empty { display: none; }
-.hl-std-tip { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
 .hl-std-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; }
 .hl-std-w { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .hl-std-notein { box-sizing: border-box; flex: 1 1 200px; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
@@ -2897,31 +2898,21 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-drag-donebox > summary::-webkit-details-marker { display: none; }
 .hl-drag-donebox > summary::after { content: ' ▸'; }
 .hl-drag-donebox[open] > summary::after { content: ' ▾'; }
-/* 「📖 怎麼看這頁」：第一層 5 行白話；「看完整規則」預設收合 */
+/* 「📖 怎麼看這頁」：第一層 5 行白話（第 3 行後面接「看各通路分數線 →」）；「看算法說明」預設收合 */
 .hl-guide-intro { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.9; color: var(--text); }
+.hl-guide-link { padding: 0 2px; border: 0; background: none; color: var(--info); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.hl-guide-link:hover, .hl-guide-link:focus-visible { color: var(--primary); text-decoration: underline; }
 .hl-guide-more > summary { cursor: pointer; list-style: none; font-weight: 600; color: var(--info); }
 .hl-guide-more > summary::-webkit-details-marker { display: none; }
 .hl-guide-more > summary::after { content: ' ▸'; }
 .hl-guide-more[open] > summary::after { content: ' ▾'; }
 .hl-guide-full { margin-top: 8px; }
-/* 「看完整規則」表格（塊 2）：固定欄寬＋可換行，彈窗再窄也不出現橫向捲軸。css/profit.css 的全域 th / td（靠右、不換行、大寫、hover 色）這裡全部設回。 */
+/* 「看算法說明」內容：小標＋短段落 */
 .hl-gt-from { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
-.hl-gt { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
-.hl-gt th, .hl-gt td { padding: 8px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; line-height: 1.6; }
-.hl-gt th { font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
-.hl-gt th:hover { color: var(--text-muted); }
-.hl-gt-c1 { width: 25%; }
-.hl-gt-c2 { width: 25%; }
-.hl-gt-c3 { width: 50%; }
-.hl-gt-lines { margin: 0; padding: 0; list-style: none; }
-.hl-gt-lines li + li { margin-top: 4px; }
-.hl-gt-i { padding: 0 2px; border: 0; background: none; color: var(--info); font: inherit; cursor: pointer; }
-.hl-gt-i:hover, .hl-gt-i:focus-visible, .hl-gt-i[aria-expanded="true"] { color: var(--primary); }
-.hl-gt .hl-gt-detail td { background: var(--primary-soft); font-size: 12px; }
-.hl-gt-detail-list { margin: 0; padding-left: 18px; }
-.hl-gt-detail-list li + li { margin-top: 4px; }
-.hl-gt-noscore { margin-top: 4px; padding: 8px 8px 8px 26px; border-radius: var(--radius-sm); background: var(--primary-soft); font-size: 12px; }
-.hl-gt-note { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+.hl-ga-sec { padding: 8px 0; border-top: 1px solid var(--border); }
+.hl-ga-h { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text); }
+.hl-ga-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--text); }
+.hl-ga-list li + li { margin-top: 3px; }
 .hl-tile-detail .hl-card { margin: 0; }
 .hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
 .hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
