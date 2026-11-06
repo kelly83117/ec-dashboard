@@ -2907,12 +2907,11 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-guide-more > summary::after { content: ' ▸'; }
 .hl-guide-more[open] > summary::after { content: ' ▾'; }
 .hl-guide-full { margin-top: 8px; }
-/* 「看算法說明」內容：小標＋短段落 */
-.hl-gt-from { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
-.hl-ga-sec { padding: 8px 0; border-top: 1px solid var(--border); }
-.hl-ga-h { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text); }
-.hl-ga-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--text); }
-.hl-ga-list li + li { margin-top: 3px; }
+/* 「看算法說明」內容：上方適用月份一行＋5 點 */
+.hl-gt-from { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.hl-ga-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.7; color: var(--text); }
+.hl-ga-list li + li { margin-top: 4px; }
+.hl-ga-list b { font-weight: 600; }
 .hl-tile-detail .hl-card { margin: 0; }
 .hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
 .hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
