@@ -62,8 +62,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：32 個物件 / 50 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 32**（2026-11-06 #436 商品調整加 `__cloudGrowth`（寫入只有 `writePaths`）→ 31 變 32、方法 49 變 50——**防護碼實測**（floor 32）。
+   **「TEST_NOWRITE v2 已啟用：34 個物件 / 54 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 34**（2026-11-06 #436 ④ ⑤ 合併：廣告調整封存加 `__cloudNotesArchive`（寫入 `createMonth`、`commitDelete`、`restoreMonth`）→ 33 變 34、方法 51 變 54——**防護碼實測**（floor 34、MUST 補這三支）。
+   再之前：2026-11-06 #436 優化紀錄加 `__cloudOptlog`（寫入只有 `writePaths`）→ 32 變 33、方法 50 變 51——**防護碼實測**（floor 33、MUST 補 `['__cloudOptlog','writePaths']`）。
+   再之前：2026-11-06 #436 商品調整加 `__cloudGrowth`（寫入只有 `writePaths`）→ 31 變 32、方法 49 變 50——**防護碼實測**（floor 32）。
    防護碼正本是 `C:\Users\keani\ec-tools\nowrite.txt`，`ec-tools.ps1` 檢查它必須剛好 **106 行**，加項目要接在既有行上。下面寫的 floor 31、MUST 清單是同日才真的補進檔案（之前檔案裡下限還是 5）。
    再之前：2026-11-04 KPI FriDay 主站加 `__cloudFridayRecon`（寫入只有 `writePaths`）→ 30 變 31、方法 48 變 49——**防護碼實測**（floor 31、MUST 補 `['__cloudFridayRecon','writePaths']`）。
    再之前：2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
@@ -90,7 +92,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 32 / 50 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 34 / 54 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -108,12 +110,12 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
    `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`、`['__cloudFridayRecon', 'writePaths']`，
-   還有 `['__cloudGrowth', 'writePaths']`，物件下限改 32，否則新物件沒有 fail-loud 保護。
+   還有 `['__cloudGrowth', 'writePaths']`、`['__cloudOptlog', 'writePaths']`、`['__cloudNotesArchive', 'createMonth']`、`['__cloudNotesArchive', 'commitDelete']`、`['__cloudNotesArchive', 'restoreMonth']`，物件下限改 34，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 32** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 34** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -126,11 +128,12 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 32）。
+不要相信文件上的數字（包括上面那個 34）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
 **以工具實際印出的為準**：對不上先停手查是哪個物件沒被包到，不要直接改數字了事。
+
 
 **測完拆除順序（勿顛倒）：** 先關分頁 → 再停 server → 最後才刪掉
 `firebase.js` 裡的防護區塊。
@@ -194,6 +197,25 @@ ESM 有個致命陷阱必須牢記：
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
 - `app/profit_notes_2026`、`app/profit_notes_2026_2`（archive docs）— 舊月份的廣告調整（`ec_notes`），延後訂閱。
   `app/profit_2026_05` 是 2026/05 的舊報表封存，**已不載入，文件留著不刪**（那 4 份報表 `profits` 都有，畫面一直用 `profits` 那份；不要載回來，會把舊版填進記憶體）。
+- `notes_archive` collection — 廣告調整的新封存（#436 第 ⑤ 塊），**每通路每月一份**，doc id `{通路}__{YYYY-MM}`（例 `好麻吉__2026-09`）。上面兩片舊封存不動、維持唯讀照常讀，之後不再往裡面放。
+  形狀 `{ schema:1, shop, month:'YYYY-MM', state:'copied'|'done', notes:{ first|second|full: { 品號:{adjustments:[…]} } }, src:{ keys, sig, codes }, createdAt, createdBy, doneAt?, doneBy? }`，
+  只放 app/profit 原本有的那幾把。通路清單寫死在 firebase.js `NOTES_ARCHIVE_SHOPS`（四家＋測試通路），**新增蝦皮通路要加**。
+  - **讀取**：firebase.js 把每份展開回 `ec_notes|{通路}|{YYYY/MM}|{半月}` 併進 `_profitMem`（舊兩片 → 新封存 → app/profit），所以讀取端（淨利表、跨期次數、洞察表 `profitNoteHistoryFor`、工作日誌）都沒改。
+    訂閱跟舊兩片同一組：`__loadArchiveSubs`（進蝦皮個別通路、工作日誌、健檢；#436 ⑤ 起洞察表打開商品調整彈窗也會觸發）。整個 collection 一個監聽、開 `includeMetadataChanges`。
+    `__profitArchivesReady` 多一個條件：新封存最近一次快照來自伺服器、沒有訂閱錯誤、沒有不合法的文件（不合法的不併進畫面，寫入一律擋下）。
+  - **唯讀判斷**（profit.js `_notesWriteBlockReason`）：app/profit 有這把 ⇒ 放行，**但**封存已就緒而且這把在 `done` 的新封存裡 ⇒ 已封存（舊分頁寫回的殘留）。
+    `done` 的 key 又出現在 app/profit 時，畫面以封存為主、逐品號補上殘留多出來的紀錄（`naOverlay`，不刪任何東西），Console 警告一次。
+  - **寫入**：只有淨利表頂端「🗄 封存廣告調整」（profit.js `openNotesArchiveTool`，管理員才看得到；app/profit 快滿提醒卡也有「開啟封存工具」）。透過 `window.__cloudNotesArchive`，三支都是交易：
+    `createMonth`（文件不存在才建立，state `copied`；`done` 一律拒絕、`copied` 要帶 `replaceCopied`）、
+    `commitDelete`（同一個交易讀 app/profit 與封存，逐品號相同才用 FieldPath 刪 app/profit 那幾把、同時改成 `done`）、
+    `restoreMonth`（回搬：寫回 app/profit、刪封存；app/profit 已經有任何一把、或寫回後大小／索引 ≥ 90% 就不做）。
+    成功回 `{ ok:true }`，條件不符回 `{ ok:false, why }`（什麼都沒寫），被唯讀／本機防護擋下回 `undefined` → 一律 `r && r.ok`。
+    工具流程：0 檢查（只讀，「試跑」只做到這裡）→ 下載備份 JSON → 複製 → 讀回逐品號比對 → 刪舊欄位＋生效 → 最後讀回。任何一步不符就停、白話原因留在視窗。
+    檢查會擋：月份還沒結束（測試通路例外）、這台有沒同步的這個月調整、key 也在舊兩片、目標已是 `done`、內容不是物件、新文件超過上限 60%。
+    純函式（盤點、產生、比對、合併）在 firebase.js `NOTES_ARCHIVE_PURE_BEGIN/END`，對外是 `window.__notesArchivePure`；不用 app/profit 的 updateTime 當鎖（任何人改任何格都會變），改用交易內逐品號比對。
+  - 🔴 **第一次正式封存前要請大家重新整理**：舊分頁不訂閱新封存，被搬走的月份在舊分頁會整個消失、而且被當成可以改（寫回 app/profit 變殘留）。工具要勾「已請大家重新整理」才會封存。
+  - 🔴 **回滾**：先在工具裡對每個 `done` 月份按「回搬」，**全部回搬後才能還原程式**；順序反過來，舊程式看不到新封存，那些月份會從畫面消失、變成可以改。回搬會讓 app/profit 漲回來，超過 90% 會自動停。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__notesArchiveState()`、`__notesArchiveWhere(key)`、`__notesLocalDirtyKeys()`、`__profitDocStats({compute:true}).notesArchive`。
 - `app/growth_{通路}`（好麻吉 / 玩樂 / 森之旅 / 維克）— 商品調整（#436 第 ③ 塊，從 app/profit 的 `ec_notes|{通路}_growth` 搬出，每通路一份，開站就訂閱）。透過 `window.__cloudGrowth`：讀 `getDoc(shop, 'server')` / `subscribe`；寫只有 `writePaths(shop, pairs)`（逐品號 FieldPath；🔴 文件不存在就失敗、**不會自動建立**，所以不走 `kpiWriteTo`）。
   形狀 `{ items:{ 品號:{adjustments:[…]} }, migratedAt:數字, migratedBy, legacySeen:{ 品號:指紋 } }`。`_profitMem` 的 key 名不變（`ec_notes|{通路}_growth`），讀取端（淨利表、洞察表、工作日誌、匯出）都不用改。
   - **切換判斷**（每個通路各自，`window.__growthRoute(通路)`）：文件有數字 `migratedAt` ⇒ 讀寫都走新文件（`new`）；伺服器確認沒有這份文件 ⇒ 完全走 app/profit 舊欄位（`old`）；沒有文件但快照來自快取 ⇒ 不算數（`loading`）。測試通路沒列管（`none`），一律舊路徑。新增蝦皮通路要改 firebase.js `GROWTH_SHOPS`。
@@ -202,6 +224,18 @@ ESM 有個致命陷阱必須牢記：
   - **搬家**：Console 腳本在 `ec-backup\04_工具與文件\growth搬家\`（不進 repo），一次一個通路；步驟 4 刪舊欄位才省到空間。指紋共用 `window.__growthPure.sig`（純函式在 firebase.js `GROWTH_PURE_BEGIN`）。
   - 🔴 **回滾**：先對每個已搬的通路跑回搬（步驟 6），**全部回搬後才能還原程式**；順序反過來，舊程式看不到新文件，商品調整會從畫面消失。
   - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__growthState()`、`__profitDocStats({compute:true}).growth`。本機測試 `__growthMock('維克')`、`__growthMock('維克',{residueCode:'品號'})`（只在 localhost、資料只在記憶體）。
+- `app/optlog_{店}`（甲配 / 乙配 / MO+麻吉 / MO+森之旅 / MO+玩樂 / PChome / 博客來 / FriDay / 酷澎 / 麻吉 / 露營館）— MOMO 優化紀錄與墓碑（#436 第 ④ 塊，從 app/profit 的 `ec_momo_optlog|{店}`、`ec_momo_optlog_del|{店}` 搬出，每店一份，開站就訂閱）。透過 `window.__cloudOptlog`：讀 `getDoc(shop, 'server')` / `subscribe`；寫只有 `writePaths(shop, pairs)`（逐品號、逐墓碑 FieldPath；🔴 文件不存在就失敗、不會自動建立）。
+  形狀 `{ items:{ 品號:[紀錄] }, tomb:{ 紀錄身分:{at,by} }, migratedAt:數字, migratedBy }`。`_profitMem` 的 key 名不變（`ec_momo_optlog|{店}`），讀取端都不用改。PChome 自己的優化紀錄在 `app/pchome_optlog`，跟這裡無關（`ec_momo_optlog|PChome` 只有補成本）。
+  - **切換判斷**（每家各自，`window.__optlogRoute(店)`）：文件有數字 `migratedAt` ⇒ `new`；伺服器確認沒有這份文件 ⇒ `old`（走 app/profit）；沒有文件但快照來自快取 ⇒ `loading`；訂閱失敗 ⇒ `error`；沒列管 ⇒ `none`。🔴 **新增會寫優化紀錄的店要加進 firebase.js `OPTLOG_SHOPS`**；沒列的照舊寫 app/profit，資料不會掉，Console 會警告。
+  - **寫入**：`momoSyncOptlog` 每次重讀伺服器決定路徑，🔴 讀不到就算失敗、絕不退回寫舊欄位（代價：沒搬的店離線時同步也會失敗）。已搬的店走 `_syncOptlogDoc`：只寫有變的品號與墓碑，寫完讀回比對。sweep 仍是「localStorage 有就撿」，但都由 `momoSyncOptlog` 決定路徑；沒有差異就不寫。
+  - **本機未同步的紀錄**：同步讀 `_optlogLocalForPush`（記憶體 ∪ localStorage），開頁時 `_optlogHydrateOnce` 把 localStorage 比雲端多的補回記憶體並列入待推。🔴 不能只讀 `momoLoadOptlog`：它先回雲端版，沒同步就重新整理的紀錄會被合併結果蓋掉。
+  - **工作日誌**：🔴 `momoUpdateDailyProgress` 在所有家都到位（`_optlogDpReady`，走 `__optlogReady`）之前不算、不寫、不推，到位後 `_optlogDpFlush` 補算。不擋的話算出來的次數會換掉當天的 `momo-summary`，再整份推上雲。
+  - **舊分頁寫回舊欄位**：靠紀錄 id、`editedAt` 與墓碑判斷（`_optlogAbsorbOld`，底層是 `momoMergeOptlog`）：新文件沒有、也沒有墓碑的才算殘留，合併進顯示、Console 警告、下次同步補寫。**不用 legacySeen**，所以舊快照晚到不會誤報。舊欄位不自動刪，用腳本 7 清。
+  - **搬家**：Console 腳本在 `ec-backup_工具與文件optlog搬家`（不進 repo），看裡面的讀我；一次一家，步驟 4 刪舊欄位才省到空間。沒資料的店用腳本 8 建空文件。
+  - 🔴 **回滾**：先對每家已搬的店跑步驟 6 回搬，**全部回搬後才能還原程式**；順序反過來，舊程式看不到新文件，優化紀錄會從畫面消失。
+  - **已知問題（沒修、照原樣搬）**：同步是逐品號聯集，改品號後舊品號的紀錄會被雲端併回來（甲配有 25 筆同 id 出現在新舊品號底下），刪除商品也一樣。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__optlogState()`、`__profitDocStats({compute:true}).optlog`。本機測試 `__optlogMock('乙配')`、`__optlogMock('乙配',{residueSku:'品號'})`（只在 localhost、資料只在記憶體）。
+- **雲端文件容量提醒**（app.js `__profitCapCheck`，只有管理員）：app/profit ≥85% 黃卡、≥95% 紅卡；`app/growth_*`、`app/optlog_*` 任一份 ≥70% 黃卡、≥90% 紅卡（`__profitCapDocs`），卡片寫出是哪一份。索引比例也算。
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
