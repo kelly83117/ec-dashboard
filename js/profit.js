@@ -10807,7 +10807,7 @@ const KPI_GROUPS=[
     //   存了值＝手動覆蓋；沒存＝calc 算出的預設（在 _kpiRawForCalc 補上，所以純利、小計、總覽、年度總表全部吃同一個值）。
     //   填寫模式那一格灰底＋placeholder、不算填寫進度；「從對帳單帶入」不寫。乙配耗材仍是 fieldMerge 的不適用、MO+ 各店仍手填。
     autoFill:{
-      material:{shops:['MOMO-甲配','mo+0號店(好麻吉)','mo+1號店(森之旅)'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*3,desc:'耗材 = 訂單數 × $3（可手動覆蓋）'},
+      material:{shops:['MOMO-甲配','mo+0號店(好麻吉)','mo+1號店(森之旅)','mo+2號店(玩樂)'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*3,desc:'耗材 = 訂單數 × $3（可手動覆蓋）'},
     },
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
     // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格。
