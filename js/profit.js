@@ -4255,6 +4255,10 @@ window.addEventListener('profitDataReady', (e)=>{
 
 // ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
 (function backfillProfitToCloud(){
+  // #436 停用：本機沒有旗標時，會把「app/profit 目前沒有」的本機 key 整欄推回 app/profit——已封存到 profit_notes_* 的廣告調整、
+  //   已搬到其他文件的資料都會被塞回來（空間滿的電腦寫不進旗標，每次開站都會跑）。下方本體與註解保留給回溯用，不要再打開。
+  return;
+  // eslint-disable-next-line no-unreachable
   const FLAG='ec.profit_backfilled_v3';
   const PREFIXES=['ec|','ec_edits|','ec_notes|','ec_ana_','ec_growth_','ec_hcols|'];
   function isProfitKey(k){ return PREFIXES.some(p=>k.startsWith(p)); }

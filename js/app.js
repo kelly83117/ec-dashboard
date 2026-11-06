@@ -726,6 +726,7 @@ const App = {
     this.bindSidebarResize();
     this._checkMemFallbackAtBoot();
     __lsSpaceSchedule();   // 本機空間快滿預警：開站 20 秒後檢查一次、之後每 30 分鐘（見 __lsSpaceCheck）
+    __profitCapSchedule(); // 淨利表雲端檔（app/profit）快滿提醒：只有管理員（見 __profitCapCheck）
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
     if (!window.__appUnloadGuardInstalled) {
@@ -3028,6 +3029,8 @@ function __notifyCloudFail(key, err, action) {
   let friendly = raw;
   if (/exceeds the maximum allowed size|1,048,576|1048576/.test(raw)) {
     friendly = '雲端文件已達 1 MiB 上限，這筆 ' + action + ' 被拒絕。\n資料還在本機，重整前請先匯出 / 截圖備份。\n請聯絡管理員把舊月份資料封存。';
+  } else if (/too many index entries/i.test(raw)) {
+    friendly = '雲端文件的索引數已達上限（每份文件 40,000 筆），這筆 ' + action + ' 被拒絕。\n跟 1 MiB 大小是不同的限制：資料不一定很大，但欄位太多。\n資料還在本機，重整前請先匯出 / 截圖備份，並聯絡管理員把舊資料搬出這份文件。';
   } else if (/permission|PERMISSION_DENIED/i.test(raw)) {
     friendly = '雲端拒絕：沒有寫入權限。請聯絡管理員。';
   } else if (/quota|RESOURCE_EXHAUSTED/i.test(raw)) {
@@ -3712,6 +3715,78 @@ window.__lsSpaceCheck = function (opts) {
     return { shown: true, reason: '', usage: u };
   } catch (e) { return { shown: false, reason: '檢查失敗：' + ((e && e.message) || e) }; }
 };
+/* ═══════════ 淨利表雲端檔（app/profit）快滿提醒（#436 短期警報，拆檔完成前用）═══════════
+ * 數字來自 js/firebase.js 的 window.__profitDocStats()（只用既有訂閱的快照估算，不多讀 Firestore；只有管理員才算）。
+ * 只有 role==='admin' 看得到。大小或索引任一項：≥95% 紅卡（每次開站一次）；≥85% 黃卡（同一台電腦一天一次，記在 ec.profitCapWarnDay）。
+ * 🔴 這裡不寫雲端；ec.profitCapWarnDay 直接寫 localStorage、不經 Store（不上雲）。 */
+const PROFIT_CAP_WARN = 0.85;
+const PROFIT_CAP_RED = 0.95;
+const PROFIT_CAP_DAY_KEY = 'ec.profitCapWarnDay';
+let __profitCapShownDay = '';      // 黃卡：ec.profitCapWarnDay 寫不進去時，靠這個做到同分頁同日一次
+let __profitCapRedShown = false;   // 紅卡：每次開站（每個分頁）一次
+// 檢查一次。opts：{ stats（測試用，直接給數字）, ignoreDay }。回傳 { shown, level, reason, stats }，不丟錯。
+window.__profitCapCheck = function (opts) {
+  opts = opts || {};
+  try {
+    const u = App.currentUser;
+    if (!u) return { shown: false, reason: '沒有登入' };
+    if (u.role !== 'admin') return { shown: false, reason: '不是管理員' };
+    const s = opts.stats || (typeof window.__profitDocStats === 'function' ? window.__profitDocStats({ compute: true }) : null);
+    if (!s || typeof s.ratio !== 'number') return { shown: false, reason: '還沒有數字' };
+    const worst = Math.max(s.ratio, typeof s.idxRatio === 'number' ? s.idxRatio : 0);
+    if (worst >= PROFIT_CAP_RED) {
+      if (__profitCapRedShown) return { shown: false, level: 'red', reason: '這次開站提醒過', stats: s };
+      __profitCapRedShown = true;
+      __profitCapShow(s, 'red');
+      return { shown: true, level: 'red', reason: '', stats: s };
+    }
+    if (worst >= PROFIT_CAP_WARN) {
+      const today = __lsTaipeiDay();
+      if (!opts.ignoreDay) {
+        let saved = ''; try { saved = localStorage.getItem(PROFIT_CAP_DAY_KEY) || ''; } catch (e) {}
+        if (saved === today || __profitCapShownDay === today) return { shown: false, level: 'warn', reason: '今天提醒過', stats: s };
+      }
+      __profitCapShownDay = today;
+      try { localStorage.setItem(PROFIT_CAP_DAY_KEY, today); } catch (e) {}
+      __profitCapShow(s, 'warn');
+      return { shown: true, level: 'warn', reason: '', stats: s };
+    }
+    return { shown: false, reason: '沒到門檻', stats: s };
+  } catch (e) { return { shown: false, reason: '檢查失敗：' + ((e && e.message) || e) }; }
+};
+function __profitCapHide() { try { const el = document.getElementById('profit-cap-warn'); if (el) el.remove(); } catch (e) {} }
+function __profitCapShow(s, level) {
+  __profitCapHide();
+  const pct = x => Math.round(x * 100);
+  const kb = b => Math.round(b / 1024);
+  const el = document.createElement('div');
+  el.id = 'profit-cap-warn';
+  el.className = 'ls-warn profit-cap-warn' + (level === 'red' ? ' profit-cap-warn--red' : '');
+  el.setAttribute('role', level === 'red' ? 'alert' : 'status');
+  const t = document.createElement('div'); t.className = 'ls-warn-title';
+  t.textContent = (level === 'red' ? '淨利表雲端檔快滿了' : '淨利表雲端檔空間偏高');
+  const p = document.createElement('div'); p.className = 'ls-warn-text';
+  const top = (s.top && s.top[0]) ? s.top[0] : null;
+  let msg = '淨利表雲端檔已用 ' + pct(s.ratio) + '%（約 ' + kb(s.bytes) + ' KB）';
+  if (typeof s.idxRatio === 'number' && s.idxRatio >= PROFIT_CAP_WARN) msg += '，索引已用 ' + pct(s.idxRatio) + '%（' + s.idx + ' 筆）';
+  if (top) msg += '，最大的是 ' + top.key + '（約 ' + kb(top.bytes) + ' KB）';
+  msg += '，請通知 Gini 處理';
+  p.textContent = msg;
+  const a = document.createElement('div'); a.className = 'ls-warn-actions';
+  const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '知道了';
+  later.addEventListener('click', __profitCapHide);
+  a.append(later); el.append(t, p, a);
+  document.body.appendChild(el);
+}
+function __profitCapSchedule() {
+  if (window.__profitCapInstalled) return;
+  window.__profitCapInstalled = true;
+  try {
+    window.addEventListener('profitDocStatsReady', () => { window.__profitCapCheck(); });   // firebase.js 算完一次就檢查
+    setTimeout(() => { window.__profitCapCheck(); }, 20 * 1000);                           // 登入晚於快照時，補算一次
+    setInterval(() => { window.__profitCapCheck(); }, 30 * 60 * 1000);
+  } catch (e) {}
+}
 function __lsSpaceSchedule() {
   if (window.__lsSpaceTimerInstalled) return;
   window.__lsSpaceTimerInstalled = true;

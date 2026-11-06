@@ -1835,6 +1835,13 @@
     cursor: pointer;
   }
   .ls-warn-go:disabled, .ls-warn-later:disabled { opacity: .6; cursor: not-allowed; }
+  /* 淨利表雲端檔（app/profit）快滿提醒（js/app.js __profitCapShow）：沿用 .ls-warn 卡片，只給管理員。
+     本機空間卡片同時出現時往上疊，不互相蓋住。 */
+  body:has(#ls-warn) .profit-cap-warn { bottom: 230px; }
+  .profit-cap-warn .ls-warn-title { color: var(--text); }
+  .profit-cap-warn--red { border-color: var(--danger); }
+  .profit-cap-warn--red .ls-warn-title { color: var(--danger); }
+  .profit-cap-warn--red .ls-warn-later { background: var(--danger-soft); }
   /* 等雲端報表期間（最多 40 秒）：換成淺底，跟「處理中」區分；停用時不再變淡，讓等待文字看得清楚 */
   .ls-warn-go.ls-warn-go--waiting,
   .ls-warn-go.ls-warn-go--waiting:disabled { background: var(--warn-soft); color: var(--text); border: 1px solid var(--warn); opacity: 1; cursor: progress; }
