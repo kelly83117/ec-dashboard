@@ -190,7 +190,8 @@ ESM 有個致命陷阱必須牢記：
   `subscribe`）存取。`getDoc('server')` 強制讀伺服器現值（`getDocFromServer`，不吃本機快取），
   無參數仍是原本的 `getDoc`；「從試算表同步」比對 / 寫前 / 寫後驗證都用它。
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
-- `app/profit_YYYY_MM`（archive docs）— 舊月份歷史資料，延後訂閱。
+- `app/profit_notes_2026`、`app/profit_notes_2026_2`（archive docs）— 舊月份的廣告調整（`ec_notes`），延後訂閱。
+  `app/profit_2026_05` 是 2026/05 的舊報表封存，**已不載入，文件留著不刪**（那 4 份報表 `profits` 都有，畫面一直用 `profits` 那份；不要載回來，會把舊版填進記憶體）。
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
@@ -227,7 +228,19 @@ ESM 有個致命陷阱必須牢記：
   - `ADJ_ALL_SHOPS` 維持寫死（由 BASE 推導），**不要從雲端推導**。注意它不是唯一一份通路清單：marketing.js 另有多份寫死的
     `INSIGHT_SHOPS`、firebase.js 也有一份，新增通路時要一起改。
   - ⚠ 「只有管理員」只是**前端防呆**，Firestore 規則全開；`_adjOwnerPlanCheck` 是寫入前最後一道把關，畫面限制只是方便操作。
-- `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
+- `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。**近月窗口（#428）**：只即時訂閱近 3 個月，舊月份要用才讀。
+  - **訂閱**：`firebase.js` `__subProfits` 每通路一條範圍查詢（今天的月份往前到 M-2，台灣時間；上限不封頂），通路清單 `PROFITS_SUB_SHOPS` 寫死，**新增蝦皮通路要加**。起點記在 `window.__profitsWindowFrom`。`ec|filemeta|*` 不載；`ectest|*` 進測試通路選了期間才讀。
+    `__profitsCollectionReady` 語意＝所有通路的近月都收過伺服器快照。🔴 監聽要開 `includeMetadataChanges`，不然 ready 可能永遠 false。
+  - 🔴 **月份狀態看 `_reportMonthState(通路, 'YYYY/MM')`（`loaded`／`loading`／`failed`／`idle`）**，不看記憶體或 localStorage 有沒有；`loaded` 才能相信「沒有這份」。讀不到不等於沒有。`lsLoad` 對窗口外還沒讀的月份回 null，不讀本機舊版。
+  - **按需讀**：`_reportEnsure(通路, [月份…])`（同一批只發一次、相鄰月份併成一次查詢、結果過守衛寫進記憶體、發 `profitDataReady`；絕不 reject，回 `{ok,failed}`）。`_reportCloudIndex()`＝ts 目錄（`state` 不是 `ok` 時不能推論任何事）。
+    舊月不是即時的：別人重產後要重新選月（已載入超過 1 分鐘會背景更新）或重新整理才看得到。
+  - **新增讀舊月份報表的地方要先 ensure**。產生報表（`_doGenerate`）上期讀不到就擋下、不存不推；等待中期別變了也停下。`getPrevPeriodMap` 沒 `loaded` 就丟錯。
+  - **同步保險**：遷移、沒存穩、一鍵整理在窗口外都看 ts 目錄（`_reportCloudOf`），目錄沒到就等，絕不當成雲端沒有。
+  - **舊 `r.note`**：只存在 2026/03～05（`_LEGACY_NOTE_MONTHS`）、沒有寫入端了。不為它載整段歷史：抽出來存本機 `ec_report_legacy_notes_v1`，ts 沒變就不再讀；還沒讀完時計數顯示「N+」、彈窗顯示載入中。按需讀回時發現其他月份有 `r.note` 會 console.warn。
+  - **工作日誌**：處理數靠 `ec_notes`，看窗口外的月份時補讀該月和前 1 月（`__dailyReportNeed`），看到 2026/06 以前再加 03～05；紀錄引用到更舊的期別或查不到品名時再往外讀。品名版本可能跟全載不同（2026/03 有 24 筆，使用者已接受）。
+  - **健檢**：`__healthProductSnapshot` 沒讀到回 `pending`，`_hlRunQueue` 不快取，事件到了再排；讀取失敗回 error。**都不是沒資料**。
+  - **回滾**：還原這個切換的 commit（`firebase.js` 與開關要一起），只改開關不算回滾。部署後舊分頁仍是全量訂閱，不影響資料，但要請大家重開。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭、不影響本機防寫物件數）：`__reportWindowState()`、`__profitsSubState()`。
 - `app/inventory` — 庫存（取代 Google 試算表「元創數位公司庫存&MOMO庫存統計表」），**不放 app/main**。透過 `window.__cloudInventory`：
   讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（同 `__cloudKpi` 的 FieldPath 逐格寫入、共用 `kpiWriteTo`），
   成功回 `{ ok:true }`，被唯讀 / 本機防護擋下回 `undefined` → 呼叫端 `r && r.ok`，再讀回比對。
@@ -373,6 +386,27 @@ ESM 有個致命陷阱必須牢記：
   - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
     console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
   - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
+- 蝦皮報表持久 dirty 登記（#428 方案 A；開關 profit.js 開頭 `_REPORT_DIRTY_GATE`）：
+  - **同步只推登記過的報表**：localStorage 有 ≠ 待推。登記是 `ec_report_dirty`＝`{ 報表 key: 存檔當下的 ts }`（沒有 ts 的舊報表記 0）；key 名含 dirty，一鍵釋出空間會自動保護。
+  - **寫入**：只有 `lsSave` 登記，而且先登記再寫報表（報表寫不進去時登記還在）。
+  - **清除**：`syncToCloud` 推成功，而且推出去的 ts 等於記憶體與登記的 ts 才清；推送途中又改過就 dirty、pending 都留著。
+    🔴 唯讀帳號不清：唯讀防護把寫入換成空函式、一樣回成功，分不出來，所以 `_reportPushedClean` 一律回 false。
+    🔴 `outbound.ts` 仍必須等於 `payload.ts`（見上方一鍵釋出空間），不可改成推送當下的時間。
+  - **讀取**：profit.js 載入時（檔尾 `_reportDirtyBoot`）把 dirty 報表補進 `_profitMem` 並撿回 pending。profit.js 是動態載入，雲端快照可能先到，所以不能只靠守衛。
+    `__profitShouldSkipCloudOverwrite` 再擋掉雲端覆蓋。sweep 只撿登記過的（`_reportDirtyCollect`），`_momoSyncPendingCount` 用同一個判準，**改一邊就要改另一邊**。
+  - **本機那份不能代表登記的版本**（`_reportDirtyHold`，放開守衛、不推）：
+    `bad`＝解不開，不刪不改，同步列為「本機讀不到」，重新產生才會好。
+    `lost`＝本機沒有或比登記舊（最後一次修改沒存穩），等雲端資料到了處理（`_reportLostSettle`）：本機比雲端新就重新登記再推；否則移除登記並紅字通知。
+  - **遷移（部署前留下、沒有登記的本機報表）**：比對一次（旗標 `ec_report_dirty_migrated_v1`），全部判完才設。
+    本機解不開＝不登記、寫進報告。窗口內快照被 5 秒守衛跳過＝這次不判。窗口外看 ts 目錄，目錄沒到＝這次不判。
+    雲端沒有＝登記。兩邊都有 ts＝本機較新才登記。雲端沒 ts、本機有＝登記。本機沒 ts、雲端有＝不登記、寫進報告。兩邊都沒 ts＝內容相同不用推、不同寫進報告（判斷表是純函式 `_reportMigrateDecide`）。
+    **遷移完成前，未登記的報表不推也不進 pending**：進了 pending 守衛就會擋快照，記憶體一直是本機版，比 ts 永遠相等，沒推的報表會被判成「已推過」。同步會提示「還在比對雲端資料」（`__lastSyncReport.reportMigrateWaiting`），本機資料不動。
+    窗口內的雲端現值看 `_profitMem`。沒有本機報表的裝置開頁就設旗標，不多載資料。按同步或開預覽且有東西在等窗口內的報表時，才呼叫 `__loadShopeeSubs`。
+    登記內容損毀＝清空並拿掉旗標，重新比對一次。
+  - **回滾**：`_REPORT_DIRTY_GATE` 改 false 再部署（要 bump 版號）＝sweep、MOMO 鈕計數、雲端守衛回到舊行為（localStorage 有就推），也不跑遷移。`lsSave` 與推送後清除照舊，登記繼續維持。
+  - **已知限制**：兩台同改同一期是後推者贏。`ec_split` 與多類 MOMO／酷澎 key 仍是 localStorage 有就推。`setShop` 的全域同步鈕只看有沒有資料就亮，不代表有待推（實際數字看 `__profitPendingCount()`）。
+    部署時要請大家關掉舊分頁重開：舊分頁存的報表不會登記。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭、不影響本機防寫物件數）：`__reportDirtyState()`、`window.__reportDirtyMigrateReport`。
 - MOMO 商品主檔本機壓縮（docs/plan-momo-compress.md §8 第 1 塊＝讀取端相容 LZ1、§9 第 2 塊＝寫入壓縮＋就地壓縮；firebase.js 的 hook 是可選的第 3 塊，還沒做）：
   - 範圍只有 `ec_momo_products|<通路>` 與 `ec_momo_products_lastpushed|<通路>`；`ec_momo_cost_by_origin`（含 `_meta`）不壓（#175，firebase.js 直接 `JSON.parse` 它）。
   - 讀：一律走 `_momoLsRead(k, 'array'|'sigmap')` / `_momoLsReadNote`（回 `{state:'absent'|'ok'|'bad'}`；舊 JSON 不檢查形狀＝跟改版前逐字相同）。
