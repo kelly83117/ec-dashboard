@@ -75,8 +75,16 @@ try {
   //   舊月份報表         → 2026/05 曾封存在 app/profit_2026_05；現在報表一律以 profits collection 為準，那份文件留著但不載入（見 PROFIT_ARCHIVE_DOCS）
   //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
+  const GROWTH_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];   // 商品調整獨立文件 app/growth_{通路} 列管的通路（#436）；沒列的一律走 app/profit 舊欄位
+  // MOMO 優化紀錄獨立文件 app/optlog_{店} 列管的店（#436 第 ④ 塊）：ec_momo_optlog|{店} 的 {店} 實際會出現的名字（含補成本寫入的 PChome、博客來、FriDay、酷澎及酷澎兩家）。
+  //   🔴 新增會寫優化紀錄的店要加進來；沒列的照舊寫 app/profit，資料不會掉，profit.js 開站與同步時會 Console 警告。
+  const OPTLOG_SHOPS = ['甲配', '乙配', 'MO+麻吉', 'MO+森之旅', 'MO+玩樂', 'PChome', '博客來', 'FriDay', '酷澎', '麻吉', '露營館'];
   const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
+  // #436 第 ⑤ 塊：之後的廣告調整封存＝notes_archive collection，每通路每月一份（doc id「通路__YYYY-MM」）。上面兩片維持唯讀照常讀。
+  //   ⚠ 通路清單寫死：新增蝦皮通路要加進來（同 PROFITS_SUB_SHOPS、GROWTH_SHOPS），沒列的通路一鍵封存工具不處理。
+  const NOTES_ARCHIVE_COL = 'notes_archive';
+  const NOTES_ARCHIVE_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克', '測試通路'];
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
     + '/databases/(default)/documents/app/profit';
   const restDeleteProfitFields = async (keys) => {
@@ -87,7 +95,7 @@ try {
     return resp.json();
   };
   window.__cloudProfit = {
-    getDoc: () => getDoc(profitDocRef),
+    getDoc: (src) => src === 'server' ? getDocFromServer(profitDocRef) : getDoc(profitDocRef),   // 'server'＝強制讀伺服器（#436 ⑤ 一鍵封存用）；無參數行為不變
     setField: (key, value) => safeSetField(profitDocRef, key, value),
     removeFields: (keys) => restDeleteProfitFields(keys),
     subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
@@ -113,12 +121,135 @@ try {
     //     （SDK 的 onSnapshot 出錯後該監聽即終止、不會再送快照，「錯誤已解除」不會有任何訊號，清了等於說謊）
     const profitArchiveMeta = {};
     const profitArchiveErrors = {};
-    // 這把 key 是否存在於任一封存分片的【最新快照】。
+    // #436 ⑤ 新封存的狀態（訂閱在 __loadArchiveSubs）。naParts：doc id → { shop, ym, state, keys:{ 完整 key: 內容 }, raw }。
+    //   naMeta.invalid：內容不合法的文件（不併進畫面、ready 為 false ＝ 寫入一律擋下）。
+    const naParts = {};
+    const naMeta = { subscribed: false, gotSnap: false, fromCache: null, error: null, invalid: {}, warned: '' };
+    const naReady = () => naMeta.subscribed && naMeta.gotSnap && naMeta.fromCache === false && !naMeta.error && !Object.keys(naMeta.invalid).length;
+    const naFind = (key) => { for (const id in naParts) { if (Object.prototype.hasOwnProperty.call(naParts[id].keys, key)) return naParts[id]; } return null; };
+    // 這把 key 是否存在於任一封存分片的【最新快照】（含 #436 ⑤ 新封存，不分 copied / done）。
     //   快照未到 → false，與「確定不在」無法區分 → 呼叫端要先看 __profitArchivesReady()。
     window.__profitArchiveHas = (key) => PROFIT_ARCHIVE_DOCS.some(n => {
       const d = profitParts.archives[n];
       return !!d && Object.prototype.hasOwnProperty.call(d, key);
-    });
+    }) || !!naFind(key);
+    // #436 ⑤：這把 key 在已生效（state 'done'）的新封存裡。app/profit 也有這把時 ＝ 舊分頁寫回的殘留，期別仍算已封存（js/profit.js _notesWriteBlockReason）。
+    window.__notesArchiveDoneHas = (key) => { const p = naFind(key); return !!(p && p.state === 'done'); };
+    // 一鍵封存工具用：這把 key 在哪裡（只回位置，不回內容）。legacy＝舊封存片名；monthly＝新封存 { id, state }。
+    window.__notesArchiveWhere = (key) => {
+      const p = naFind(key);
+      return { legacy: PROFIT_ARCHIVE_DOCS.filter(n => { const d = profitParts.archives[n]; return !!d && Object.prototype.hasOwnProperty.call(d, key); }),
+        monthly: p ? { id: p.id, state: p.state } : null, current: Object.prototype.hasOwnProperty.call(profitParts.current || {}, key) };
+    };
+    // 唯讀觀測（不以 __cloud 開頭）：新封存的訂閱狀態與每份文件的 key 數
+    window.__notesArchiveState = () => ({ ready: naReady(), subscribed: naMeta.subscribed, fromCache: naMeta.fromCache, error: naMeta.error,
+      invalid: JSON.parse(JSON.stringify(naMeta.invalid)),
+      docs: Object.fromEntries(Object.keys(naParts).sort().map(id => [id, { state: naParts[id].state, keys: Object.keys(naParts[id].keys) }])) });
+    // NOTES_ARCHIVE_PURE_BEGIN（node 驗證會擷取這段，改名要一起改 node 腳本；比對用 growthCanon / growthSig，定義在下方 GROWTH_PURE）
+    //   文件形狀：{ schema:1, shop, month:'YYYY-MM', state:'copied'|'done', notes:{ first|second|full: { 品號: {adjustments:[…]} } },
+    //     src:{ keys:[原 key…], sig:{ 半月: 指紋 }, codes:{ 半月: 品號數 } }, createdAt, createdBy, doneAt?, doneBy? }
+    const NA_HALVES = ['first', 'second', 'full'];
+    const NA_KEY_RE = /^ec_notes\|([^|]+)\|(\d{4})\/(\d{2})\|(first|second|full)$/;
+    const naIsMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+    const naDocId = (shop, ym) => shop + '__' + ym;
+    const naKey = (shop, ym, half) => 'ec_notes|' + shop + '|' + ym.replace('-', '/') + '|' + half;
+    const naParseKey = (k) => { const m = NA_KEY_RE.exec(String(k)); return m ? { shop: m[1], ym: m[2] + '-' + m[3], half: m[4] } : null; };
+    const naParseId = (id) => { const i = String(id).lastIndexOf('__'); if (i <= 0) return null; const shop = id.slice(0, i), ym = id.slice(i + 2); return /^\d{4}-\d{2}$/.test(ym) ? { shop, ym } : null; };
+    // 文件是否合法。回 { ok:true, shop, ym, state, keys:{ 完整 key: 內容 } } 或 { ok:false, why }。
+    const naValidate = (id, d) => {
+      const p = naParseId(id);
+      if (!p) return { ok: false, why: 'doc id 格式不對' };
+      if (!naIsMap(d)) return { ok: false, why: '文件不是物件' };
+      if (d.schema !== 1) return { ok: false, why: 'schema 不是 1' };
+      if (d.shop !== p.shop || d.month !== p.ym) return { ok: false, why: 'shop / month 跟 doc id 不同' };
+      if (!NOTES_ARCHIVE_SHOPS.includes(d.shop)) return { ok: false, why: '不是列管的通路' };
+      if (d.state !== 'copied' && d.state !== 'done') return { ok: false, why: 'state 不對' };
+      if (!naIsMap(d.notes)) return { ok: false, why: 'notes 不是物件' };
+      const halves = Object.keys(d.notes);
+      if (!halves.length) return { ok: false, why: 'notes 是空的' };
+      const keys = {};
+      for (const h of halves) {
+        if (!NA_HALVES.includes(h)) return { ok: false, why: '不認得的半月：' + h };
+        if (!naIsMap(d.notes[h])) return { ok: false, why: h + ' 不是物件' };
+        keys[naKey(p.shop, p.ym, h)] = d.notes[h];
+      }
+      return { ok: true, shop: p.shop, ym: p.ym, state: d.state, keys };
+    };
+    // 盤點 app/profit 裡某通路某月的廣告調整。回 { source:{ 完整 key: 內容 }, list:[{ key, half, codes, adjs, maxDate, noBy, bad }] }。
+    //   maxDate＝紀錄裡最晚的 date（字串比較，格式 YYYY/MM/DD）；noBy＝沒有 by 的筆數；bad＝內容不是物件（不能封存）。
+    const naInventory = (profitDoc, shop, ym) => {
+      const source = {}, list = [];
+      NA_HALVES.forEach(h => {
+        const k = naKey(shop, ym, h);
+        if (!profitDoc || !Object.prototype.hasOwnProperty.call(profitDoc, k)) return;
+        const v = profitDoc[k];
+        const row = { key: k, half: h, codes: 0, adjs: 0, maxDate: '', noBy: 0, bad: !naIsMap(v) };
+        if (!row.bad) {
+          source[k] = v;
+          Object.keys(v).forEach(c => {
+            row.codes++;
+            const adjs = growthAdjList(v[c]);
+            adjs.forEach(a => {
+              row.adjs++;
+              const dt = a && typeof a.date === 'string' ? a.date : '';
+              if (dt > row.maxDate) row.maxDate = dt;
+              if (!(a && a.by)) row.noBy++;
+            });
+          });
+        }
+        list.push(row);
+      });
+      return { source, list };
+    };
+    // 由盤點結果產生要寫入的文件（state 'copied'）。source 只能是同一通路同一月份的 key。
+    const naBuild = (shop, ym, source, by, at) => {
+      const notes = {}, sig = {}, codes = {};
+      Object.keys(source).sort().forEach(k => {
+        const p = naParseKey(k);
+        if (!p || p.shop !== shop || p.ym !== ym) throw new Error('不是 ' + shop + ' ' + ym + ' 的 key：' + k);
+        notes[p.half] = JSON.parse(JSON.stringify(source[k]));
+        sig[p.half] = growthSig(source[k]);
+        codes[p.half] = Object.keys(source[k]).length;
+      });
+      return { schema: 1, shop, month: ym, state: 'copied', notes, src: { keys: Object.keys(source).sort(), sig, codes }, createdAt: at, createdBy: by || '' };
+    };
+    // source（完整 key → 內容）與文件 notes 逐品號比對。回 { same, diffs:[{ key, code, why:'missing'|'extra'|'changed' }] }。
+    //   why 以 source 為準：missing＝文件少了、extra＝文件多了、changed＝內容不同。整把 key 少了／多了 code 是 '*'。
+    const naCompare = (shop, ym, source, notes) => {
+      const diffs = [];
+      const doc = {};
+      Object.keys(notes || {}).forEach(h => { doc[naKey(shop, ym, h)] = notes[h]; });
+      const all = new Set(Object.keys(source || {}).concat(Object.keys(doc)));
+      all.forEach(k => {
+        const a = (source || {})[k], b = doc[k];
+        if (a === undefined) { diffs.push({ key: k, code: '*', why: 'extra' }); return; }
+        if (b === undefined) { diffs.push({ key: k, code: '*', why: 'missing' }); return; }
+        const codes = new Set(Object.keys(a || {}).concat(Object.keys(b || {})));
+        codes.forEach(c => {
+          if (!Object.prototype.hasOwnProperty.call(b || {}, c)) diffs.push({ key: k, code: c, why: 'missing' });
+          else if (!Object.prototype.hasOwnProperty.call(a || {}, c)) diffs.push({ key: k, code: c, why: 'extra' });
+          else if (growthCanon(a[c]) !== growthCanon(b[c])) diffs.push({ key: k, code: c, why: 'changed' });
+        });
+      });
+      return { same: !diffs.length, diffs };
+    };
+    // 已生效的封存（arch）與 app/profit 的殘留（cur，舊分頁寫的）逐品號合併：封存為主，殘留多的紀錄補到尾端，不刪任何東西。
+    //   回 { value, codes:[有補到東西的品號] }。
+    const naOverlay = (arch, cur) => {
+      const value = Object.assign({}, arch || {});
+      const codes = [];
+      if (naIsMap(cur)) Object.keys(cur).forEach(c => {
+        if (!Object.prototype.hasOwnProperty.call(value, c)) { value[c] = cur[c]; codes.push(c); return; }
+        if (growthCanon(value[c]) === growthCanon(cur[c])) return;
+        const before = growthAdjList(value[c]).length;
+        const next = growthAddExtras(value[c], growthAdjList(cur[c]));
+        if (next.adjustments.length !== before) { value[c] = next; codes.push(c); }
+      });
+      return { value, codes };
+    };
+    // NOTES_ARCHIVE_PURE_END
+    const naPure = { HALVES: NA_HALVES, docId: naDocId, key: naKey, parseKey: naParseKey, parseId: naParseId, validate: naValidate,
+      inventory: naInventory, build: naBuild, compare: naCompare, overlay: naOverlay };
     // 所有封存分片是否都已從【伺服器】收到過快照（嚴格版）：
     //   每片都要 (1) profitParts.archives 有那片的 key（訂閱 callback 對 exists()===false 也會寫入 {}，
     //   所以 doc 不存在也算已到達），且 (2) 最近一次快照 metadata.fromCache 為 false。
@@ -126,20 +257,176 @@ try {
     //   快照，若只看 (1) 會在離線時把所有封存期別誤判成「未封存」。離線 → ready 永遠 false（fail-closed）。
     //   ⚠ 已 ready 後若又收到 fromCache=true 的快照（連線中斷、SDK 切到快取），ready 會退回 false，
     //     等重新連上收到伺服器快照才恢復 —— 這是刻意的，離線期間不該相信封存判斷。
+    //   #436 ⑤：另外要新封存 collection 的最近一次快照來自伺服器、沒有訂閱錯誤、沒有不合法的文件（naReady）。
     window.__profitArchivesReady = () => PROFIT_ARCHIVE_DOCS.every(n =>
       Object.prototype.hasOwnProperty.call(profitParts.archives, n)
-      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false);
-    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。
-    window.__profitArchiveErrors = () => JSON.parse(JSON.stringify(profitArchiveErrors));
+      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false) && naReady();
+    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。#436 ⑤：新封存的訂閱錯誤與不合法文件也列在這裡。
+    window.__profitArchiveErrors = () => {
+      const o = JSON.parse(JSON.stringify(profitArchiveErrors));
+      if (naMeta.error) o[NOTES_ARCHIVE_COL] = JSON.parse(JSON.stringify(naMeta.error));
+      Object.keys(naMeta.invalid).forEach(id => { o[NOTES_ARCHIVE_COL + '/' + id] = JSON.parse(JSON.stringify(naMeta.invalid[id])); });
+      return o;
+    };
     // app/profit【最新快照】裡是否有這把 key（讀 profitParts.current；首批快照未到時是 {} → 一律 false）。
     //   與 __profitArchiveHas 搭配用（js/profit.js 的 _notesWriteBlockReason）：app/profit 有 → 不可能是「被搬走」的封存 key。
     //   刻意不另設「app/profit 首批已到」狀態：它只會讓提示文字更細，不改變任何放行／擋下結果
     //   （首批未到 → false → 由封存 ready 判斷接手；離線 fromCache 空快照也是 false → 方向正確）。同樣不回傳內容。
     window.__profitCurrentHas = (key) => Object.prototype.hasOwnProperty.call(profitParts.current || {}, key);
+
+    // ══════ 商品調整獨立文件 app/growth_{通路}（#436 第 ③ 塊）══════
+    //   切換判斷（每個通路）：文件有數字 migratedAt ＝ 讀寫都走新文件；伺服器確認沒有這份文件 ＝ 完全走 app/profit 舊欄位。
+    //   _profitMem 的 key 名維持 ec_notes|{通路}_growth，讀取端都不用改。寫入見 js/profit.js syncNotesMerge。
+    //   舊欄位還在 / 又出現（舊分頁寫的）的處理靠 legacySeen（品號 → 舊欄位內容的指紋）：
+    //     指紋相同 ＝ 已經看過，忽略（不能只看「新文件沒有」，否則新文件刪掉的紀錄會一直復活）；
+    //     指紋不同 ＝ 舊分頁動過：把新文件沒有的紀錄補進顯示，下次同步寫進新文件並更新指紋。不刪任何東西。
+    // GROWTH_PURE_BEGIN（node 驗證會擷取這段，改名要一起改 node 腳本；搬家腳本的指紋必須跟 growthSig 同一套）
+    const growthCanon = (v) => {
+      if (Array.isArray(v)) return '[' + v.map(growthCanon).join(',') + ']';
+      if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + growthCanon(v[k])).join(',') + '}';
+      return JSON.stringify(v === undefined ? null : v);
+    };
+    // FNV-1a 32 位元（UTF-16 碼元）→ 8 碼十六進位。撞號的後果只是漏補一個品號，機率可忽略。
+    const growthSig = (v) => {
+      const s = growthCanon(v);
+      let h = 0x811c9dc5;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+      return (h >>> 0).toString(16).padStart(8, '0');
+    };
+    const growthAdjList = (entry) => {
+      if (typeof entry === 'string') return [{ date: '', text: entry }];
+      return (entry && Array.isArray(entry.adjustments)) ? entry.adjustments : [];
+    };
+    // 把 extras 裡 entry 沒有的紀錄補到尾端。回新物件，不動傳入的 entry。
+    const growthAddExtras = (entry, extras) => {
+      const list = growthAdjList(entry);
+      const have = new Set(list.map(growthCanon));
+      const add = (extras || []).filter(a => !have.has(growthCanon(a)));
+      const base = (entry && typeof entry === 'object' && !Array.isArray(entry)) ? entry : {};
+      return Object.assign({}, base, { adjustments: list.concat(add) });
+    };
+    // items＝新文件內容、old＝app/profit 舊欄位（可能 undefined）、seen＝legacySeen。
+    //   回 { value:合併後的內容（新物件）, residue:{ 品號:{ sig, extras } } }；residue 空 ＝ 舊欄位沒有新東西。
+    const growthOverlay = (items, old, seen) => {
+      const value = Object.assign({}, items || {});
+      const residue = {};
+      const sn = seen || {};
+      if (old && typeof old === 'object' && !Array.isArray(old)) {
+        Object.keys(old).forEach(code => {
+          const sig = growthSig(old[code]);
+          if (sn[code] === sig) return;
+          const cur = growthAdjList(value[code]);
+          const have = new Set(cur.map(growthCanon));
+          const extras = growthAdjList(old[code]).filter(a => !have.has(growthCanon(a)));
+          residue[code] = { sig, extras };
+          if (extras.length) value[code] = growthAddExtras(value[code], extras);
+        });
+      }
+      return { value, residue };
+    };
+    // GROWTH_PURE_END
+    window.__growthPure = { sig: growthSig, canon: growthCanon, overlay: growthOverlay, addExtras: growthAddExtras };
+    const growthKey = (shop) => 'ec_notes|' + shop + '_growth';
+    const growthParts = {};   // 通路 → { state:'loading'|'old'|'new', items, seen, raw, residue, error }
+    GROWTH_SHOPS.forEach(s => { growthParts[s] = { state: 'loading', items: null, seen: null, raw: null, residue: {}, error: null }; });
+    // 這把 key 是不是列管通路的商品調整；是就回通路名。測試通路等沒列管的回 null（一律走舊路徑）。
+    window.__growthShopOfKey = (k) => {
+      const m = /^ec_notes\|(.+)_growth$/.exec(String(k));
+      return (m && GROWTH_SHOPS.includes(m[1])) ? m[1] : null;
+    };
+    const growthIsNewKey = (k) => { const s = window.__growthShopOfKey(k); return !!(s && growthParts[s].state === 'new'); };
+    // 唯讀觀測點（刻意不以 __cloud 開頭，同 __profitArchivesReady）。'none'＝沒列管；'error'＝訂閱失敗。
+    window.__growthRoute = (shop) => {
+      const p = growthParts[shop];
+      if (!p) return 'none';
+      return (p.state === 'loading' && p.error) ? 'error' : p.state;
+    };
+    // 舊欄位有新東西、等下次同步補寫的 key（只回 key 名）
+    window.__growthResidueKeys = () => GROWTH_SHOPS.filter(s => growthParts[s].state === 'new' && Object.keys(growthParts[s].residue).length).map(growthKey);
+    window.__growthState = () => Object.fromEntries(GROWTH_SHOPS.map(s => {
+      const p = growthParts[s];
+      return [s, { route: window.__growthRoute(s), codes: p.items ? Object.keys(p.items).length : 0, residue: Object.keys(p.residue), error: p.error }];
+    }));
+    // 把新文件 + 舊欄位算成顯示內容，有變才寫 _profitMem。回 true＝變了（呼叫端負責發事件）。
+    const growthSync = (shop) => {
+      const p = growthParts[shop];
+      if (p.state !== 'new') return false;
+      const k = growthKey(shop);
+      const ov = growthOverlay(p.items, profitParts.current[k], p.seen);
+      // 只有真的有紀錄要補才算殘留。內容都在新文件裡（步驟 4 清 legacySeen 後舊快照晚到，或舊分頁寫回一樣的內容）不警告、不列入待補寫；
+      //   指紋不用另外補寫：刪紀錄一定走同步，_syncGrowthDoc 會在同一次寫入更新這些品號的指紋，所以不會復活。
+      p.residue = Object.fromEntries(Object.entries(ov.residue).filter(([, r]) => r.extras.length));
+      const codes = Object.keys(p.residue);
+      if (codes.length) {
+        const tag = codes.map(c => c + ':' + ov.residue[c].sig).join(',');
+        if (p.warned !== tag) { p.warned = tag; console.warn('[商品調整] ' + shop + '：app/profit 舊欄位有新文件沒看過的品號（可能是舊分頁寫的），已合併進顯示，下次同步會補寫進新文件：', codes); }
+      }
+      if (window.__profitShouldSkipCloudOverwrite && window.__profitShouldSkipCloudOverwrite(k)) return false;
+      // 用 growthCanon 比：伺服器每次傳來的 map key 順序不固定（實測），順序不同不算變動
+      if (Store._profitMem[k] !== undefined && growthCanon(ov.value) === growthCanon(Store._profitMem[k])) return false;
+      Store._profitMem[k] = ov.value;
+      return true;
+    };
+    // ══════ MOMO 優化紀錄獨立文件 app/optlog_{店}（#436 第 ④ 塊）══════
+    //   切換判斷同商品調整：文件有數字 migratedAt ＝ 讀寫都走新文件；伺服器確認沒有這份文件 ＝ 走 app/profit 舊欄位。
+    //   這裡只管文件狀態。合併、殘留判斷都在 js/profit.js（momoMergeOptlog 只有一份）；只有 profit.js 會讀優化紀錄，所以它載入時才把資料放進記憶體（_optlogApply）。
+    //   舊欄位又出現（舊分頁寫的）靠紀錄 id 與墓碑判斷，不用 legacySeen：新文件沒有、也沒有墓碑的紀錄才算殘留。
+    const optlogKey = (shop) => 'ec_momo_optlog|' + shop;
+    const optlogDelKey = (shop) => 'ec_momo_optlog_del|' + shop;
+    const optlogParts = {};   // 店 → { state:'loading'|'old'|'new', items, tomb, raw, error, oldSeen }
+    OPTLOG_SHOPS.forEach(s => { optlogParts[s] = { state: 'loading', items: null, tomb: null, raw: null, error: null, oldSeen: '' }; });
+    const optlogIsNewKey = (k) => {
+      const m = /^ec_momo_optlog(?:_del)?\|(.+)$/.exec(String(k));
+      return !!(m && OPTLOG_SHOPS.includes(m[1]) && optlogParts[m[1]].state === 'new');
+    };
+    const optlogOldSig = (shop) => JSON.stringify([profitParts.current[optlogKey(shop)], profitParts.current[optlogDelKey(shop)]]);
+    const optlogNotify = (shop) => { try { if (window.__optlogApplyCloud) window.__optlogApplyCloud(shop); } catch (e) { console.error('[優化紀錄] 套用失敗：', shop, e); } };
+    // 以下都是唯讀觀測點（刻意不以 __cloud 開頭，同 __growthRoute）。
+    window.__optlogListed = (shop) => OPTLOG_SHOPS.includes(shop);
+    window.__optlogShops = () => OPTLOG_SHOPS.slice();
+    // 'old'／'new'；'none'＝沒列管；'loading'＝還不知道；'error'＝訂閱失敗。
+    window.__optlogRoute = (shop) => {
+      const p = optlogParts[shop];
+      if (!p) return 'none';
+      return (p.state === 'loading' && p.error) ? 'error' : p.state;
+    };
+    // 這家的優化紀錄已經從雲端到位了嗎（工作日誌只有全部到位才算次數，見 profit.js momoUpdateDailyProgress）。
+    window.__optlogReady = (shop) => {
+      const r = window.__optlogRoute(shop);
+      if (r === 'new') return true;
+      return (r === 'old' || r === 'none') && !!profitParts.gotFirst;
+    };
+    window.__optlogDocView = (shop) => {
+      const p = optlogParts[shop];
+      return { route: window.__optlogRoute(shop), items: p ? p.items : null, tomb: p ? p.tomb : null, oldField: profitParts.current[optlogKey(shop)], oldTomb: profitParts.current[optlogDelKey(shop)] };
+    };
+    window.__optlogState = () => Object.fromEntries(OPTLOG_SHOPS.map(s => {
+      const p = optlogParts[s];
+      let entries = 0;
+      if (p.items) Object.values(p.items).forEach(a => { if (Array.isArray(a)) entries += a.length; });
+      return [s, { route: window.__optlogRoute(s), skus: p.items ? Object.keys(p.items).length : 0, entries, tomb: p.tomb ? Object.keys(p.tomb).length : 0, oldField: Object.prototype.hasOwnProperty.call(profitParts.current, optlogKey(s)), residue: window.__optlogResidueCount ? window.__optlogResidueCount(s) : null, error: p.error }];
+    }));
+    // #436 ⑤：data 已是「封存 → app/profit」的合併結果。done 的 key 若 app/profit 也有，改成封存為主、逐品號補上殘留。
+    const naOverlayDone = (data) => {
+      const hit = [];
+      Object.values(naParts).forEach(p => {
+        if (p.state !== 'done') return;
+        Object.keys(p.keys).forEach(k => {
+          if (!Object.prototype.hasOwnProperty.call(profitParts.current || {}, k)) return;
+          const ov = naOverlay(p.keys[k], profitParts.current[k]);
+          data[k] = ov.value;
+          hit.push(k + ':' + ov.codes.join(','));
+        });
+      });
+      const tag = hit.join(';');
+      if (tag && naMeta.warned !== tag) { naMeta.warned = tag; console.warn('[廣告調整封存] 已封存的期別在 app/profit 又出現（可能是舊分頁寫的），畫面以封存為主、只補上多出來的紀錄：', hit); }
+    };
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
+      Object.values(naParts).forEach(p => Object.assign(data, p.keys));   // #436 ⑤ 新封存（key 跟舊兩片、彼此都不重複）
       Object.assign(data, profitParts.current);
+      naOverlayDone(data);   // #436 ⑤ 已生效的封存又出現在 app/profit（舊分頁寫的）：逐品號合併，不讓 app/profit 整把蓋掉
       const oldData = Store._profitMem || {};
       const changedShops = new Set();
       // 只比對 profitDoc 自己的非報表 key（ec_notes|、ec_edits| 等）
@@ -147,6 +434,8 @@ try {
       Object.keys(data).forEach(k => {
         if (k.startsWith('ec|')) return; // 舊版報表殘留 key，跳過
         if (k.startsWith('ec_momo_products|')) return; // MOMO 商品主檔以 momo_products collection 為準，不在此比對（遷移過渡）
+        if (growthIsNewKey(k)) return; // 已搬的商品調整以 app/growth_{通路} 為準，下方 growthSync 處理
+        if (optlogIsNewKey(k)) return; // 已搬的優化紀錄以 app/optlog_{店} 為準，下方 optlogNotify 處理
         if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
           const shop = k.split('|')[1];
           if (shop) changedShops.add(shop);
@@ -155,6 +444,8 @@ try {
       // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）與 MOMO 商品主檔（ec_momo_products|）
       //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
+        if (growthIsNewKey(k)) return;   // 已搬的商品調整：舊欄位不直接覆蓋，由 growthSync 合併
+        if (optlogIsNewKey(k)) return;   // 已搬的優化紀錄：舊欄位不直接覆蓋，由 profit.js _optlogApply 合併
         // ec_pchome_products / ec_pchome_recon 已搬到 app/pchome_products / app/pchome_recon 獨立 doc
         //   （照 ec_momo_products 搬 collection 的先例）：新 doc 權威，app/profit 舊欄位只當【遷移過渡的 fallback】
         //   —— 只在新 doc 尚未填該 key（Store._profitMem 還沒值）時才填入，避免 app/profit echo 蓋掉新 doc 的值。
@@ -167,6 +458,15 @@ try {
           if (window.__profitShouldSkipCloudOverwrite && window.__profitShouldSkipCloudOverwrite(k)) return;
           Store._profitMem[k] = data[k];
         }
+      });
+      // 已搬的通路：舊欄位可能剛被舊分頁寫入，重算一次。通路名維持 key 的第二段（玩樂_growth），跟搬之前發的事件相同。
+      GROWTH_SHOPS.forEach(s => { if (growthSync(s)) changedShops.add(s + '_growth'); });
+      // 已搬的店：舊欄位有變動（舊分頁寫回、或搬家刪掉）才重算一次。
+      OPTLOG_SHOPS.forEach(s => {
+        const p = optlogParts[s];
+        if (p.state !== 'new') return;
+        const sig = optlogOldSig(s);
+        if (sig !== p.oldSeen) { p.oldSeen = sig; optlogNotify(s); }
       });
       window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
       // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
@@ -245,7 +545,26 @@ try {
         const m = profitDocMeasure(profitParts.archives[n] || {}, 'app/' + n);
         archives[n] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
       });
-      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives });
+      const growth = {};   // 商品調整獨立文件（還沒搬、還沒收到快照的通路不報）
+      GROWTH_SHOPS.forEach(s => {
+        const raw = growthParts[s].raw;
+        if (!raw) return;
+        const m = profitDocMeasure(raw, 'app/growth_' + s);
+        growth[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      const optlog = {};   // 優化紀錄獨立文件（同上）
+      OPTLOG_SHOPS.forEach(s => {
+        const raw = optlogParts[s].raw;
+        if (!raw) return;
+        const m = profitDocMeasure(raw, 'app/optlog_' + s);
+        optlog[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      const notesArchive = {};   // #436 ⑤ 新封存（還沒載入的不報）
+      Object.keys(naParts).forEach(id => {
+        const m = profitDocMeasure(naParts[id].raw || {}, NOTES_ARCHIVE_COL + '/' + id);
+        notesArchive[id] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog, notesArchive });
       profitDocStatsDirty = false;
       try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
       return profitDocStatsCache;
@@ -269,9 +588,74 @@ try {
     // 輕量：app/profit 立刻訂閱（小檔案，不會卡住）
     onSnapshot(profitDocRef, snap => {
       profitParts.current = snap.exists() ? (snap.data() || {}) : {};
+      if (snap.exists() || !(snap.metadata && snap.metadata.fromCache)) profitParts.gotFirst = true;   // 沒開 persistence：離線的快取快照是空的，不算收到（優化紀錄 __optlogReady 用）
       mergeAndNotify();
       _pdSchedule();
     }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
+
+    // 商品調整文件的快照入口（訂閱在本檔下方 __cloudGrowth 建好之後；物件要用到 KPI_DELETE，不能放在這裡）。
+    //   data＝文件內容（不存在＝null）。
+    window.__growthApplySnap = (shop, data, meta) => {
+      const p = growthParts[shop];
+      if (!p) return;
+      const fromCache = !!(meta && meta.fromCache);
+      const prev = p.state;
+      p.error = null;
+      if (data && typeof data.migratedAt === 'number') {
+        p.state = 'new';
+        p.items = (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) ? data.items : {};
+        p.seen = (data.legacySeen && typeof data.legacySeen === 'object') ? data.legacySeen : {};
+        p.raw = data;
+      } else if (data) {
+        // 文件在、沒有 migratedAt：不算搬完，照舊走 app/profit
+        if (!p.warnedNoMark) { p.warnedNoMark = true; console.warn('[商品調整] app/growth_' + shop + ' 存在但沒有 migratedAt，照舊使用 app/profit 舊欄位'); }
+        p.state = 'old'; p.items = null; p.seen = null; p.residue = {}; p.raw = data;
+      } else if (!fromCache) {
+        p.state = 'old'; p.items = null; p.seen = null; p.residue = {}; p.raw = null;
+      } else {
+        return;   // 沒有文件、資料來自快取：離線時 SDK 會送這種快照，不能當成「確定沒有」，維持原狀態
+      }
+      _pdSchedule();
+      if (p.state === 'new') {
+        if (growthSync(shop)) window.dispatchEvent(new CustomEvent('profitDataReady', { detail: { changedShops: [shop + '_growth'] } }));
+      } else if (prev === 'new') {
+        // 回搬（migratedAt 被移除）：把舊欄位放回顯示
+        mergeAndNotify();
+      }
+    };
+    window.__growthSubError = (shop, err) => {
+      const p = growthParts[shop];
+      if (p) p.error = String((err && err.message) || err);
+      console.error('[商品調整] app/growth_' + shop + ' 訂閱失敗：', err);
+    };
+    // 優化紀錄文件的快照入口（判斷同上方商品調整）。data＝文件內容（不存在＝null）。
+    window.__optlogApplySnap = (shop, data, meta) => {
+      const p = optlogParts[shop];
+      if (!p) return;
+      const fromCache = !!(meta && meta.fromCache);
+      const prev = p.state;
+      p.error = null;
+      const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+      if (data && typeof data.migratedAt === 'number') {
+        p.state = 'new'; p.items = isMap(data.items) ? data.items : {}; p.tomb = isMap(data.tomb) ? data.tomb : {}; p.raw = data;
+        p.oldSeen = optlogOldSig(shop);
+      } else if (data) {
+        if (!p.warnedNoMark) { p.warnedNoMark = true; console.warn('[優化紀錄] app/optlog_' + shop + ' 存在但沒有 migratedAt，照舊使用 app/profit 舊欄位'); }
+        p.state = 'old'; p.items = null; p.tomb = null; p.raw = data;
+      } else if (!fromCache) {
+        p.state = 'old'; p.items = null; p.tomb = null; p.raw = null;
+      } else {
+        return;   // 沒有文件、資料來自快取：不能當成「確定沒有」，維持原狀態
+      }
+      _pdSchedule();
+      if (prev === 'new' && p.state !== 'new') mergeAndNotify();   // 回搬：把舊欄位放回顯示
+      optlogNotify(shop);
+    };
+    window.__optlogSubError = (shop, err) => {
+      const p = optlogParts[shop];
+      if (p) p.error = String((err && err.message) || err);
+      console.error('[優化紀錄] app/optlog_' + shop + ' 訂閱失敗：', err);
+    };
 
     // 重量：archive 分片（PROFIT_ARCHIVE_DOCS，見上方常數）跟 profits collection 延後訂閱
     // 等首頁渲染完成 + 使用者第一次切換到淨利表 才載入
@@ -310,7 +694,118 @@ try {
           console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
         });
       });
+      naSubscribe();   // #436 ⑤ 新封存，跟舊兩片同一組、同一個時機
       __markSubsMaybeAllLoaded();
+    };
+
+    // ══════ #436 第 ⑤ 塊：廣告調整新封存 notes_archive（每通路每月一份）══════
+    //   訂閱：整個 collection 一個監聽，由 __loadArchiveSubs 觸發（進蝦皮個別通路、工作日誌、洞察表調整彈窗、健檢）。
+    //   🔴 includeMetadataChanges 不能拿掉：沒開 persistence，離線可能先送 fromCache 的空快照，要等翻成伺服器狀態才算 ready。
+    //   不合法的文件不併進畫面，記在 naMeta.invalid ⇒ __profitArchivesReady 為 false ⇒ 寫入一律擋下（fail-closed）。
+    const naSubscribe = () => {
+      if (naMeta.subscribed) return;
+      naMeta.subscribed = true;
+      try {
+        onSnapshot(collection(db, NOTES_ARCHIVE_COL), { includeMetadataChanges: true }, snap => {
+          naMeta.fromCache = !!(snap && snap.metadata && snap.metadata.fromCache);
+          // 只有 fromCache／待寫入狀態變了的快照：文件沒變，不用重算（第一份快照一律處理）
+          if (naMeta.gotSnap && snap && typeof snap.docChanges === 'function' && !snap.docChanges().length) return;
+          naMeta.gotSnap = true;
+          Object.keys(naParts).forEach(id => delete naParts[id]);
+          Object.keys(naMeta.invalid).forEach(id => delete naMeta.invalid[id]);
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const v = naValidate(d.id, data);
+            if (!v.ok) { naMeta.invalid[d.id] = { at: Date.now(), code: 'invalid', message: v.why }; console.error('[廣告調整封存] 文件內容不合法，不採用（寫入會先擋下）：', NOTES_ARCHIVE_COL + '/' + d.id, v.why); return; }
+            naParts[d.id] = { id: d.id, shop: v.shop, ym: v.ym, state: v.state, keys: v.keys, raw: data };
+          });
+          mergeAndNotify();
+          _pdSchedule();
+        }, err => {
+          naMeta.error = { at: Date.now(), code: (err && err.code) || '', message: String((err && err.message) || err) };
+          console.error('[廣告調整封存] 訂閱失敗：', err);
+        });
+      } catch (e) {
+        naMeta.error = { at: Date.now(), code: 'throw', message: String((e && e.message) || e) };
+        console.error('[廣告調整封存] 訂閱失敗：', e);
+      }
+    };
+    window.__notesArchivePure = Object.assign({ measure: profitDocMeasure, sig: growthSig, canon: growthCanon }, naPure);
+    // 雲端物件：讀 getDoc(shop, ym, 'server')（名字在讀取白名單）；寫 createMonth / commitDelete / restoreMonth（三支都是交易）。
+    //   寫入成功回 { ok:true, … }；條件不符回 { ok:false, why, … }（什麼都沒寫）；被唯讀／本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+    //   ⚠ 新增這顆後本機防護物件數 +1、寫入方法 +3（實際數字以合併時防護碼輸出為準，見 CLAUDE.md）。
+    const naRef = (shop, ym) => {
+      if (!NOTES_ARCHIVE_SHOPS.includes(shop)) throw new Error('不是列管的通路：' + shop);
+      if (!/^\d{4}-\d{2}$/.test(String(ym))) throw new Error('月份格式不對：' + ym);
+      return doc(db, NOTES_ARCHIVE_COL, naDocId(shop, ym));
+    };
+    // 把 app/profit 裡這個通路這個月的廣告調整撈出來（交易內用）
+    const naSourceOf = (pdata, shop, ym) => naInventory(pdata, shop, ym).source;
+    window.__cloudNotesArchive = {
+      getDoc: (shop, ym, src) => src === 'server' ? getDocFromServer(naRef(shop, ym)) : getDoc(naRef(shop, ym)),
+      // 複製：文件不存在才建立（state 'copied'）。已是 done 一律拒絕；已是 copied 要帶 opts.replaceCopied 才重建。
+      createMonth: (shop, ym, data, opts) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const s = await tx.get(ref);
+          if (s.exists()) {
+            const cur = s.data() || {};
+            if (cur.state === 'done') return { ok: false, why: 'done' };
+            if (!(opts && opts.replaceCopied)) return { ok: false, why: 'exists', state: cur.state || '' };
+          }
+          const v = naValidate(id, data);
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (data.state !== 'copied') return { ok: false, why: 'invalid', detail: 'state 要是 copied' };
+          tx.set(ref, data);
+          return { ok: true, replaced: s.exists() };
+        });
+      },
+      // 刪舊欄位＋生效：同一個交易讀 app/profit 與封存文件，這個通路這個月的 key 要跟封存逐品號相同才刪，同時把封存改成 done。
+      commitDelete: (shop, ym, by) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const as = await tx.get(ref);
+          const ps = await tx.get(profitDocRef);
+          if (!as.exists()) return { ok: false, why: 'no-archive' };
+          const a = as.data() || {};
+          const v = naValidate(id, a);
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (a.state !== 'copied') return { ok: false, why: a.state === 'done' ? 'done' : 'state' };
+          if (!ps.exists()) return { ok: false, why: 'no-profit' };
+          const src = naSourceOf(ps.data() || {}, shop, ym);
+          const cmp = naCompare(shop, ym, src, a.notes);
+          if (!cmp.same) return { ok: false, why: 'changed', diffs: cmp.diffs.slice(0, 50), nDiffs: cmp.diffs.length };
+          const keys = Object.keys(v.keys);
+          const args = [];
+          keys.forEach(k => { args.push(new FieldPath(k), deleteField()); });
+          tx.update(profitDocRef, ...args);
+          tx.update(ref, { state: 'done', doneAt: Date.now(), doneBy: by || '' });
+          return { ok: true, keys };
+        });
+      },
+      // 回搬：封存內容寫回 app/profit、刪掉封存文件。app/profit 已經有任何一把 ⇒ 不做；寫回後 app/profit 超過 90%（大小或索引）⇒ 不做。
+      restoreMonth: (shop, ym) => {
+        const ref = naRef(shop, ym), id = naDocId(shop, ym);
+        return runTransaction(db, async (tx) => {
+          const as = await tx.get(ref);
+          const ps = await tx.get(profitDocRef);
+          if (!as.exists()) return { ok: false, why: 'no-archive' };
+          const v = naValidate(id, as.data() || {});
+          if (!v.ok) return { ok: false, why: 'invalid', detail: v.why };
+          if (!ps.exists()) return { ok: false, why: 'no-profit' };
+          const pdata = ps.data() || {};
+          const keys = Object.keys(v.keys);
+          const clash = keys.filter(k => Object.prototype.hasOwnProperty.call(pdata, k));
+          if (clash.length) return { ok: false, why: 'profit-has', keys: clash };
+          const after = profitDocMeasure(Object.assign({}, pdata, v.keys), 'app/profit');
+          if (after.ratio >= 0.9 || after.idxRatio >= 0.9) return { ok: false, why: 'capacity', ratio: after.ratio, idxRatio: after.idxRatio };
+          const args = [];
+          keys.forEach(k => { args.push(new FieldPath(k), v.keys[k]); });
+          tx.update(profitDocRef, ...args);
+          tx.delete(ref);
+          return { ok: true, keys, ratio: after.ratio, idxRatio: after.idxRatio };
+        });
+      },
     };
 
     // #315：profits collection 是否已從【伺服器】收到過快照（唯讀觀測點，給 js/profit.js 的 _progHeavyLoaded 判「載入中 / 尚無報表」）。
@@ -1337,6 +1832,147 @@ try {
     window.__cloudFridayRecon.subscribe(data => { window.__fridayReconCloudLatest = data; if (typeof window.__fridayApplyCloudRecon === 'function') window.__fridayApplyCloudRecon(data); },
       e => console.error('[friday_recon] 訂閱失敗：', e));
   } catch (e) { console.error('[friday_recon] 訂閱失敗：', e); }
+
+  // ============== 商品調整 app/growth_{通路}（#436 第 ③ 塊；從 app/profit 的 ec_notes|{通路}_growth 搬出） ==============
+  //   結構：{ items:{ 品號:{adjustments:[…]} }, migratedAt:數字, migratedBy, legacySeen:{ 品號:指紋 } }。
+  //   文件只由搬家腳本建立；沒有 migratedAt 就不算搬完，讀寫都照舊走 app/profit（切換判斷見上方 __growthRoute）。
+  //   寫入只有 writePaths：FieldPath 逐品號寫。🔴 刻意不走 kpiWriteTo（它遇到文件不存在會自動建空文件；
+  //     自動建的文件沒有 migratedAt，那個通路會被靜默切回舊路徑）。這裡文件不存在就失敗。
+  //   成功回 { ok:true }；被唯讀 / 本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe。⚠ 新增這顆後本機防護物件數 31 → 32、寫入方法 +1（見 CLAUDE.md）。
+  const growthRef = (shop) => {
+    if (!GROWTH_SHOPS.includes(shop)) throw new Error('不是列管的通路：' + shop);
+    return doc(db, 'app', 'growth_' + shop);
+  };
+  window.__cloudGrowth = {
+    DELETE: KPI_DELETE,
+    // getDoc(shop, 'server')：強制讀伺服器現值（離線會丟錯，不吃快取）。同步一律用這個決定路徑。
+    getDoc: (shop, src) => src === 'server' ? getDocFromServer(growthRef(shop)) : getDoc(growthRef(shop)),
+    // 🔴 includeMetadataChanges 不能拿掉：沒開 persistence，離線可能先送 fromCache 的空快照，要等翻成伺服器狀態才知道文件真的不存在。
+    subscribe: (shop, cb, onErr) => onSnapshot(growthRef(shop), { includeMetadataChanges: true },
+      snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
+    writePaths: (shop, pairs) => kpiUpdate(growthRef(shop), pairs).then(() => ({ ok: true })),
+  };
+  GROWTH_SHOPS.forEach(shop => {
+    try {
+      window.__cloudGrowth.subscribe(shop, (data, meta) => { if (window.__growthApplySnap) window.__growthApplySnap(shop, data, meta); },
+        e => { if (window.__growthSubError) window.__growthSubError(shop, e); });
+    } catch (e) { console.error('[商品調整] 訂閱失敗：', shop, e); }
+  });
+  // ============== MOMO 優化紀錄 app/optlog_{店}（#436 第 ④ 塊；從 app/profit 的 ec_momo_optlog|{店}、ec_momo_optlog_del|{店} 搬出） ==============
+  //   結構：{ items:{ 品號:[紀錄] }, tomb:{ 紀錄身分:{at,by} }, migratedAt:數字, migratedBy }。
+  //   文件只由搬家腳本建立；沒有 migratedAt 就不算搬完，讀寫都照舊走 app/profit（切換判斷見上方 __optlogRoute）。
+  //   寫入只有 writePaths：逐品號、逐墓碑 FieldPath 寫。🔴 刻意不走 kpiWriteTo，理由同 __cloudGrowth：文件不存在就失敗，不自動建立。
+  //   成功回 { ok:true }；被唯讀 / 本機防護擋下回 undefined → 呼叫端一律 r && r.ok。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe。⚠ 新增這顆後本機防護物件數 32 → 33、寫入方法 +1（見 CLAUDE.md）。
+  const optlogRef = (shop) => {
+    if (!OPTLOG_SHOPS.includes(shop)) throw new Error('不是列管的店：' + shop);
+    return doc(db, 'app', 'optlog_' + shop);
+  };
+  window.__cloudOptlog = {
+    DELETE: KPI_DELETE,
+    // getDoc(shop, 'server')：強制讀伺服器現值（離線會丟錯，不吃快取）。同步一律用這個決定路徑。
+    getDoc: (shop, src) => src === 'server' ? getDocFromServer(optlogRef(shop)) : getDoc(optlogRef(shop)),
+    // 🔴 includeMetadataChanges 不能拿掉，理由同 __cloudGrowth.subscribe。
+    subscribe: (shop, cb, onErr) => onSnapshot(optlogRef(shop), { includeMetadataChanges: true },
+      snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
+    writePaths: (shop, pairs) => kpiUpdate(optlogRef(shop), pairs).then(() => ({ ok: true })),
+  };
+  OPTLOG_SHOPS.forEach(shop => {
+    try {
+      window.__cloudOptlog.subscribe(shop, (data, meta) => { if (window.__optlogApplySnap) window.__optlogApplySnap(shop, data, meta); },
+        e => { if (window.__optlogSubError) window.__optlogSubError(shop, e); });
+    } catch (e) { console.error('[優化紀錄] 訂閱失敗：', shop, e); }
+  });
+  // 本機測試：把某家換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
+  //   __optlogMock('乙配')＝用目前的紀錄當新文件；__optlogMock('乙配', { residueSku:'品號' })＝假裝舊欄位那個品號多一筆新文件沒有的紀錄（舊分頁寫的）；
+  //   __optlogMock('乙配', 'doc')＝看假文件內容；__optlogMock('乙配', false)＝收掉（重新整理才會回到真實狀態）。
+  window.__optlogMock = (() => {
+    const H = location.hostname;
+    if (H !== 'localhost' && H !== '127.0.0.1') return () => { console.warn('__optlogMock 只在 localhost 可用'); };
+    const docs = {};
+    let real = null;
+    const snapOf = (d) => ({ exists: () => !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) });
+    const install = () => {
+      if (real) return;
+      const co = window.__cloudOptlog;
+      real = { getDoc: co.getDoc, writePaths: co.writePaths };
+      co.getDoc = (shop, src) => docs[shop] ? Promise.resolve(snapOf(docs[shop])) : real.getDoc(shop, src);
+      co.writePaths = (shop, pairs) => {
+        if (!docs[shop]) return real.writePaths(shop, pairs);
+        pairs.forEach(([segs, v]) => {
+          let o = docs[shop];
+          segs.slice(0, -1).forEach(s => { o = o[s] = o[s] || {}; });
+          if (v === co.DELETE) delete o[segs[segs.length - 1]]; else o[segs[segs.length - 1]] = JSON.parse(JSON.stringify(v));
+        });
+        console.log('%c[optlog mock] 假寫入（只在記憶體）', 'color:#2563eb', shop, pairs.map(p => p[0].join('.')));
+        window.__optlogApplySnap(shop, JSON.parse(JSON.stringify(docs[shop])), { fromCache: false });
+        return Promise.resolve({ ok: true });
+      };
+    };
+    return (shop, opt) => {
+      if (opt === 'doc') return docs[shop] ? JSON.parse(JSON.stringify(docs[shop])) : null;
+      if (opt === false) { delete docs[shop]; console.log('[optlog mock] 已收掉 ' + shop + '，重新整理才會回到真實狀態'); return; }
+      install();
+      const clone = (v) => JSON.parse(JSON.stringify(v || {}));
+      const d = { items: clone((Store._profitMem || {})['ec_momo_optlog|' + shop]), tomb: clone((Store._profitMem || {})['ec_momo_optlog_del|' + shop]), migratedAt: Date.now(), migratedBy: 'mock' };
+      if (opt && opt.residueSku) {
+        const a = d.items[opt.residueSku];
+        if (Array.isArray(a) && a.length) { a.pop(); if (!a.length) delete d.items[opt.residueSku]; }
+        else console.warn('[optlog mock] 這個品號沒有紀錄：', opt.residueSku);
+      }
+      docs[shop] = d;
+      window.__optlogApplySnap(shop, JSON.parse(JSON.stringify(d)), { fromCache: false });
+      console.log('%c[optlog mock] ' + shop + ' 已切到假文件（' + Object.keys(d.items).length + ' 個品號）', 'color:#2563eb;font-weight:700');
+      return d;
+    };
+  })();
+  // 本機測試：把某通路換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
+  //   __growthMock('維克')＝用目前畫面內容當新文件；__growthMock('維克', { residueCode:'品號' })＝假裝舊欄位那個品號被舊分頁動過，且最後一筆新文件沒有；
+  //   __growthMock('維克', false)＝收掉（重新整理才會回到真實狀態）；__growthMock('維克', 'doc')＝看假文件內容。
+  window.__growthMock = (() => {
+    const H = location.hostname;
+    if (H !== 'localhost' && H !== '127.0.0.1') return () => { console.warn('__growthMock 只在 localhost 可用'); };
+    const docs = {};
+    let real = null;
+    const snapOf = (d) => ({ exists: () => !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) });
+    const install = () => {
+      if (real) return;
+      const cg = window.__cloudGrowth;
+      real = { getDoc: cg.getDoc, writePaths: cg.writePaths };
+      cg.getDoc = (shop, src) => docs[shop] ? Promise.resolve(snapOf(docs[shop])) : real.getDoc(shop, src);
+      cg.writePaths = (shop, pairs) => {
+        if (!docs[shop]) return real.writePaths(shop, pairs);
+        pairs.forEach(([segs, v]) => {
+          let o = docs[shop];
+          segs.slice(0, -1).forEach(s => { o = o[s] = o[s] || {}; });
+          if (v === cg.DELETE) delete o[segs[segs.length - 1]]; else o[segs[segs.length - 1]] = JSON.parse(JSON.stringify(v));
+        });
+        console.log('%c[growth mock] 假寫入（只在記憶體）', 'color:#2563eb', shop, pairs.map(p => p[0].join('.')));
+        window.__growthApplySnap(shop, JSON.parse(JSON.stringify(docs[shop])), { fromCache: false });
+        return Promise.resolve({ ok: true });
+      };
+    };
+    return (shop, opt) => {
+      if (opt === 'doc') return docs[shop] ? JSON.parse(JSON.stringify(docs[shop])) : null;
+      if (opt === false) { delete docs[shop]; console.log('[growth mock] 已收掉 ' + shop + '，重新整理才會回到真實狀態'); return; }
+      install();
+      const pure = window.__growthPure;
+      const cur = JSON.parse(JSON.stringify((Store._profitMem || {})['ec_notes|' + shop + '_growth'] || {}));
+      const seen = {};
+      Object.keys(cur).forEach(c => { seen[c] = pure.sig(cur[c]); });
+      const d = { items: cur, migratedAt: Date.now(), migratedBy: 'mock', legacySeen: seen };
+      if (opt && opt.residueCode) {
+        const c = opt.residueCode;
+        if (d.items[c] && Array.isArray(d.items[c].adjustments) && d.items[c].adjustments.length) { d.items[c].adjustments.pop(); d.legacySeen[c] = 'mock0000'; }
+        else console.warn('[growth mock] 這個品號沒有紀錄：', c);
+      }
+      docs[shop] = d;
+      window.__growthApplySnap(shop, JSON.parse(JSON.stringify(d)), { fromCache: false });
+      console.log('%c[growth mock] ' + shop + ' 已切到假文件（' + Object.keys(cur).length + ' 個品號）', 'color:#2563eb;font-weight:700');
+      return d;
+    };
+  })();
 
   window.dispatchEvent(new Event('cloudStoreReady'));
 
