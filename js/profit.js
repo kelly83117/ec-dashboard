@@ -244,10 +244,11 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前通路：—</div>
           <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
             <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px" onchange="onPlatformRateChange()">
+            <span class="upm-rate-val" id="platformRate">—</span>
             <span style="font-size:12px;color:#6b7280">%</span>
           </div>
         </div>
+        <div class="upm-rate-note" id="upm-rate-note"></div>
         <label class="ucard" id="upm-map" style="width:100%;box-sizing:border-box">
           <input type="file" id="upm-map-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
           <button id="upm-map-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('map')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
@@ -2105,7 +2106,7 @@ function lsSave(shop,month,half,built,period,days,storeAds,opts){
   //   沿用這份報表【已存的】storeAds（先讀回再覆蓋），改一格廣告費不會把它弄丟、也不會變成「沒記錄」。
   //   舊報表本來就沒有這個欄位 → 重存後照樣沒有（不補 0）。
   if(storeAds===undefined){const old=lsLoad(shop,month,half);if(old&&old.storeAds!==undefined)storeAds=old.storeAds;}
-  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
+  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop,month),ts:Date.now()};
   if(storeAds!==undefined)payload.storeAds=storeAds;
   const k=lsKey(shop,month,half);
   const json=JSON.stringify(payload);
@@ -2546,7 +2547,7 @@ function testSave(shop,start,end,built,period,days){
   // ⚠ 只剝一次就夠：payload.built 是 _stripDerived 產出的【全新乾淨物件】，
   //   而 loadIntoUI 事後加回衍生欄位的對象是原始的 built 陣列、不是這份拷貝。
   //   （syncToCloud 那邊要再剝一次，是因為它讀的是被 loadIntoUI 就地污染過的 _profitMem。）
-  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
+  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop,start),ts:Date.now()};
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=payload; }catch{}
   const col=window.__cloudProfitCol;
   if(!col||typeof col.setReport!=='function'){ _testSaveFailed(k,'雲端層尚未就緒（__cloudProfitCol 未建立）'); return; }
@@ -2574,8 +2575,8 @@ function _testSaveFailed(k,msg){
 //     否則說明書會叫使用者去等一則不存在的提示。
 const TEST_SHOP_HELP=[
   {q:'① 用法',a:'切到「測試通路」→ 選開始日和結束日 → 上傳檔案 → 產生報表 → 匯出 Excel。\n跟好麻吉完全一樣，只是期間從「月份＋上下半月」變成兩個日期。'},
-  {q:'② 手續費要自己設',a:'期間旁邊有「手續費 __%」，預設 20.5%。這是這個通路專用的，改它不會影響其他通路。'},
-  {q:'③ 報表自動存雲端，不用按同步',a:'跟其他四個通路不一樣。所以在辦公室跑完，回家用筆電選同一組日期就看得到。\n⚠️ 但「手續費設定」不會自動上雲，要按「☁ 同步雲端」才會跨電腦。\n改完費率沒按同步就換電腦，報表叫得出來、費率卻是預設值，淨利會跟辦公室看到的不一樣。'},
+  {q:'② 手續費',a:'期間旁邊顯示「手續費 20.5%」。2026/11 起費率依月份自動帶入（跟其他通路同一套），這裡不能改。'},
+  {q:'③ 報表自動存雲端，不用按同步',a:'跟其他四個通路不一樣。所以在辦公室跑完，回家用筆電選同一組日期就看得到。'},
   {q:'④ 跑過的區間會自動叫出來',a:'選了日期，如果那個區間跑過，會把存的報表叫出來。沒跑過就顯示空白等你上傳。'},
   {q:'⑤ 不做跨期間比較',a:'沒有上期營收／成長比／成長分析／成長調整，那幾欄會是空的。\n要比較兩個區間的話，分別跑、看 Excel。'},
   {q:'⑥ 丟錯檔案就重新上傳覆蓋',a:'這個通路沒有清除用的按鈕。丟錯檔案的話，用同一組日期重新上傳、再產生一次報表，就會覆蓋掉舊的那份。\n（其他通路的上傳視窗有一顆清除鈕，但它只清掉「上傳的檔案紀錄」、不會刪報表 —— 要換掉一份報表一律是重傳覆蓋。）'},
@@ -4247,7 +4248,7 @@ function _splitRowsOf(shop,g){
   const b=built.find(r=>r&&r.code===g.to);
   if(!a)return {err:`這一期的報表裡找不到品號 ${g.from}`};
   if(!b)return {err:`這一期的報表裡找不到品號 ${g.to}`};
-  const P=getPlatformRate(shop);
+  const P=getPlatformRate(shop,_rateMonthOf(shop));
   const aAds=a.adsFee||0,bAds=b.adsFee||0;
   return {a,b,P,rows:[
     {label:`A ${a.code} 原始`,   name:a.name||'', after:false, v:_splitCalc(a.rev||0,          a.gross||0,          aAds,P)},
@@ -4263,7 +4264,7 @@ function renderSplitResults(){
   const shop=_splitShop;
   const rows=Array.isArray(_splitDraft)?_splitDraft:[];
   if(!shop||!rows.length){host.innerHTML='';return;}
-  const P=getPlatformRate(shop);
+  const P=getPlatformRate(shop,_rateMonthOf(shop));
   // ⚠ 費率顯示一定要走 toFixed：getPlatformRate 是 20.5/100，乘回 100 會是 20.499999999999996。
   const rateTxt=(P*100).toFixed(1);
   const cell=(v,after)=>{
@@ -5673,29 +5674,55 @@ function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el
 // ⚠ 這顆 gen-{shop} 是舊版按鈕，被 shopHTML 的 <div style="display:none"> 藏住、使用者點不到。
 //   畫面上實際那顆是 upm-gen-btn（openUploadModal / onGlobalFile 各自控制）。這裡放寬只是保持條件一致。
 function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!s.rawMobic;}
-// ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
-// 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
-const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5,[TEST_SHOP_ID]:20.5};
-function getShopRates(){return Object.assign({},SHOP_RATE_DEF,_cloudRead('ec_shop_rate')||{});}
-function saveShopRates(t){_cloudWrite('ec_shop_rate',t);}
-function getPlatformRate(shop){
-  const n=parseFloat(getShopRates()[shop]);
-  return (Number.isFinite(n)&&n>=0 ? n : 20.5)/100;
+// ── 通路平台費率：依「報表月份」生效（2026-11-09）──
+//   費率屬於通路，而且依月份生效：base＝最早的費率；changes＝從某個月（含）起改成多少（由舊到新）。
+//   🔴 改費率＝在這裡加一筆 changes（不要改 base、不要改舊的那筆）：舊月份的報表、淨利表總表、KPI 手續費估算都依各自的月份取值，
+//     加一筆只影響那個月以後。以前的「上傳視窗輸入框 → 雲端 ec_shop_rate」整家店所有月份一起改，會讓舊月份跟著跳，已停用：
+//     輸入框改成唯讀顯示；不再讀寫 ec_shop_rate，雲端若有值只 console.warn 一次、不採用。
+//   🔴 一律要傳月份（'YYYY/MM'、'YYYY-MM' 或 'YYYY-MM-DD'），沒傳或格式不對就 throw，不會默默用最新費率去算舊月份。
+//   純函式 shopRatePct 在 SHOP_RATE_PURE_BEGIN／END 之間（node 測試會擷取）。
+// SHOP_RATE_PURE_BEGIN
+const SHOP_RATE_SCHEDULE=Object.freeze({
+  '好麻吉':{base:20.5},
+  '玩樂':{base:20.5},
+  '森之旅':{base:20.5},
+  '維克':{base:17.5,changes:[{from:'2026-11',rate:20.5}]},   // 2026/11 起蝦皮對維克的收費跟其他三家相同（2026-11-09 會議）
+  [TEST_SHOP_ID]:{base:20.5},
+});
+const SHOP_RATE_FALLBACK=20.5;   // 費率表沒列的通路（同改版前 getPlatformRate 的預設）
+// 'YYYY/MM'、'YYYY-MM'、'YYYY-MM-DD'、'YYYY/MM/DD' → 'YYYY-MM'；其他 → null
+function _rateYm(x){
+  const m=/^(\d{4})[-/](\d{2})(?:[-/]\d{2})?$/.exec(String(x==null?'':x).trim());
+  return m&&+m[2]>=1&&+m[2]<=12?m[1]+'-'+m[2]:null;
 }
-function onPlatformRateChange(){
-  const el=document.getElementById('platformRate');
-  if(!el) return;
-  const shop=(typeof curShop!=='undefined'&&curShop!=='總表')?curShop:SHOPS[0].id;
-  const n=parseFloat(el.value);
-  if(!Number.isFinite(n)||n<0||n>100){
-    el.value=getShopRates()[shop];
-    if(typeof showToast==='function') showToast('費率要介於 0 到 100 之間','error');
-    return;
-  }
-  const t=getShopRates(); t[shop]=n; saveShopRates(t);
-  if(typeof renderSummary==='function') try{renderSummary();}catch(e){console.error(e);}
-  if(typeof showToast==='function') showToast(shop+' 手續費已改為 '+n+'%（記得按同步雲端）','success');
+// 某通路某月的平台費率（%）。month 不合法 ⇒ throw。
+function shopRatePct(shop,month){
+  const ym=_rateYm(month);
+  if(!ym)throw new Error('平台費率要傳月份（'+shop+'，收到 '+JSON.stringify(month)+'）');
+  const s=SHOP_RATE_SCHEDULE[shop];
+  if(!s)return SHOP_RATE_FALLBACK;
+  let r=s.base;
+  (s.changes||[]).forEach(c=>{if(ym>=c.from)r=c.rate;});
+  return r;
 }
+// SHOP_RATE_PURE_END
+let _shopRateCloudWarned=false;
+function _shopRateWarnCloud(){
+  if(_shopRateCloudWarned)return;
+  _shopRateCloudWarned=true;
+  try{const v=_cloudRead('ec_shop_rate');if(v&&typeof v==='object'&&Object.keys(v).length)console.warn('[平台費率] 雲端 ec_shop_rate 有值，但 2026-11 起已停用、不採用（費率改由程式內 SHOP_RATE_SCHEDULE 依月份決定）：',v);}catch{}
+}
+function getPlatformRate(shop,month){
+  _shopRateWarnCloud();
+  return shopRatePct(shop,month)/100;
+}
+// 這個通路目前在畫面上的月份（測試通路是日期區間，用起始日）
+function _rateMonthOf(shop){
+  const s=state[shop]||{};
+  return shop===TEST_SHOP_ID?(s.curStart||s.curMonth):s.curMonth;
+}
+// 上傳視窗費率旁的說明小字（白話）
+const SHOP_RATE_NOTE='費率依月份自動帶入；維克 2026/11 起與其他三家相同 20.5%';
 
 // ── 取得對應的「上期」區間 key ──
 function getPrevPeriodKey(shop, month, half) {
@@ -6083,7 +6110,7 @@ function confirmUnmatched(){
 }
 
 function buildShop(shop,days){
-  const s=state[shop];const PLATFORM=getPlatformRate(shop);
+  const s=state[shop];const PLATFORM=getPlatformRate(shop,_rateMonthOf(shop));   // 這一期的費率（依月份生效）
   const salesCol=s.rawMobic.length?Object.keys(s.rawMobic[0]).find(k=>k.startsWith('銷售數量')):null;
   const agg={};
   s.rawMobic.forEach(r=>{
@@ -6427,6 +6454,18 @@ function _updateUploadModalPeriod(shop){
   if(hdr)hdr.textContent=fullP?`　${fullP}`:'';
   const gen=document.getElementById('upm-gen-btn');
   if(gen)gen.textContent=shortP?`▶ 產生 ${shortP} 報表`:'▶ 產生報表';
+  _updateUploadModalRate(shop);
+}
+// 上傳視窗右上角的平台手續費：唯讀顯示「目前選的那一期」的費率（2026-11 起依月份生效，不能在這裡改）。
+//   月份還沒選（測試通路沒選日期）⇒ 顯示「—」，不猜。
+function _updateUploadModalRate(shop){
+  const el=document.getElementById('platformRate');
+  const note=document.getElementById('upm-rate-note');
+  const m=_rateMonthOf(shop);
+  let txt='—';
+  if(_rateYm(m)){try{txt=String(shopRatePct(shop,m));}catch(e){console.error(e);}}
+  if(el)el.textContent=txt;
+  if(note)note.textContent=SHOP_RATE_NOTE;
 }
 // 卡片副標：解析得出檔案期間就顯示，否則回到原本的副檔名提示。
 // ⚠ 刻意【不用警告色】：沿用 .ucard-sub 的灰字（css/profit.css 搜 `.ucard-sub`）。理由同
@@ -6451,8 +6490,6 @@ function _updateFilePeriodSubs(shop){
 function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
-  const _rEl=document.getElementById('platformRate');
-  if(_rEl) _rEl.value=getShopRates()[shop];
   document.getElementById('upm-shop-hint').textContent='目前通路：'+shop;
   _updateUploadModalPeriod(shop);   // 標題列 + 產生鈕都帶上目前期間（理由見該函式上方註解）
   // 測試通路刻意不給那顆清除鈕（2026-08-17 更新理由）。
@@ -8500,7 +8537,7 @@ function updateAdsEditPreview(){
   const newAds=parseFloat(document.getElementById('ads-edit-input').value);
   const el=document.getElementById('ads-edit-preview');
   if(isNaN(newAds)){el.innerHTML='';return;}
-  const PLATFORM=getPlatformRate(shop);
+  const PLATFORM=getPlatformRate(shop,_rateMonthOf(shop));
   const newPure=r.gross-newAds-(r.rev*PLATFORM);
   const newPureRate=r.rev>0?newPure/r.rev*100:0;
   const col=newPure>=0?'#10b981':'#ef4444';
@@ -8635,7 +8672,7 @@ function patchRow(shop,code,ov){
 
 function recalcRow(shop,code,ov){
   const built=state[shop]._built;const idx=built.findIndex(r=>r.code===code);if(idx<0)return;
-  const r=built[idx];const PLATFORM=getPlatformRate(shop);
+  const r=built[idx];const PLATFORM=getPlatformRate(shop,_rateMonthOf(shop));   // 已載入那一期的費率（依月份生效）
   // 只有廣告費可以編輯，重算相關衍生欄位
   const adsFee=ov.adsFee!==undefined?ov.adsFee:r.adsFee;
   const rev=r.rev;const gross=r.gross;
@@ -10510,7 +10547,7 @@ function editSummaryCell(rowId,shop,field,tdEl){
     saveSummaryRows(rows, { type:'edit', rowId, shop, field, value: isValid ? v : null, start: row.start, end: row.end });
     // patch cells without re-rendering
     const d=row.shops[shop]||{};
-    const rate=getPlatformRate(shop);
+    const rate=getPlatformRate(shop,row.start);   // 這一列的月份（依月份生效）
     const pure=(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
     const fmt=n=>fmtN(Math.round(n||0));
     const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
@@ -10548,14 +10585,15 @@ function renderSummary(){
   });
   const fmt=n=>fmtN(Math.round(n||0));
   const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
-  const calcPure=(d,shopId)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(shopId);
+  // 每一列用自己月份的費率（依月份生效；一列＝同一個月內的期間，取起始日的月份）
+  const calcPure=(d,shopId,row)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(shopId,row.start);
 
   const shopGroupHdr=SUMMARY_SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
   const shopSubHdr=SUMMARY_SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
 
-  const dataCells=(shopMap,editable,rowId)=>SUMMARY_SHOPS.map(s=>{
+  const dataCells=(shopMap,editable,rowId,row)=>SUMMARY_SHOPS.map(s=>{
     const d=shopMap?.[s.id]||{};
-    const p=calcPure(d,s.id);
+    const p=calcPure(d,s.id,row);
     const bl='border-left:2px solid #e5e7eb;';
     const blB='border-left:2px solid #c7d2fe;';
     const borderL=editable?bl:blB;
@@ -10594,10 +10632,10 @@ function renderSummary(){
     const delBtn=`<button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle;margin-left:4px" title="刪除">✕</button>`;
     if(full){
       return`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:#eef2ff;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:#eef2ff;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id,row)}</tr>`;
     }
     return`<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id,row)}</tr>`;
   };
 
   // 彈窗用（左側有 − 隱藏按鈕，帶 data-rid 供顯示全部用）
@@ -10609,7 +10647,7 @@ function renderSummary(){
     const hideBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 5px;line-height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0';
     const hideBtn=`<button class="sum-hide-btn" onclick="event.stopPropagation();_sumToggleRow(this)" style="${hideBtnStyle}" title="隱藏此行">−</button>`;
     const bg1=bgFull||'#eef2ff',bg2=bgNorm||'white';
-    const dataTds=dataCells(row.shops,false,row.id).replace(/<td /g,'<td class="sum-data-td" ');
+    const dataTds=dataCells(row.shops,false,row.id,row).replace(/<td /g,'<td class="sum-data-td" ');
     if(full){
       return`<tr data-rid="${row.id}" class="sum-modal-row" style="background:${bg1};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
         <td style="padding:6px 10px 6px 8px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bg1};z-index:1;text-align:left">${hideBtn}${label}</td>${dataTds}</tr>`;
@@ -11099,10 +11137,10 @@ const KPI_GROUPS=[
     commonCostPlaceholder:'照帳單填含稅金額',
     commonCostInfo:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通，整組共同費用，只扣在蝦皮小計純利。金額含稅，照帳單填。',
     // 手續費（2026-10-01）：自動預設＝實際營收 × 估算費率；存了值＝手動覆蓋；實際營收空著 → 不補（維持空，純利不變）。舊手填值的整理見 __kpiShopeeFeeMigrate。
-    //   2026-11 起估算費率＝淨利表「平台費率」（ec_shop_rate，預設 好麻吉／玩樂／森之旅 20.5%、維克 17.5%）− 5（_kpiShopeeFeeEstRate）：
+    //   2026-11 起估算費率＝淨利表平台費率（依月份生效，SHOP_RATE_SCHEDULE：好麻吉／玩樂／森之旅 20.5%；維克 2026/10 以前 17.5%、2026/11 起 20.5%）− 5（_kpiShopeeFeeEstRate）：
     //   對帳單手續費約佔含稅營收 15%，舊的 20.5% 含 5% 營業稅；營業稅現在由「稅金」欄另外扣，不能再算一次。
     autoFill:{
-      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop),desc:'手續費：從對帳單帶入＝−（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費總支付）（含稅，照進帳報表正負號；不含 AMS、不含優惠券，這兩項在各項費用）；未帶入的月份＝實際營收×估算費率（淨利表平台費率 − 5：維克 12.5%，其他 15.5%；可手動覆蓋）。對帳單手續費約佔含稅營收 15%；淨利表的 20.5% 含 5% 營業稅，營業稅已由「稅金」欄另外扣，所以估算要減 5'},
+      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop,month)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop,month),desc:'手續費：從對帳單帶入＝−（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費總支付）（含稅，照進帳報表正負號；不含 AMS、不含優惠券，這兩項在各項費用）；未帶入的月份＝實際營收×估算費率（淨利表平台費率 − 5：好麻吉／玩樂／森之旅 15.5%；維克 2026/10 以前 12.5%，2026/11 起與其他三家相同 15.5%；可手動覆蓋）。對帳單手續費約佔含稅營收 15%；淨利表的 20.5% 含 5% 營業稅，營業稅已由「稅金」欄另外扣，所以估算要減 5'},
     },
     order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','tax','_common','pure','pureRate']},
   // 2026-11-05：商城兩店「從淨利表帶入」（資料在淨利表 → 酷澎 → 訂單明細上傳；KPI 只讀同店同月合計，單向、不讀 KPI 任何格子）。
@@ -14666,7 +14704,7 @@ async function __kpiShopeeFeeMigrate(){
     group.shops.forEach(shop=>{
       const c=((d.months[m]||{}).shopee||{})[shop]; if(!c) return;
       const stored=c.fee; if(stored==null||stored==='') return;
-      const rate=_kpiShopeeFeeRate(shop), hasRev=!(c.rev==null||c.rev===''), formula=hasRev?(Number(c.rev)||0)*rate:null;
+      const rate=_kpiShopeeFeeRate(shop,m), hasRev=!(c.rev==null||c.rev===''), formula=hasRev?(Number(c.rev)||0)*rate:null;
       const v=Number(stored)||0, dNow=_kpiShopCalc(row,group,shop);
       const eq=formula!=null&&Math.abs(v-formula)<=1, isEx=ex.has(m+'|'+shop)&&formula!=null;
       const act=(eq||isEx)?'auto':'keep';
@@ -15225,6 +15263,36 @@ async function __kpiShopeeTaxInRestore(which,opts){
   if(bad.length)console.error(tag+' 讀回不一致',bad.map(x=>x.month+' '+x.shop+' '+x.field));else console.log('%c'+tag+' 已還原 '+todo.length+' 格，讀回一致','color:#16a34a;font-weight:700');
   return{ok:!bad.length,items:todo.length,bad:bad.map(x=>x.month+' '+x.shop+' '+x.field)};
 }
+// ── 平台費率依月份生效的回歸比對（只讀：不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭，不影響本機防寫物件數）──
+//   __shopRateRegressionSnap()：先用 _reportEnsure 補讀 2026-01～12 的蝦皮報表（網站自己的讀取路徑），再輸出：
+//     reports['店|YYYY/MM|半月']＝{ rate:存的費率, rows:[[品號, 存的 pureProfit, 用該期費率重算的 gross−ads−rev×費率]] }
+//     summary[列 id]＝{ start, end, 店:純利（同 renderSummary 的 calcPure） }
+//     kpi['YYYY-MM']＝{ 店:{ rev, fee, pure, pureRate } }、feeEst['YYYY-MM']＝{ 店:_kpiShopeeFeeEstRate }
+async function __shopRateRegressionSnap(){
+  const shops=['好麻吉','玩樂','維克','森之旅'],months=[];
+  for(let m=1;m<=12;m++)months.push('2026/'+String(m).padStart(2,'0'));
+  const ensure={};
+  for(const shop of shops){const r=await _reportEnsure(shop,months);ensure[shop]=r&&r.ok?'ok':'failed:'+JSON.stringify(r&&r.failed);}
+  const reports={};
+  shops.forEach(shop=>months.forEach(month=>['first','second','full'].forEach(half=>{
+    const p=lsLoad(shop,month,half);if(!p||!Array.isArray(p.built))return;
+    const rate=getPlatformRate(shop,month);
+    reports[shop+'|'+month+'|'+half]={rate:p.rate==null?null:p.rate,rows:p.built.map(r=>[r.code,r.pureProfit==null?null:r.pureProfit,(r.gross||0)-(r.adsFee||0)-(r.rev||0)*rate])};
+  })));
+  const summary={};
+  (getSummaryRows()||[]).forEach(row=>{
+    const o={start:row.start,end:row.end};
+    SUMMARY_SHOPS.forEach(s=>{const d=(row.shops||{})[s.id]||{};o[s.id]=(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(s.id,row.start);});
+    summary[row.id||(row.start+'~'+row.end)]=o;
+  });
+  const kpi={},feeEst={},g=KPI_GROUPS.find(x=>x.key==='shopee');
+  (getKpiRows()||[]).filter(r=>r&&String(r.month).startsWith('2026')).forEach(r=>{
+    const o={},f={};
+    g.shops.forEach(shop=>{const d=_kpiShopCalc(r,g,shop);o[shop]={rev:d.rev,fee:d.fee,pure:d.pure,pureRate:d.pureRate};f[shop]=_kpiShopeeFeeEstRate(shop,r.month);});
+    kpi[r.month]=o;feeEst[r.month]=f;
+  });
+  return{ensure,reports,summary,kpi,feeEst};
+}
 // ── MOMO 稅金整理（2026-10-01，稅金公式改 實際營收×5/105、改成可覆蓋的自動欄時用）──
 //   規則：存的稅金＝新公式（誤差 ≤1）→ 刪掉改自動；不相等 → 保留手動覆蓋（不改數字）；例外：2026-06 MO+ 好麻吉／森之旅手填的 0 → 刪掉改自動。
 //   另外列出「沒存稅金、靠公式算」的格子：上線時就從 ×5% 變 ×5/105（這支不寫它們，只讓你看到改前改後）。
@@ -15509,7 +15577,7 @@ function _kpiRawForCalc(raw,group,shop,row){
   Object.keys(group.autoFill||{}).forEach(f=>{
     const a=group.autoFill[f];
     if(!a.shops.includes(shop)||!(raw[f]==null||raw[f]===''))return;
-    const v=a.calc(raw,shop);if(v!=null&&!Number.isNaN(v))patch[f]=v;
+    const v=a.calc(raw,shop,row&&row.month);if(v!=null&&!Number.isNaN(v))patch[f]=v;   // 第三個參數＝KPI 月份（蝦皮手續費估算依月份取費率）
   });
   return Object.keys(patch).length?{...raw,...patch}:raw;
 }
@@ -15517,15 +15585,13 @@ function _kpiRawForCalc(raw,group,shop,row){
 //   淨利表的 20.5%／17.5% 含 5% 營業稅；KPI 營收改含稅後，營業稅由「稅金」欄另外扣，估算手續費不能再含一次。
 //   對帳單實際：手續費約佔含稅營收 15%（2026-01 好麻吉 15.3%、維克 14.5%）。
 const KPI_SHOPEE_FEE_EST_LESS=5;
-function _kpiShopeeFeeEstRate(shop){
-  return Math.max(0,_kpiShopeeFeeRate(shop)*100-KPI_SHOPEE_FEE_EST_LESS)/100;
+function _kpiShopeeFeeEstRate(shop,month){
+  return Math.max(0,_kpiShopeeFeeRate(shop,month)*100-KPI_SHOPEE_FEE_EST_LESS)/100;
 }
-// 蝦皮手續費率（小數）：淨利表的平台費率設定（getShopRates：預設＋ec_shop_rate 覆蓋），讀不到才用預設
-//   ⚠ KPI 的手續費估算改用 _kpiShopeeFeeEstRate；這支只剩 __kpiShopeeFeeMigrate（2026-10 的舊整理工具，不要再跑）用。
-function _kpiShopeeFeeRate(shop){
-  let r=null;try{r=Number((getShopRates()||{})[shop]);}catch{}
-  if(!(r>0))r=Number(SHOP_RATE_DEF[shop]);
-  return (r>0?r:20.5)/100;
+// 蝦皮手續費率（小數）：淨利表平台費率（依月份生效，shopRatePct；month＝'YYYY-MM'，沒傳就 throw）。
+//   ⚠ KPI 的手續費估算用 _kpiShopeeFeeEstRate；這支另外只給 __kpiShopeeFeeMigrate（2026-10 的舊整理工具，不要再跑）用。
+function _kpiShopeeFeeRate(shop,month){
+  return getPlatformRate(shop,month);
 }
 function _kpiIsAutoFill(group,shop,k){return !!(group.autoFill&&group.autoFill[k]&&group.autoFill[k].shops.includes(shop));}
 // ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
@@ -30504,8 +30570,7 @@ function periodRowShopeeHTML(id){
         ${months.map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||months[0])?'selected':''}>${mo}</option>`).join('')}
       </select>
       <div id="half-btns-${id}"></div>`;}
-// 測試通路：期間是任意起訖日，不是月份+半月。費率輸入也掛在這一列
-//   （不是上傳 modal 裡那顆 platformRate，理由見 onTestRateChange）。
+// 測試通路：期間是任意起訖日，不是月份+半月。手續費也顯示在這一列（2026-11 起唯讀，依開始日的月份取 SHOP_RATE_SCHEDULE，見 _testRateShow）。
 //   樣式走 css/profit.css 的 .tp-* class，不寫 inline style。
 function periodRowTestHTML(id){return`
       <span class="tp-lbl">期間</span>
@@ -30513,7 +30578,7 @@ function periodRowTestHTML(id){return`
       <span class="tp-sep">–</span>
       <input type="date" class="tp-date" id="test-end-${id}" onchange="onTestPeriodChange('${id}')">
       <span class="tp-lbl tp-lbl-gap">手續費</span>
-      <input type="number" class="tp-rate" id="test-rate-${id}" min="0" max="100" step="0.1" onchange="onTestRateChange('${id}')">
+      <span class="tp-rate tp-rate-ro" id="test-rate-${id}" title="${SHOP_RATE_NOTE}">—</span>
       <span class="tp-lbl">%</span>
       <button type="button" class="tp-info" onclick="openTestShopHelp()" title="測試通路使用注意事項：期間怎麼選、手續費要自己設、報表只存雲端不存本機">ⓘ 使用說明</button>`;}
 function periodRowHTML(id){return id===TEST_SHOP_ID?periodRowTestHTML(id):periodRowShopeeHTML(id);}
@@ -30674,6 +30739,7 @@ function onTestPeriodChange(shop){
   state[shop].curStart=a?a.value:'';
   state[shop].curEnd  =b?b.value:'';
   state[shop].days=testHasPeriod(shop)?testDays(state[shop].curStart,state[shop].curEnd):1;
+  _testRateShow(shop);
   testTryLoadSaved(shop);
 }
 // 對照組是 tryLoadSaved —— 行為刻意一致：有存檔就載入、沒有就空狀態等上傳。
@@ -30711,28 +30777,14 @@ function testInitShopUI(shop){
   const a=document.getElementById('test-start-'+shop),b=document.getElementById('test-end-'+shop);
   if(a)a.value=state[shop].curStart||'';
   if(b)b.value=state[shop].curEnd||'';
-  const r=document.getElementById('test-rate-'+shop);
-  if(r)r.value=getShopRates()[shop];
+  _testRateShow(shop);
   testTryLoadSaved(shop);
 }
-// 🔴 刻意不改 onPlatformRateChange：它寫死 getElementById('platformRate')，改成「找兩個 id」
-//    等於讓既有四家的路徑多一個分支，風險不對稱。這裡整支對稱重寫，驗證規則（0–100）與
-//    寫入路徑（getShopRates → t[shop]=n → saveShopRates）逐字比照原版。
-// ⚠ 費率存的是 ec_shop_rate 這個【整包 map】，走既有 _cloudWrite → _markPending，
-//    所以費率設定仍要按「☁ 同步雲端」才會上雲 —— 跟報表直寫是兩條不同的路，toast 要講清楚，
-//    不然使用者會以為改完費率關掉瀏覽器也還在。
-function onTestRateChange(shop){
-  const el=document.getElementById('test-rate-'+shop);
-  if(!el) return;
-  const n=parseFloat(el.value);
-  if(!Number.isFinite(n)||n<0||n>100){
-    el.value=getShopRates()[shop];
-    if(typeof showToast==='function') showToast('費率要介於 0 到 100 之間','error');
-    return;
-  }
-  const t=getShopRates(); t[shop]=n; saveShopRates(t);
-  if(state[shop]?._built?.length) testTryLoadSaved(shop);   // 重算純利（對照 onPlatformRateChange 的 renderSummary）
-  if(typeof showToast==='function') showToast(shop+' 手續費已改為 '+n+'%（報表已自動存雲端，費率設定要按「☁ 同步雲端」）','success');
+// 測試通路期間列的手續費：唯讀顯示（2026-11 起費率依月份生效、由程式決定，不再寫雲端 ec_shop_rate）。沒選開始日 ⇒「—」。
+function _testRateShow(shop){
+  const r=document.getElementById('test-rate-'+shop);if(!r)return;
+  const m=_rateMonthOf(shop);
+  r.textContent=_rateYm(m)?String(shopRatePct(shop,m)):'—';
 }
 
 function initProfitPeriodControls(){
@@ -31292,8 +31344,8 @@ Object.assign(window, {
   getEdits,getGrowthThresh,getHiddenCols,getNotes,getPeriodLabel,getPlatformRate,getPrevPeriodKey,
   getPrevPeriodMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
-  onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
-  onTestPeriodChange,onTestRateChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
+  onHalfChange,onMapFile,onMonthChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
+  onTestPeriodChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
@@ -31307,7 +31359,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,

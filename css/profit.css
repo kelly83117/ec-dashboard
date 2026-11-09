@@ -965,6 +965,11 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   cursor:pointer;
 }
 .tp-rate{width:60px;}
+/* 2026-11：手續費改成唯讀顯示（費率依月份生效、由程式決定）。去掉輸入框的外觀，只留數字。 */
+.tp-rate-ro{display:inline-block;width:auto;padding:4px 2px;background:none;border:none;cursor:default;}
+/* 上傳視窗右上角「平台手續費 X %」（唯讀）與下面那行白話說明 */
+.upm-rate-val{font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.upm-rate-note{font-size:11px;color:var(--text-muted);text-align:right;margin-top:-10px;}
 /* 期間列尾端的「ⓘ 使用說明」入口。用 <button> 不用 <span>：Tab 走得到、Enter 按得下去。
    視覺語言跟 .export-btn（⬆ 上傳檔案那排）同一套：白底 + 邊框 + 圓角，一眼看得出可點。
    但刻意小一號 —— padding / 字級 / 圓角直接抄同一列的 .tp-date / .tp-rate，
