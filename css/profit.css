@@ -2139,3 +2139,37 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .nar-ask-f{display:flex;justify-content:flex-end;margin-top:8px;}
 .nar-act button:focus-visible,.nar-all button:focus-visible,.nar-ask-f button:focus-visible,.nar-x:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px;}
 @media (max-width:640px){ .nar-tbl thead{display:none;} .nar-tbl td,.nar-tbl td.nar-shop,.nar-tbl td.nar-act{display:block;width:auto;border:0;padding:4px 0;text-align:left;} .nar-tbl tr{display:block;border-bottom:1px solid #f3f4f6;padding:6px 0;} .nar-act button:first-child{margin-left:0;} .nar-all{justify-content:flex-start;} .nar-all button:first-child{margin-left:0;} }
+
+/* ── 在架沒賣彈窗（us，js/profit.js 的 openUnsoldModal / _usRender）──
+   沿用 .ana-overlay / .ana-modal 外殼，表格寫法照 .tagfx-table；全部走 :root 變數。 */
+.us-btn{margin-left:2px;}
+.us-modal{width:1100px;max-width:96vw;}
+.us-body{padding:20px;overflow-y:auto;max-height:76vh;}
+.us-bar{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.us-month{font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:6px;}
+.us-month select{padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text);}
+.us-export{margin-left:auto;}
+.us-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;}
+.us-sum-w{font-size:13px;color:var(--text-muted);}
+.us-sum-w b{color:var(--success);}
+.us-note{margin-top:6px;font-size:12px;color:var(--text-muted);line-height:1.6;}
+.us-info{cursor:help;color:var(--primary);}
+.us-warn{margin-top:6px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--text);font-size:12px;}
+.us-grp{margin-top:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);}
+.us-grp-hd{padding:9px 12px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;}
+.us-grp-have .us-grp-hd{color:var(--success);}
+.us-grp-zero .us-grp-hd{color:var(--danger);}
+.us-grp-unknown .us-grp-hd{color:var(--text-muted);}
+.us-grp-sub{margin-left:10px;font-size:12px;font-weight:400;color:var(--text-muted);}
+.us-scroll{overflow-x:auto;border-top:1px solid var(--border);}
+.us-table{border-collapse:collapse;width:100%;font-size:12px;}
+.us-table th{background:var(--primary-soft);color:var(--text);font-weight:700;padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;}
+.us-table td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);vertical-align:top;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.us-table th.tl,.us-table td.tl{text-align:left;}
+/* 商品名稱只顯示一行，超出「…」；全名＋商品 ID 在滑鼠提示 */
+.us-table td.us-name{width:100%;max-width:0;}
+.us-name-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:200px;}
+.us-sub{font-size:11px;color:var(--warn);}
+.us-na{color:var(--text-faint);}
+.us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
+.us-empty-sm{padding:10px;border-top:1px solid var(--border);}
