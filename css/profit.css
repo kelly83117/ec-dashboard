@@ -2152,8 +2152,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;}
 .us-sum-w{font-size:13px;color:var(--text-muted);}
 .us-sum-w b{color:var(--success);}
-.us-count{margin-top:4px;font-size:13px;color:var(--text);}
 .us-note{margin-top:6px;font-size:12px;color:var(--text-muted);line-height:1.6;}
+.us-info{cursor:help;color:var(--primary);}
 .us-warn{margin-top:6px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--text);font-size:12px;}
 .us-grp{margin-top:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);}
 .us-grp-hd{padding:9px 12px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;}
@@ -2166,8 +2166,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-table th{background:var(--primary-soft);color:var(--text);font-weight:700;padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;}
 .us-table td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);vertical-align:top;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .us-table th.tl,.us-table td.tl{text-align:left;}
-.us-table td.us-name{white-space:normal;min-width:220px;max-width:360px;}
-.us-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+/* 商品名稱只顯示一行，超出「…」；全名＋商品 ID 在滑鼠提示 */
+.us-table td.us-name{width:100%;max-width:0;}
+.us-name-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:200px;}
 .us-sub{font-size:11px;color:var(--warn);}
 .us-na{color:var(--text-faint);}
 .us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}

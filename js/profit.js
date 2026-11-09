@@ -31225,7 +31225,7 @@ function _usStockMap(reps){
   const list=reps.slice().sort((a,b)=>a.month<b.month?-1:a.month>b.month?1:((_US_HALF_RANK[a.half]-_US_HALF_RANK[b.half])||(a.ts-b.ts)));
   const map={};
   list.forEach(r=>{
-    const label=_lmPeriodShort(r.month,r.half)+'（'+r.shop+'）';
+    const label=_lmPeriodShort(r.month,r.half)+'・'+r.shop+'報表';
     r.built.forEach(row=>{if(!row||!row.code||row.fromMobic===false)return;map[row.code]={stock:Number(row.stock)||0,label,name:row.name||''};});
   });
   return map;
@@ -31260,7 +31260,7 @@ function _usBuild(o){
     const name=codes.map(x=>(byCode[x]||{}).name).find(Boolean)||kn.map(x=>stock[x].name).find(Boolean)||'';
     const rev=codes.length&&o.prevRev?codes.reduce((t,x)=>t+(has(o.prevRev,x)?o.prevRev[x]:0),0):null;
     const last=(o.hist||[]).find(h=>{const v=h.items&&h.items[id];return Array.isArray(v)&&Number(v[1])>0;});
-    groups[g].push({id,codes,name,stock:st,partial:kn.length>0&&kn.length<codes.length,dates:[...new Set(kn.map(x=>stock[x].label))],rev,lastSold:last?last.ym:''});
+    groups[g].push({id,codes,name,stock:st,partial:kn.length>0&&kn.length<codes.length,dates:[...new Set(kn.map(x=>stock[x].label))],srcs:codes.map(x=>({code:x,label:has(stock,x)?stock[x].label:''})),rev,lastSold:last?last.ym:''});
   });
   const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.id<b.id?-1:a.id>b.id?1:0);
   groups.have.sort((a,b)=>(b.stock-a.stock)||byRev(a,b));
@@ -31337,40 +31337,48 @@ function _usRender(v){
     return;
   }
   const r=d.res,g=r.groups,pmm=Number(d.prevMonth.slice(5,7));
-  const head=`<div class="us-sum"><b>${mm} 月動銷率 ${r.num} / ${r.den}（${_usPct(r.num,r.den)}）</b>`+
-    `<span class="us-sum-w">若①全部各賣出 1 件，動銷率可到 <b>${_usPct(r.num+g.have.length,r.den)}</b></span></div>`+
-    `<div class="us-count">在架沒賣 ${r.unsold} 個商品 ID：① 有庫存 ${g.have.length}・② 沒庫存 ${g.zero.length}・③ 庫存不明 ${g.unknown.length}</div>`+
-    `<div class="us-note">ⓘ 可用庫存是莫筆克公司倉、報表產生當下的數字（取四家蝦皮 ${Number(d.stockMonths[0].slice(5,7))}～${mm} 月報表裡最新的一期），不是蝦皮平台上的數量；「在架」是匯出整月商品表現當下的狀態，不是月底的狀態。一個商品 ID 對到多個品號時，庫存是查得到的品號加總。</div>`;
+  // 老闆也會看，字要少：上方一行數字＋一行說明，其他說明收進 ⓘ 的滑鼠提示
+  const tip=[
+    '「在架」是匯出整月商品表現當下的狀態，不是月底的狀態。',
+    `庫存是莫筆克報表產生當下的數字，取四家蝦皮 ${Number(d.stockMonths[0].slice(5,7))}～${mm} 月報表裡最新的一期，所以可能是從其他通路的報表查到的。`,
+    '一個商品 ID 對到好幾個品號時，庫存是這些品號加總。',
+    `「上月營收」是 ${pmm} 月這個通路的營收。`,
+    `「最近有賣」往回看${d.histFrom?' '+_usYmLabel(d.histFrom)+' 起':''}已上傳的整月商品表現，看不到寫「—」。`,
+  ].join('\n');
+  const head=`<div class="us-sum"><b>${mm}月動銷率 ${_usPct(r.num,r.den)}（${r.num}/${r.den}）</b>`+
+    `<span class="us-sum-w">→ ① 全部賣出 1 件可到 <b>${_usPct(r.num+g.have.length,r.den)}</b></span></div>`+
+    `<div class="us-note">庫存＝莫筆克公司倉（全公司共用），不是蝦皮後台的數量 <span class="us-info" title="${e(tip)}">ⓘ</span></div>`;
   const warns=[];
   if(d.failed.length)warns.push(`以下報表讀取失敗：${d.failed.join('、')}。「庫存不明」不代表沒有庫存，請稍後重開。`);
   if(d.masterEmpty)warns.push(`讀不到 ${shop} 的洞察表母表，商品 ID 對不到品號（全部列在③）。`);
   if(!d.prevRev)warns.push(`${shop} 沒有 ${pmm} 月的報表，「${pmm} 月營收」一律顯示 —。`);
   if(d.histFailed.length)warns.push(`${d.histFailed.map(_usYmLabel).join('、')} 的整月商品表現讀取失敗，「最近有賣」可能不準。`);
   const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
-  const histNote=`<div class="us-note">「最近有賣」往回看 ${d.histFrom?_usYmLabel(d.histFrom)+' 起':'前 '+_US_LOOKBACK+' 個月'}已上傳的整月商品表現，看不到寫「—」。</div>`;
   const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
-  const row=x=>`<tr><td class="tl us-name">${x.name?e(x.name):'<span class="us-na">（母表沒有這個商品 ID）</span>'}</td>`+
+  // 商品 ID、庫存查自不佔欄位，放滑鼠提示
+  const nameTip=x=>(x.name||'（母表沒有這個商品 ID）')+'\n商品 ID：'+x.id;
+  const stockTip=x=>!x.srcs.length?'對不到品號':x.srcs.length===1?(x.srcs[0].label?'查自：'+x.srcs[0].label:'四家報表都查不到'):
+    x.srcs.map(s=>s.code+(s.label?' 查自：'+s.label:'：四家報表都查不到')).join('\n');
+  const row=x=>`<tr><td class="tl us-name" title="${e(nameTip(x))}"><div class="us-name-txt">${x.name?e(x.name):'<span class="us-na">（母表沒有這個商品 ID）</span>'}</div></td>`+
     `<td class="tl">${x.codes.length?x.codes.map(e).join('<br>'):'<span class="us-na">—</span>'}</td>`+
-    `<td class="tl us-mono">${e(x.id)}</td>`+
-    `<td>${num(x.stock)}${x.partial?'<div class="us-sub">部分品號查不到</div>':''}</td>`+
-    `<td class="tl">${x.dates.length?x.dates.map(e).join('<br>'):'<span class="us-na">—</span>'}</td>`+
+    `<td title="${e(stockTip(x))}">${num(x.stock)}${x.partial?'<div class="us-sub">部分品號查不到</div>':''}</td>`+
     `<td>${num(x.rev)}</td>`+
     `<td>${x.lastSold?_usYmLabel(x.lastSold):'<span class="us-na">—</span>'}</td></tr>`;
-  const th=`<tr><th class="tl">商品名稱</th><th class="tl">品號</th><th class="tl">蝦皮商品 ID</th><th>莫筆克可用庫存</th><th class="tl">庫存資料日期</th><th>${pmm} 月營收</th><th>最近有賣</th></tr>`;
+  const th=`<tr><th class="tl">商品名稱</th><th class="tl">品號</th><th>庫存</th><th title="${pmm} 月這個通路的營收">上月營收</th><th>最近有賣</th></tr>`;
   const grps=_US_GROUPS.map(G=>{
     const list=g[G.key];
-    return `<details class="us-grp us-grp-${G.key}" open><summary class="us-grp-hd">${G.label}（${list.length}）<span class="us-grp-sub">${G.sub}</span></summary>`+
+    return `<details class="us-grp us-grp-${G.key}"${G.key==='have'?' open':''}><summary class="us-grp-hd">${G.label}（${list.length}）<span class="us-grp-sub">${G.sub}</span></summary>`+
       (list.length?`<div class="us-scroll"><table class="us-table"><thead>${th}</thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<div class="us-empty us-empty-sm">沒有</div>`)+
       `</details>`;
   }).join('');
-  body.innerHTML=bar+head+warnHtml+grps+histNote;
+  body.innerHTML=bar+head+warnHtml+grps;
 }
+// 匯出不精簡：畫面收進滑鼠提示的商品 ID、庫存查自都在這裡
 function unsoldExportExcel(){
   const d=_usView.data;if(!d)return;
-  const pmm=Number(d.prevMonth.slice(5,7));
-  const aoa=[['分組','商品名稱','品號','蝦皮商品 ID','莫筆克可用庫存','庫存資料日期',pmm+' 月營收','最近有賣']];
+  const aoa=[['分組','商品名稱','品號','蝦皮商品 ID','庫存','庫存查自','上月營收','最近有賣']];
   _US_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label,x.name||'（母表沒有這個商品 ID）',x.codes.join('、'),x.id,
-    x.stock==null?'':x.stock,x.dates.join('、'),x.rev==null?'':Math.round(x.rev),x.lastSold?_usYmLabel(x.lastSold):''])));
+    x.stock==null?'':x.stock,x.srcs.length>1?x.srcs.map(s=>s.code+'：'+(s.label||'查不到')).join('、'):x.dates.join('、'),x.rev==null?'':Math.round(x.rev),x.lastSold?_usYmLabel(x.lastSold):''])));
   const name='在架沒賣_'+String(d.shop).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym;
   if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){
     const esc=x=>{const t=String(x==null?'':x);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
