@@ -2184,22 +2184,60 @@ function _hlTileHtml(r, prev, rank, open, snap) {
         : r.score == null
         ? `<div class="hl-tile-score hl-tile-score-none"><span class="hl-tile-noscore">未評分</span><span class="hl-tile-why">${escapeHtml(_hlNoScoreWhy(r, healthRulesForMonth(r.month, snap && snap.healthRuleVersions)))}</span></div>`
         : `<div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>`}
+      ${_hlTileAmtHtml(r, snap)}
       ${_hlTilePartsHtml(r)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
 }
-// 卡片分數下面一行（v5）：「純利 80 · 動銷 60」；動銷率在等商品層時「純利 80 · 動銷 載入中…」；
-//   只有純利率算分時寫出原因（_hlPureOnlyWhy）：「純利 80・動銷率標準未設定，暫時只看純利率」「純利 80・動銷率尚未上傳，暫時只看純利率」。
+// 卡片金額列（2026-11-10，老闆要在卡片上直接看到營收、純利）：只顯示、不計分，不進 data-hl-fp。
+//   數字＝純利率用的同一格 KPI（_hlCell 的 rev＝實際營收、pure＝_kpiShopPureAdj），所以 純利 ÷ 營收＝卡片上的純利率；不多讀任何資料。
+//   KPI 填完、不是還沒開始（beforeSince）、不是已關站才顯示，否則「—」（沒填完時純利可能被高估）。
+//   絕對值未滿 1 萬寫整數加千分位（908、−3,335），1 萬以上寫「X.X 萬」；滑鼠提示完整金額（NT$1,286,432）。
+//   下面小字「↑ 上月 X」同三個比率（方向用顯示的字比，看起來一樣就是 →）；上月不能顯示就空行，卡片才等高。
+//   營收未滿 minRev：兩格灰字（同比率灰字規則，負號照留、不上紅色）；純利是負數：紅字。
+function _hlAmtOk(c) { return !!c && !c.beforeSince && !c.closed && _hlFillDone(c); }
+function _hlFmtAmt(v) {
+  const a = Math.round(Math.abs(v)), s = v < 0 && a > 0 ? '−' : '';
+  if (a < 10000) return s + a.toLocaleString('en-US');
+  return s + (Math.round(Math.abs(v) / 1000) / 10).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' 萬';
+}
+function _hlFmtAmtFull(v) { const a = Math.round(Math.abs(v)); return (v < 0 && a > 0 ? '−' : '') + 'NT$' + a.toLocaleString('en-US'); }
+function _hlTileAmtHtml(r, snap) {
+  const ch = HEALTH_CHANNELS.find(x => x.id === r.id);
+  const c = ch && _hlIsYm(r.month) ? _hlCell(snap, r.month, ch) : null;
+  const ok = _hlAmtOk(c);
+  const p = ok ? _hlCell(snap, _hlAddMonth(r.month, -1), ch) : null, pOk = _hlAmtOk(p);
+  const small = ok && !(c.rev >= healthRulesForMonth(r.month, snap && snap.healthRuleVersions).minRev);
+  const why = !c ? '這個月沒有 KPI 資料' : c.closed ? '已關站' : c.beforeSince ? '這個月還沒有 KPI' : 'KPI 還沒填完，金額不顯示';
+  const cell = (label, key) => {
+    const k = `<span class="hl-tile-amt-k">${label}</span>`;
+    if (!ok) return `<span class="hl-tile-amt-c">${k}<span class="hl-tile-amt-v hl-tile-amt-none" title="${escapeHtml(why)}">—</span><span class="hl-tile-amt-p" aria-hidden="true"></span></span>`;
+    const v = Number(c[key]) || 0, txt = _hlFmtAmt(v);
+    let sub = '<span class="hl-tile-amt-p" aria-hidden="true"></span>';
+    if (pOk) {
+      const pv = Number(p[key]) || 0, ptxt = _hlFmtAmt(pv);
+      const dir = txt === ptxt ? 'flat' : v > pv ? 'up' : 'down';
+      sub = `<span class="hl-tile-amt-p hl-ov-${dir}" title="上月 ${escapeHtml(_hlFmtAmtFull(pv))}">${dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→'} 上月 ${escapeHtml(ptxt)}</span>`;
+    }
+    const cls = small ? ' hl-tile-amt-ref' : (v < 0 && txt.charAt(0) === '−' ? ' hl-tile-amt-neg' : '');
+    const tip = _hlFmtAmtFull(v) + (small ? `（營收未滿 ${_hlFmtMoney(healthRulesForMonth(r.month, snap && snap.healthRuleVersions).minRev)}，僅供參考）` : '');
+    return `<span class="hl-tile-amt-c">${k}<span class="hl-tile-amt-v${cls}" title="${escapeHtml(tip)}">${escapeHtml(txt)}</span>${sub}</span>`;
+  };
+  return `<div class="hl-tile-amt">${cell('營收', 'rev')}${cell('純利', 'pure')}</div>`;
+}
+// 卡片分數下面一行：「分數：純利率 80 · 動銷率 60」（2026-11-10 起寫全名加「分數：」，免得跟金額列的「純利」混淆）；
+//   動銷率在等商品層時「分數：純利率 80 · 動銷率 載入中…」；
+//   只有純利率算分時寫出原因（_hlPureOnlyWhy）：「分數：純利率 80・動銷率標準未設定，暫時只看純利率」。
 //   純利率沒有分數的卡片也留這一行的位置，卡片才等高。
 function _hlTilePartsHtml(r) {
   const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
   if (!pure || pure.status !== 'ok') return '<div class="hl-tile-parts" aria-hidden="true"></div>';
   const waitTxt = { loading: '載入中…', notLoaded: '未載入', timeout: '載入逾時' };
-  const right = st && st.status === 'ok' ? `${st.short} ${st.score}`
-    : st && st.lines && waitTxt[st.status] ? `${st.short} ${waitTxt[st.status]}` : null;
-  // 兩段各自不斷行：寬的卡片一行放完，窄的卡片在「，」後面換行（不會只剩「純利率」掉到第二行）
-  if (right == null) return `<div class="hl-tile-parts hl-tile-parts-why"><span>${escapeHtml(`${pure.short} ${pure.score}・${_hlPureOnlyWhy(r)}，`)}</span><span>${escapeHtml(`暫時只看${pure.label}`)}</span></div>`;
-  return `<div class="hl-tile-parts">${escapeHtml(pure.short)} ${pure.score} · ${escapeHtml(right)}</div>`;
+  const right = st && st.status === 'ok' ? `${st.label} ${st.score}`
+    : st && st.lines && waitTxt[st.status] ? `${st.label} ${waitTxt[st.status]}` : null;
+  // 三段各自不斷行：寬的卡片一行放完，窄的卡片在「・」「，」後面換行（不會只剩「純利率」掉到下一行）
+  if (right == null) return `<div class="hl-tile-parts hl-tile-parts-why"><span>${escapeHtml(`分數：${pure.label} ${pure.score}・`)}</span><span>${escapeHtml(`${_hlPureOnlyWhy(r)}，`)}</span><span>${escapeHtml(`暫時只看${pure.label}`)}</span></div>`;
+  return `<div class="hl-tile-parts">分數：${escapeHtml(pure.label)} ${pure.score} · ${escapeHtml(right)}</div>`;
 }
 // 只看純利率的原因（給不懂系統的人看）：「動銷率標準未設定」「動銷率尚未上傳」「動銷率資料不足」…（狀態字同 _HL_STATUS_TEXT）
 function _hlPureOnlyWhy(r) {

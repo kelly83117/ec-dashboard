@@ -8,6 +8,7 @@
     --sidebar-muted: #94a3b8;
     --primary: #4f46e5;
     --primary-soft: #eef2ff;
+    --hl-amt-bg: var(--bg);   /* 通路健檢卡片金額列的淺底（只引用 --bg，不改底色） */
     --primary-dark: #4338ca;
     --border: #e5e7eb;
     --text: #111827;
@@ -2789,7 +2790,7 @@
 .hl-std-hist-sub { font-size: 11px; color: var(--text-muted); }
 .hl-std-hist-info { cursor: help; }
 /* 營收未滿 3 萬的灰字參考數字：評分標準視窗「近 6 月」、卡片底部三欄（.hl-tile-met-ref，下面一行「僅供參考」）、指標逐月變化表（.hl-mc-ref）共用 */
-.hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v, .hl-mt-tbl .hl-mc-ref { font-weight: 400; color: var(--text-muted); }
+.hl-std-hist-ref .hl-std-hist-avg, .hl-tile-met-ref .hl-tile-met-v, .hl-mt-tbl .hl-mc-ref, .hl-tile-amt-v.hl-tile-amt-ref { font-weight: 400; color: var(--text-muted); }
 .hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
 .hl-std-err:empty { display: none; }
 .hl-std-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; }
@@ -2876,9 +2877,19 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-todo-warn:hover, .hl-todo-ok:hover { text-decoration: underline; text-underline-offset: 2px; }
 .hl-todo-warn:focus-visible, .hl-todo-ok:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-todo-wait { color: var(--text-muted); }
-/* v5：分數下面一行「純利 80 · 動銷 60」／「純利 80 · 只看純利率」（沒有總分的卡片也留這一行的高度，卡片才一樣高） */
+/* 卡片金額列（2026-11-10）：分數下方淺底兩格「營收／純利」，數字同三欄大字；下面「↑ 上月 X」同三欄小字 */
+.hl-tile-amt { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 6px; padding: 4px 8px; background: var(--hl-amt-bg); border-radius: var(--radius); }
+.hl-tile-amt-c { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.hl-tile-amt-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+.hl-tile-amt-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; cursor: help; }
+.hl-tile-amt-v.hl-tile-amt-none { font-weight: 400; color: var(--text-muted); cursor: default; }
+.hl-tile-amt-v.hl-tile-amt-neg { color: var(--danger); }
+.hl-tile-amt-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: nowrap; }
+.hl-tile-amt-p.hl-ov-up { color: var(--success); }
+.hl-tile-amt-p.hl-ov-down { color: var(--danger); }
+/* 分數下面一行「分數：純利率 80 · 動銷率 60」（沒有總分的卡片也留這一行的高度，卡片才一樣高） */
 .hl-tile-parts { min-height: 16px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
-/* 只看純利率時寫出原因（「純利 80・動銷率標準未設定，暫時只看純利率」）：字比較長，允許換行 */
+/* 只看純利率時寫出原因（「分數：純利率 80・動銷率標準未設定，暫時只看純利率」）：字比較長，允許在段與段之間換行 */
 .hl-tile-parts.hl-tile-parts-why { white-space: normal; }
 .hl-tile-parts-why > span { white-space: nowrap; }
 /* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
