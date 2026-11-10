@@ -2839,8 +2839,8 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-group-hd { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--text); }
 /* 組內卡片：每張最小 205px（組寬 215 × 張數 + 間距，正好一張一欄）；卡寬要放得下三欄「↑ 上月 22.2%」不截斷；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。同一排卡片等高 */
 .hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 10px; align-items: stretch; }
-/* 卡片四列（名稱／分數一行／金額／三欄）用 subgrid：同一排卡片的每一列一樣高，金額列與三欄自然對齊（名稱換行時整排一起變高） */
-.hl-tile { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
+/* 卡片三列（名稱＋分數／金額／三欄；2026-11-10 統一版型拿掉「分數：…」那列）用 subgrid：同一排卡片的每一列一樣高，金額列與三欄自然對齊（名稱換行時整排一起變高） */
+.hl-tile { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
 .hl-tile:hover { border-color: var(--primary); }
 .hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
@@ -2853,12 +2853,18 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile-hd-r > .hl-tile-delta { grid-column: 2; grid-row: 2; justify-self: end; min-height: 15px; line-height: 15px; }
 .hl-tile-hd-r .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 48px; padding: 2px 8px; font-size: 22px; }
 .hl-tile-hd-r .hl-score-wait { font-size: 14px; }
-.hl-tile-noscore { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--text-muted); }
+/* 沒分數：右上角灰字簡短原因（標準未設定／營收未滿 3 萬…），滑鼠提示完整說明 */
+.hl-tile-noscore { font-size: 12px; line-height: 20px; font-weight: 600; color: var(--text-muted); cursor: help; }
 /* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「▲ 上月 x%」（灰字、只有三角形上色）（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
    卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「▼ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
 .hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; align-self: start; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
 .hl-tile-met { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
 .hl-tile-met-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; cursor: help; }
+/* 小標＋分數 chip 同一行、不換行；chip 顏色＝分數徽章同一套燈號（.hl-l-green／yellow／red／none） */
+/*   三欄每欄約 64px：小標加 chip 要放得下「動銷率 100分」→ 三欄小標一律 10px（同一列字級一致）、chip 左右內距 2px */
+.hl-tile-met-kr { display: flex; align-items: center; gap: 2px; min-width: 0; white-space: nowrap; }
+.hl-tile-met-kr .hl-tile-met-k { font-size: 10px; }
+.hl-tile-chip { flex: 0 0 auto; padding: 0 2px; border-radius: var(--radius-sm); font-size: 9px; line-height: 13px; font-weight: 700; cursor: help; }
 .hl-tile-met-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; }
 .hl-tile-met-off .hl-tile-met-v { font-size: 13px; line-height: 18px; font-weight: 400; color: var(--text-muted); white-space: normal; }
 .hl-tile-met-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: normal; word-break: keep-all; }
@@ -2882,10 +2888,6 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile-tri { margin-right: 2px; font-size: 8px; vertical-align: 1px; }
 .hl-tile-tri-up { color: var(--success); }
 .hl-tile-tri-down { color: var(--danger); }
-/* 第二列：靠右、灰色小字、只佔一行（放不下以 … 收尾，完整文字在 title）；沒內容也留一行高，卡片才一樣高 */
-.hl-tile-parts { min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 空的佔位（只看純利率、商品層載入中…）：自己不撐高；同一排有別張卡有字時，subgrid 讓這一列跟著留一行高，金額列照樣對齊 */
-.hl-tile-parts:empty { min-height: 0; }
 /* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
 .hl-score-tbl { margin-top: 8px; }
 .hl-score-tbl .hl-tiers { white-space: normal; }
