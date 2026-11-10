@@ -2147,7 +2147,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .nar-act button:focus-visible,.nar-all button:focus-visible,.nar-ask-f button:focus-visible,.nar-x:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px;}
 @media (max-width:640px){ .nar-tbl thead{display:none;} .nar-tbl td,.nar-tbl td.nar-shop,.nar-tbl td.nar-act{display:block;width:auto;border:0;padding:4px 0;text-align:left;} .nar-tbl tr{display:block;border-bottom:1px solid #f3f4f6;padding:6px 0;} .nar-act button:first-child{margin-left:0;} .nar-all{justify-content:flex-start;} .nar-all button:first-child{margin-left:0;} }
 
-/* ── 在架沒賣彈窗（us，js/profit.js 的 openUnsoldModal / _usRender）──
+/* ── 零動銷彈窗（us，原名在架沒賣；蝦皮 js/profit.js 的 openUnsoldModal / _usRender，MOMO 的 openZeroSalesModal / _mzRender 共用）──
    沿用 .ana-overlay / .ana-modal 外殼，表格寫法照 .tagfx-table；全部走 :root 變數。 */
 .us-btn{margin-left:2px;}
 .us-modal{width:1100px;max-width:96vw;}
@@ -2177,6 +2177,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-table td.us-name{width:100%;max-width:0;}
 .us-name-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:200px;}
 .us-sub{font-size:11px;color:var(--warn);}
+.us-sub-m{margin-left:2px;font-size:11px;color:var(--text-muted);}   /* MOMO：×20% 後是 0、公司倉還有貨 */
 .us-na{color:var(--text-faint);}
 .us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
 .us-empty-sm{padding:10px;border-top:1px solid var(--border);}

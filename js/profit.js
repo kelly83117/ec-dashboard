@@ -194,8 +194,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   </div>
   <div class="ana-overlay" id="us-modal-overlay" onclick="if(event.target===this)closeUnsoldModal()">
     <div class="ana-modal us-modal">
-      <div class="ana-modal-hdr"><span id="us-modal-title">🎯 在架沒賣</span><button class="ana-close-btn" onclick="closeUnsoldModal()">✕</button></div>
+      <div class="ana-modal-hdr"><span id="us-modal-title">🎯 零動銷</span><button class="ana-close-btn" onclick="closeUnsoldModal()">✕</button></div>
       <div class="ana-modal-body us-body" id="us-modal-body"></div>
+    </div>
+  </div>
+  <div class="ana-overlay" id="mz-modal-overlay" onclick="if(event.target===this)closeZeroSalesModal()">
+    <div class="ana-modal us-modal">
+      <div class="ana-modal-hdr"><span id="mz-modal-title">🎯 零動銷</span><button class="ana-close-btn" onclick="closeZeroSalesModal()">✕</button></div>
+      <div class="ana-modal-body us-body" id="mz-modal-body"></div>
     </div>
   </div>
   <div class="ana-overlay" id="tagfx-modal-overlay" onclick="if(event.target===this)closeTagFxModal()">
@@ -4695,7 +4701,7 @@ function shopHTML(shop){return`
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
       <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
       <button class="col-pick-btn tagfx-btn" onclick="openTagFxModal('${shop}')">📈 標籤成效</button>
-      ${['好麻吉','玩樂','森之旅','維克'].includes(shop)?`<button class="col-pick-btn us-btn" onclick="openUnsoldModal('${shop}')">🎯 在架沒賣</button>`:''}
+      ${['好麻吉','玩樂','森之旅','維克'].includes(shop)?`<button class="col-pick-btn us-btn" onclick="openUnsoldModal('${shop}')">🎯 零動銷</button>`:''}
       ${SPLIT_SHOPS.includes(shop)?`<button class="col-pick-btn" id="split-btn-${shop}" onclick="openSplitModal('${shop}')">⚖ 拆分試算</button>`:''}
     </div>
     <div id="tbl-${shop}">
@@ -15332,7 +15338,7 @@ async function __shopRateRegressionSnap(){
   });
   return{ensure,reports,summary,kpi,feeEst};
 }
-// ── 蝦皮「在架沒賣」彈窗的回歸比對（只讀：不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭，不影響本機防寫物件數）──
+// ── 蝦皮「零動銷」彈窗（原名在架沒賣）的回歸比對（只讀：不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭，不影響本機防寫物件數）──
 //   __unsoldRegressionSnap()：rate＝__shopRateRegressionSnap()（報表各列純利、總表、KPI）；
 //     perf['店|YYYY-MM']＝{ normal, soldNormal, unsoldByItems }（整月商品表現 counts，以及用 items 重算的正常沒賣數；健檢的蝦皮動銷率只讀 counts）
 //     health＝__healthRegressionSnap()（有的話；要先進過通路健檢頁）
@@ -21310,6 +21316,7 @@ function momoProfitTableHTML(shop){
       <span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="momo-filter-chip-${shop}" class="mm-chip${momoFilterActiveCount(shop)?' on':''}" style="${momoFilterActiveCount(shop)?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':''}" onclick="momoOpenFilterPanel('${shop}',this)">🏷 標籤 / 篩選${momoFilterActiveCount(shop)?'（'+momoFilterActiveCount(shop)+'）':''}</button></span>
       <span id="momo-filter-info-${shop}" style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:8px;white-space:nowrap"></span>
       <button class="mm-chip" onclick="momoOpenHierarchy('${shop}')">📊 階層圖</button>
+      ${_MZ_SHOPS.includes(shop)?`<button class="mm-chip" onclick="openZeroSalesModal('${shop}')" title="選定月份在架、整月沒有賣出的商品">🎯 零動銷</button>`:''}
       <span class="col-picker-wrap" style="position:relative">
         <button class="mm-chip" onclick="momoOpenColPicker('${shop}',this)">☰ 欄位</button>
       </span>
@@ -21358,6 +21365,13 @@ function momoPrevPeriodKey(periodKey){
   let y=+m[1], mo=+m[2]-1; if(mo<1){ mo=12; y--; }
   return y+'-'+String(mo).padStart(2,'0')+'-'+m[3];
 }
+// 「本期有銷售」的唯一判斷：grossQty（C1105 訂單數，賣出後全退仍算有動；沒有就用 qty）>0，或營收不是 0。
+//   動銷率（momoPeriodTotals / momoTotalsFromRows）、零動銷清單（_mzBuild）、零動銷標籤（momoComputeTags）都用這支，改一處全部跟著變。
+function momoSoldInPeriod(a){
+  if(!a) return false;
+  const g=(a.grossQty!=null?a.grossQty:a.qty);
+  return g>0 || Math.abs(a.revenue)>0.5;
+}
 // 某期別的總覽合計（全商品、含已下架，反映該期實際生意；加權毛利率=Σ淨利÷Σ營收）
 function momoPeriodTotals(shop, periodKey){
   if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0, revMiss:0, revMissQty:0};
@@ -21374,7 +21388,7 @@ function momoPeriodTotals(shop, periodKey){
     const a=momoAggregatePeriods(p, keys, shop, {lean:true});   // 彙總只讀 rev/profit/qty/covered/missCost，不需 listPrice/latestSale → lean 跳過逐SKU掃描熱點（MO+麻吉 每次 ~3s→~40ms；趨勢圖 ×32 次是通路總覽卡頓主因）
     // 動銷/計入判定用 grossQty(C1105訂單數，賣出後全退仍算有動)：讓動銷率不因「銷量改用對帳數量」而變動；qty 總和才是顯示銷量(對帳數量)
     const g=(a.grossQty!=null?a.grossQty:a.qty);
-    const active = g>0 || Math.abs(a.revenue)>0.5;   // 本期有銷售
+    const active = momoSoldInPeriod(a);   // 本期有銷售（判斷共用 momoSoldInPeriod：動銷率、零動銷清單、零動銷標籤同一條）
     if(isActive || active) activeTotal++;   // 動銷率分母＝目前上架 ∪ 本期有銷售（賣過卻已下架的也算現役池；只算「目前上架」會漏掉這批）
     if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; soldActive++;   // 分子＝本期有銷售（不論上下架）
       cost+=Number(a.cost)||0; if(a.reconciled===false) unreconciled++;
@@ -21399,7 +21413,7 @@ function momoTotalsFromRows(rows){
   rows.forEach(r=>{
     const isActive=r.discontinued!==true;
     const g=(r.grossQty!=null?r.grossQty:r.qty);
-    const active=g>0 || Math.abs(r.revenue)>0.5;   // 本期有銷售
+    const active=momoSoldInPeriod(r);   // 本期有銷售（同 momoPeriodTotals）
     if(isActive || active) activeTotal++;   // 分母＝目前上架 ∪ 本期有銷售（口徑同 momoPeriodTotals）
     if(active){ any=true; rev+=r.revenue||0; revBase+=(r.revenueAB!=null?r.revenueAB:(r.revenue||0)); profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } soldActive++;   // 分子＝本期有銷售（不論上下架）
       if(g>0 && Math.abs(r.revenue)<0.5){ revMiss++; revMissQty+=g; } }
@@ -23161,7 +23175,7 @@ function momoComputeTags(shop, periodKey){
   const R=all.map(p=>{
     const a=momoAggregatePeriods(p, keys, shop);
     const prev=priorKeys?momoAggregatePeriods(p, priorKeys, shop):null;
-    return {sku:p.sku, p, a, prev, active:p.discontinued!==true, sold:(a.grossQty>0||Math.abs(a.revenue)>0.5)};
+    return {sku:p.sku, p, a, prev, active:p.discontinued!==true, sold:momoSoldInPeriod(a)};
   });
   const add=(sku,k)=>{ if(!sku) return; (bySku[sku]=bySku[sku]||[]).push(k); counts[k]++; };
   // 流量類：母體=有 S1103 瀏覽量且成交率可算的商品。相對排名 pctile。
@@ -31301,11 +31315,11 @@ function _stCellSync(shop){
   const c=document.getElementById('kv-st-cmp');
   if(c)c.innerHTML=v.cmp?`<span class="kv-st-d${v.dir==='up'||v.dir==='down'?' kv-st-'+v.dir:''}">${v.cmp}</span>${v.vs?`<span class="kv-st-vs">${v.vs}</span>`:''}`:'';
 }
-// ══════ 「🎯 在架沒賣」彈窗（蝦皮四家；塊 A，2026-11-09）══════
+// ══════ 「🎯 零動銷」彈窗（蝦皮四家；塊 A，2026-11-09 上線時叫「在架沒賣」，2026-11-10 改名；MOMO 版見 openZeroSalesModal）══════
 //   列出「在架但這個月沒賣出」的商品，給老闆救動銷率用。
 //   🔴 純讀取：不寫雲端、不寫 localStorage、不進 built / lsSave / 推送；也不碰 _stCache（頂端動銷率格照舊）。
 //   資料：
-//   ① 整月商品表現 shopee_perf_month（__cloudShopeePerf.getDoc）：狀態 'N'（正常）而且數量不大於 0＝在架沒賣。
+//   ① 整月商品表現 shopee_perf_month（__cloudShopeePerf.getDoc）：狀態 'N'（正常）而且數量不大於 0＝零動銷。
 //      口徑同健檢的蝦皮動銷率（counts.normal − counts.soldNormal，marketing.js insPerfMonthFromRows 算 counts 的同一條規則），以商品 ID 計。
 //   ② 洞察表母表 ec.insight_{店}_master.byCode{品號:{id,name}}：用商品 ID 反查品號，一個 ID 可能對到多個品號。
 //   ③ 可用庫存：四家蝦皮〔前一個月, 這個月〕所有報表的 built[].stock（莫筆克銷售分析「可用庫存」，公司倉、全公司共用）。
@@ -31479,7 +31493,7 @@ function _usRender(v){
   const body=document.getElementById('us-modal-body'),title=document.getElementById('us-modal-title');
   if(!body)return;
   const shop=_usView.shop,ym=_usView.ym,e=escapeHtmlLike,mm=Number(ym.slice(5,7));
-  if(title)title.textContent='🎯 在架沒賣｜'+shop;
+  if(title)title.textContent=_usYmLabel(ym)+' 零動銷商品（在架但沒賣出）｜'+shop;
   const pm=v.pm||{};
   const opts=v.months.map(m=>{
     const s=pm[m]&&pm[m].state,tag=!pm[m]||s==='loading'?'':s==='ok'?'':s==='none'?'（未上傳）':'（讀取失敗）';
@@ -31492,7 +31506,7 @@ function _usRender(v){
   const cur=pm[ym];
   if(!d){
     if(cur&&cur.state==='none'){
-      body.innerHTML=bar+`<div class="us-empty">${_usYmLabel(ym)} 還沒有上傳整月商品表現，所以列不出在架沒賣的商品。<br>`+
+      body.innerHTML=bar+`<div class="us-empty">${_usYmLabel(ym)} 還沒有上傳整月商品表現，所以列不出零動銷商品。<br>`+
         `請到「洞察表」切到 ${e(shop)}，在上傳視窗的「整月商品表現（健檢用）」卡片，上傳蝦皮賣家中心匯出的 ${mm} 月整月商品表現檔（檔名要是 ${mm} 月 1 號到月底）。</div>`;
     }else{
       body.innerHTML=bar+`<div class="us-empty">${_usYmLabel(ym)} 的整月商品表現讀取失敗（這不代表沒有上傳）。<br><button class="col-pick-btn" onclick="unsoldReload()">重試</button></div>`;
@@ -31501,13 +31515,7 @@ function _usRender(v){
   }
   const r=d.res,g=r.groups,pmm=Number(d.prevMonth.slice(5,7));
   // 老闆也會看，字要少：上方一行數字＋一行說明，其他說明收進 ⓘ 的滑鼠提示
-  const tip=[
-    '「在架」是匯出整月商品表現當下的狀態，不是月底的狀態。',
-    `庫存是莫筆克報表產生當下的數字，取四家蝦皮 ${Number(d.stockMonths[0].slice(5,7))}～${mm} 月報表裡最新的一期，所以可能是從其他通路的報表查到的。`,
-    '一個商品 ID 對到好幾個品號時，庫存是這些品號加總。',
-    `「上月營收」是 ${pmm} 月這個通路的營收。`,
-    `「最近有賣」往回看${d.histFrom?' '+_usYmLabel(d.histFrom)+' 起':''}已上傳的整月商品表現，看不到寫「—」。`,
-  ].join('\n');
+  const tip=_zeroTip('shopee',{prevMonthNo:pmm,stockFrom:Number(d.stockMonths[0].slice(5,7)),stockTo:mm,histFrom:d.histFrom?_usYmLabel(d.histFrom):''});   // 句子跟 MOMO 版共用
   const head=`<div class="us-sum"><b>${mm}月動銷率 ${_usPct(r.num,r.den)}（${r.num}/${r.den}）</b>`+
     `<span class="us-sum-w">→ ① 全部賣出 1 件可到 <b>${_usPct(r.num+g.have.length,r.den)}</b></span></div>`+
     `<div class="us-note">庫存＝莫筆克公司倉（全公司共用），不是蝦皮後台的數量 <span class="us-info" title="${e(tip)}">ⓘ</span></div>`;
@@ -31542,19 +31550,8 @@ function unsoldExportExcel(){
   const aoa=[['分組','商品名稱','品號','蝦皮商品 ID','庫存','庫存查自','上月營收','最近有賣']];
   _US_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label,x.name||'（母表沒有這個商品 ID）',x.codes.join('、'),x.id,
     x.stock==null?'':x.stock,x.srcs.length>1?x.srcs.map(s=>s.code+'：'+(s.label||'查不到')).join('、'):x.dates.join('、'),x.rev==null?'':Math.round(x.rev),x.lastSold?_usYmLabel(x.lastSold):''])));
-  const name='在架沒賣_'+String(d.shop).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym;
-  if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){
-    const esc=x=>{const t=String(x==null?'':x);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
-    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+aoa.map(r=>r.map(esc).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download=name+'.csv';
-    document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
-    if(typeof showToast==='function')showToast('Excel 元件沒有載入，改下載 CSV','info');
-    return;
-  }
-  const ws=XLSX.utils.aoa_to_sheet(aoa);
-  aoa.forEach((r,ri)=>{if(!ri)return;[4,6].forEach(ci=>{const ref=XLSX.utils.encode_cell({r:ri,c:ci});if(ws[ref]&&typeof ws[ref].v==='number')ws[ref].z='#,##0';});});
-  ws['!cols']=[{wch:12},{wch:40},{wch:16},{wch:14},{wch:12},{wch:20},{wch:12},{wch:10}];
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,_usYmLabel(d.ym).replace('/','-')+' 在架沒賣');
-  XLSX.writeFile(wb,name+'.xlsx');
+  _zeroWriteXlsx(aoa,'零動銷_'+String(d.shop).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,_usYmLabel(d.ym).replace('/','-')+' 零動銷',[4,6],
+    [{wch:12},{wch:40},{wch:16},{wch:14},{wch:12},{wch:20},{wch:12},{wch:10}]);
 }
 // 驗收用（只讀，名稱不以 __cloud 開頭）：__shopeeUnsoldSnap('2026-10') → 四家的數量，console.table 也會印
 async function __shopeeUnsoldSnap(ym){
@@ -31567,7 +31564,232 @@ async function __shopeeUnsoldSnap(ym){
     out[shop]={正常沒賣:r.unsold,對到品號:r.mapped,查得到庫存:r.known,有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,動銷率:r.num+'/'+r.den};
   }
   console.table(out);
-  if(failed.length)console.warn('[在架沒賣] 報表讀取失敗',failed);
+  if(failed.length)console.warn('[零動銷] 報表讀取失敗',failed);
+  return out;
+}
+// ══════ ⓘ 說明（零動銷彈窗：蝦皮版、MOMO 版共用同一套句子，各通路只換來源）══════
+//   kind：'shopee'（莫筆克可用庫存，淨利表報表）｜'mobic'（甲配、MO+：莫筆克公司倉 momo_stock）｜'f1102'（乙配：MOMO 寄倉 F1102）
+//   o：{ prevMonthNo, ratio, date, stockFrom, stockTo, histFrom }
+function _zeroTip(kind,o){
+  o=o||{};
+  const L=[];
+  L.push('這份清單：選定月份在架、但整月沒有賣出的商品。筆數＝動銷率的「分母－分子」，賣出一件動銷率就會上升。');
+  L.push(kind==='shopee'
+    ?'「在架」用的是匯出整月商品表現當下的上下架狀態，不是月底的狀態。'
+    :'「在架」用的是目前的上下架狀態，不是當月的；之後才下架的商品不會出現在舊月份的清單裡。');
+  if(kind==='f1102'){
+    L.push('三組怎麼分：看 MOMO 寄倉 F1102 可賣量，大於 0 是「有庫存」；F1102 沒有的品號算「沒庫存」（未寄倉賣不了）。');
+  }else if(kind==='mobic'){
+    const pct=o.ratio!=null?Math.round(o.ratio*100):100;
+    L.push(pct!==100
+      ?'三組怎麼分：看莫筆克公司倉原始數量（乘 '+pct+'% 之前），大於 0 是「有庫存」、等於 0 是「沒庫存」。畫面數字是 ×'+pct+'% 分配估算，跟總表一致；甲配、MO+、蝦皮共用公司倉。'
+      :'三組怎麼分：看莫筆克公司倉數量，大於 0 是「有庫存」、等於 0 是「沒庫存」，畫面數字跟總表一致；甲配、MO+、蝦皮共用公司倉。');
+    L.push('「庫存不明」：查不到原廠編號，或莫筆克沒有這個原廠編號的資料。');
+  }else{
+    L.push('三組怎麼分：看莫筆克可用庫存（淨利表報表），查得到的品號加總大於 0 是「有庫存」、等於 0 是「沒庫存」；一個商品 ID 對到好幾個品號時，庫存是這些品號加總。');
+    L.push('「庫存不明」：商品 ID 對不到品號，或四家蝦皮報表都查不到庫存。');
+  }
+  L.push(kind==='shopee'
+    ?'庫存是莫筆克報表產生當下的數字，取四家蝦皮 '+(o.stockFrom||'')+'～'+(o.stockTo||'')+' 月報表裡最新的一期（日期看庫存欄的滑鼠提示，可能是從其他通路的報表查到的），不是月底當時的庫存。'
+    :'庫存是最近一次上傳的數字（'+(o.date||'沒有資料日期')+'），不是月底當時的庫存。');
+  if(o.prevMonthNo)L.push('「上月營收」是 '+o.prevMonthNo+' 月這個通路的營收。');
+  L.push(kind==='shopee'
+    ?'「最近有賣」往回看'+(o.histFrom?' '+o.histFrom+' 起':'')+'已上傳的整月商品表現，看不到寫「—」。'
+    :'「最近有賣」往回找最近一個有賣出的整月；MOMO 最早只查到 '+MOMO_FIRST_PERIOD.replace('-','/')+'，看不到寫「—」。');
+  return L.map((t,i)=>(i+1)+'. '+t).join('\n');
+}
+// ══════ 「🎯 零動銷」彈窗（MOMO 五家：甲配、乙配、MO+ 麻吉／森之旅／玩樂；2026-11-10）══════
+//   列出「選定月份在架、整月沒有賣出」的商品，給操作人員拉動銷率用。版面照蝦皮版（openUnsoldModal），樣式共用 us-*。
+//   🔴 純讀取：不寫雲端、不寫 localStorage、不進 built / lsSave / 推送。資料全在記憶體（主檔 periods、momo_stock、F1102），不另外讀雲端。
+//   定義＝MOMO 總覽動銷率（momoPeriodTotals）同一套：在架＝主檔 discontinued!==true（目前狀態）、有賣＝momoSoldInPeriod。
+//     清單筆數＝分母（在架 ∪ 有賣）－分子（有賣）；整月期別下也＝「首次零動銷」＋「連續零動銷」標籤數（momoComputeTags）。
+//   庫存＝總表「庫存」欄同一個數字：
+//     乙配有 F1102 ⇒ 寄倉可賣量（用品號對）；F1102 沒有的品號＝②沒庫存（未寄倉）。
+//     甲配、MO+（乙配沒傳 F1102 也是）⇒ momo_stock 用主原廠 p.origin 查，畫面 × MOMO_STOCK_RATIO 無條件捨去；
+//       分組看乘之前的原始數量（>0＝①），乘完 0 但原始 >0 顯示「0（公司倉 N）」。沒有原廠編號、莫筆克沒有＝③庫存不明。
+//   上月營收＝前一個月整月的 momoAggregatePeriods().revenue（總表營收欄口徑）；最近有賣＝往回找到 MOMO_FIRST_PERIOD 為止最近一個有賣的整月。
+const _MZ_SHOPS=['甲配','乙配','MO+麻吉','MO+森之旅','MO+玩樂'];
+const _MZ_GROUPS=[
+  {key:'have',label:'① 有庫存',sub:'優先推，依庫存多到少排'},
+  {key:'zero',label:'② 沒庫存',sub:'補貨或下架'},
+  {key:'unknown',label:'③ 庫存不明',sub:'查不到原廠編號，或莫筆克沒有資料'},
+];
+const _mzView={shop:'',ym:'',data:null,err:''};
+let _mzBound=false;
+// 庫存來源（跟總表 momoRenderProfitBody 同一個判斷）
+function _mzStockCtx(shop){
+  if(shop==='乙配'){
+    const f=momoLoadF1102('乙配');
+    if(f) return {src:'f1102',skus:f.skus||{},ratio:1,date:f.exportedAt?'MOMO 寄倉 F1102 '+f.exportedAt:'MOMO 寄倉 F1102（沒有資料時間）',has:true};
+  }
+  const o=momoLoadStockByOrigin()||{},at=Number(o.uploadedAt)||0;
+  let date='莫筆克公司倉（還沒有上傳）';
+  if(at){const d=new Date(at);date='莫筆克公司倉 '+d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+' 上傳';}
+  return {src:'mobic',map:o.byOrigin||{},ratio:momoStockRatio(shop),date,has:!!Object.keys(o.byOrigin||{}).length};
+}
+// 純函式：一個商品的庫存 → { g:'have'|'zero'|'unknown', stock:畫面值|null, raw:原始|null, why, intransit }
+function _mzStockOf(ctx,p){
+  if(ctx.src==='f1102'){
+    const r=ctx.skus[p.sku];
+    if(!r) return {g:'zero',stock:null,raw:null,why:'nof1102'};
+    const s=Number(r.sellable)||0;
+    return {g:s>0?'have':'zero',stock:s,raw:s,why:'',intransit:r.intransit};
+  }
+  if(!p.origin) return {g:'unknown',stock:null,raw:null,why:'noorigin'};
+  const v=ctx.map[p.origin];
+  if(v==null) return {g:'unknown',stock:null,raw:null,why:'nomobic'};
+  const raw=Number(v)||0, st=ctx.ratio===1?raw:Math.floor(raw*ctx.ratio);
+  return {g:raw>0?'have':'zero',stock:st,raw,why:''};
+}
+// 某店某月（'YYYY-MM'）的零動銷清單。只讀記憶體。
+function _mzBuild(shop,ym){
+  const keys=momoExpandPeriod(ym+'-FULL');
+  const prevYm=_stPrevYm(ym), prevKeys=prevYm>=MOMO_FIRST_PERIOD?momoExpandPeriod(prevYm+'-FULL'):null;
+  const hist=[];for(let m=prevYm;m>=MOMO_FIRST_PERIOD;m=_stPrevYm(m))hist.push(m);
+  const ctx=_mzStockCtx(shop);
+  const groups={have:[],zero:[],unknown:[]};
+  let num=0,den=0,noOrigin=0,noMobic=0,noF1102=0;
+  momoLoadProducts(shop).forEach(p=>{
+    const isActive=p.discontinued!==true;
+    const sold=momoSoldInPeriod(momoAggregatePeriods(p,keys,shop,{lean:true}));
+    if(isActive||sold)den++;
+    if(sold)num++;
+    if(!isActive||sold)return;
+    const s=_mzStockOf(ctx,p);
+    if(s.why==='noorigin')noOrigin++;else if(s.why==='nomobic')noMobic++;else if(s.why==='nof1102')noF1102++;
+    const rev=prevKeys?(Number(momoAggregatePeriods(p,prevKeys,shop,{lean:true}).revenue)||0):null;
+    const last=hist.find(m=>momoSoldInPeriod(momoAggregatePeriods(p,momoExpandPeriod(m+'-FULL'),shop,{lean:true})));
+    groups[s.g].push({sku:p.sku||'',origin:p.origin||'',name:p.name||'',stock:s.stock,raw:s.raw,why:s.why,intransit:s.intransit,rev,lastSold:last||''});
+  });
+  const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.sku<b.sku?-1:a.sku>b.sku?1:0);
+  groups.have.sort((a,b)=>((b.raw||0)-(a.raw||0))||byRev(a,b));
+  groups.zero.sort(byRev);groups.unknown.sort(byRev);
+  return {groups,num,den,unsold:groups.have.length+groups.zero.length+groups.unknown.length,noOrigin,noMobic,noF1102,ctx,prevYm:prevKeys?prevYm:''};
+}
+// 月份下拉：有資料的整月、到上個月（台灣時間）為止，新到舊
+function _mzMonths(shop){
+  const last=_usMonthList()[0];
+  return momoVisibleMonths(shop).filter(m=>m<=last).reverse();
+}
+function _mzBind(){
+  if(_mzBound||typeof window.addEventListener!=='function')return;
+  _mzBound=true;
+  const re=()=>{const ov=document.getElementById('mz-modal-overlay');if(ov&&ov.classList.contains('open'))_mzLoad();};
+  ['momoDataReady','momoStockReady','momoE001Ready','momoReconcileReady'].forEach(ev=>window.addEventListener(ev,()=>setTimeout(re,0)));
+}
+function openZeroSalesModal(shop){
+  if(_MZ_SHOPS.indexOf(shop)<0)return;
+  const ov=document.getElementById('mz-modal-overlay');if(!ov)return;
+  _mzBind();
+  _mzView.shop=shop;
+  const ms=_mzMonths(shop),def=_usMonthList()[0];
+  _mzView.ym=ms.indexOf(def)>=0?def:(ms[0]||def);   // 預設上個月；上個月沒資料就用最新有資料的月份
+  ov.classList.add('open');
+  _mzLoad();
+}
+function closeZeroSalesModal(){document.getElementById('mz-modal-overlay')?.classList.remove('open');}
+function zeroSalesSetMonth(ym){if(!/^\d{4}-\d{2}$/.test(ym||''))return;_mzView.ym=ym;_mzLoad();}
+function _mzLoad(){
+  const shop=_mzView.shop,ym=_mzView.ym;
+  _mzView.data=null;_mzView.err='';
+  if(momoLoadProducts(shop).length){
+    try{_mzView.data={shop,ym,res:_mzBuild(shop,ym)};}
+    catch(e){console.error('[零動銷] 計算失敗',shop,ym,e);_mzView.err=String(e&&e.message||e);}
+  }
+  _mzRender();
+}
+function _mzRender(){
+  const body=document.getElementById('mz-modal-body'),title=document.getElementById('mz-modal-title');
+  if(!body)return;
+  const shop=_mzView.shop,ym=_mzView.ym,e=escapeHtmlLike,mm=Number(ym.slice(5,7));
+  if(title)title.textContent=_usYmLabel(ym)+' 零動銷商品（在架但沒賣出）｜'+shop;
+  const ms=_mzMonths(shop),d=_mzView.data;
+  const opts=(ms.indexOf(ym)<0?[ym].concat(ms):ms).map(m=>`<option value="${m}"${m===ym?' selected':''}>${_usYmLabel(m)} 整月</option>`).join('');
+  const bar=`<div class="us-bar"><label class="us-month">月份 <select onchange="zeroSalesSetMonth(this.value)">${opts}</select></label>`+
+    `<button class="col-pick-btn us-export" onclick="zeroSalesExportExcel()"${d?'':' disabled'}>⬇ 匯出 Excel</button></div>`;
+  if(!d){
+    body.innerHTML=bar+`<div class="us-empty">${_mzView.err?'計算失敗：'+e(_mzView.err):e(shop)+' 的 MOMO 商品資料還在載入，載好會自動顯示。'}</div>`;
+    return;
+  }
+  const r=d.res,g=r.groups,ctx=r.ctx,pmm=r.prevYm?Number(r.prevYm.slice(5,7)):0;
+  const kind=ctx.src==='f1102'?'f1102':'mobic';
+  const tip=_zeroTip(kind,{prevMonthNo:pmm,ratio:ctx.ratio,date:ctx.date});
+  const head=`<div class="us-sum"><b>${mm}月動銷率 ${_usPct(r.num,r.den)}（${r.num}/${r.den}）</b>`+
+    `<span class="us-sum-w">→ ① 全部賣出 1 件可到 <b>${_usPct(r.num+g.have.length,r.den)}</b></span></div>`+
+    `<div class="us-note">庫存：${e(ctx.date)} <span class="us-info" title="${e(tip)}">ⓘ</span></div>`;
+  const warns=[];
+  if(kind==='mobic'&&!ctx.has)warns.push('還沒有莫筆克庫存資料，庫存全部列在③。');
+  if(!r.prevYm)warns.push('選定月份是 MOMO 最早的月份，「上月營收」一律顯示 —。');
+  const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
+  const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
+  const pct=Math.round((ctx.ratio==null?1:ctx.ratio)*100);
+  const stockTip=x=>{
+    if(x.why==='nof1102')return 'F1102 沒有這個品號（未寄倉）';
+    if(x.why==='noorigin')return '主檔沒有原廠編號，查不到莫筆克庫存';
+    if(x.why==='nomobic')return '莫筆克沒有這個原廠編號（'+x.origin+'）的資料';
+    if(ctx.src==='f1102')return 'F1102 寄倉可賣量 '+x.raw+(x.intransit?'，寄倉在途 '+x.intransit:'')+'\n'+ctx.date;
+    return '莫筆克公司倉原始數量 '+x.raw+'（原廠編號 '+x.origin+'）'+(pct!==100?'\n×'+pct+'% 是分配估算，甲配、MO+、蝦皮共用公司倉':'')+'\n'+ctx.date;
+  };
+  const stockCell=x=>{
+    if(x.stock==null)return '<span class="us-na">—</span>';
+    if(x.stock===0&&x.raw>0)return `0<span class="us-sub-m">（公司倉 ${Math.round(x.raw).toLocaleString()}）</span>`;
+    return Math.round(x.stock).toLocaleString();
+  };
+  const nameTip=x=>(x.name||'（主檔沒有商品名稱）')+'\n品號：'+x.sku+(x.origin?'\n原廠編號：'+x.origin:'');
+  const row=x=>`<tr><td class="tl us-name" title="${e(nameTip(x))}"><div class="us-name-txt">${x.name?e(x.name):'<span class="us-na">（主檔沒有商品名稱）</span>'}</div></td>`+
+    `<td class="tl">${e(x.sku)}</td>`+
+    `<td title="${e(stockTip(x))}">${stockCell(x)}</td>`+
+    `<td>${num(x.rev)}</td>`+
+    `<td>${x.lastSold?_usYmLabel(x.lastSold):'<span class="us-na">—</span>'}</td></tr>`;
+  const th=`<tr><th class="tl">商品名稱</th><th class="tl">品號</th><th>庫存</th><th title="${pmm?pmm+' 月這個通路的營收':'沒有上個月的資料'}">上月營收</th><th>最近有賣</th></tr>`;
+  const sub={have:_MZ_GROUPS[0].sub,zero:kind==='f1102'?'補貨、寄倉或下架（含 F1102 沒有的品號）':_MZ_GROUPS[1].sub,unknown:_MZ_GROUPS[2].sub};
+  const grps=_MZ_GROUPS.filter(G=>!(kind==='f1102'&&G.key==='unknown')).map(G=>{
+    const list=g[G.key];
+    return `<details class="us-grp us-grp-${G.key}"${G.key==='have'?' open':''}><summary class="us-grp-hd">${G.label}（${list.length}）<span class="us-grp-sub">${e(sub[G.key])}</span></summary>`+
+      (list.length?`<div class="us-scroll"><table class="us-table"><thead>${th}</thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<div class="us-empty us-empty-sm">沒有</div>`)+
+      `</details>`;
+  }).join('');
+  body.innerHTML=bar+head+warnHtml+grps;
+}
+// 匯出不精簡：原廠編號、公司倉原始數量、庫存說明都在這裡
+function zeroSalesExportExcel(){
+  const d=_mzView.data;if(!d)return;
+  const ctx=d.res.ctx,isF=ctx.src==='f1102',pct=Math.round((ctx.ratio==null?1:ctx.ratio)*100);
+  const why={nof1102:'F1102 沒有這個品號（未寄倉）',noorigin:'主檔沒有原廠編號',nomobic:'莫筆克沒有這個原廠編號'};
+  const aoa=[['分組','商品名稱','品號','原廠編號','庫存',isF?'F1102 可賣量':'公司倉原始數量','庫存說明','上月營收','最近有賣']];
+  _MZ_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label,x.name||'',x.sku,x.origin,x.stock==null?'':x.stock,x.raw==null?'':x.raw,
+    (why[x.why]||(isF?'F1102 寄倉可賣量'+(x.intransit?'，在途 '+x.intransit:''):(pct!==100?'×'+pct+'% 分配估算':'莫筆克公司倉')))+'（'+ctx.date+'）',
+    x.rev==null?'':Math.round(x.rev),x.lastSold?_usYmLabel(x.lastSold):''])));
+  _zeroWriteXlsx(aoa,'零動銷_'+String(d.shop).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,d.ym+' 零動銷',[4,5,7],
+    [{wch:12},{wch:40},{wch:16},{wch:16},{wch:10},{wch:14},{wch:40},{wch:12},{wch:10}]);
+}
+// 蝦皮版、MOMO 版共用：有 XLSX 寫 .xlsx，沒有就退回 CSV
+function _zeroWriteXlsx(aoa,name,sheet,numCols,cols){
+  if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){
+    const esc=x=>{const t=String(x==null?'':x);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+aoa.map(r=>r.map(esc).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download=name+'.csv';
+    document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+    if(typeof showToast==='function')showToast('Excel 元件沒有載入，改下載 CSV','info');
+    return;
+  }
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  aoa.forEach((r,ri)=>{if(!ri)return;numCols.forEach(ci=>{const ref=XLSX.utils.encode_cell({r:ri,c:ci});if(ws[ref]&&typeof ws[ref].v==='number')ws[ref].z='#,##0';});});
+  ws['!cols']=cols;
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);
+  XLSX.writeFile(wb,name+'.xlsx');
+}
+// 驗收用（只讀，名稱不以 __cloud 開頭）：__momoZeroSnap('2026-10') → 五家的數量（清單筆數、分母－分子、零動銷標籤數、三組、對不到）
+function __momoZeroSnap(ym){
+  ym=ym||_usMonthList()[0];
+  const out={};
+  _MZ_SHOPS.forEach(shop=>{
+    if(!momoLoadProducts(shop).length){out[shop]={state:'主檔還沒載入'};return;}
+    const r=_mzBuild(shop,ym),t=momoPeriodTotals(shop,ym+'-FULL'),tg=momoComputeTags(shop,ym+'-FULL');
+    out[shop]={清單筆數:r.unsold,分母減分子:t.activeTotal-t.soldActive,零動銷標籤:(tg.counts.dead_new||0)+(tg.counts.dead_long||0),
+      有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,
+      沒有原廠編號:r.noOrigin,莫筆克沒有:r.noMobic,F1102沒有:r.noF1102,動銷率:t.soldActive+'/'+t.activeTotal,庫存來源:r.ctx.date};
+  });
+  console.table(out);
   return out;
 }
 function _lmPeriodShort(month,half){
@@ -31819,7 +32041,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
