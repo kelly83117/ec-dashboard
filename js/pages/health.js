@@ -1410,7 +1410,7 @@ function _hlGuideFullHtml(rules) {
     '<b>純利率</b>＝純利 ÷ 營收；<b>毛利率</b>＝（營收 − 商品成本）÷ 營收。都取 KPI 月結（整月，跟財務對得上）。',
     `<b>動銷率</b>＝這個月有賣出的商品 ÷ 在架商品。蝦皮用洞察表「整月商品表現」，MOMO、PChome 跟各自的淨利表同一套算法${noSt.length ? `；${e(noSt.join('、'))}不算動銷率` : ''}。`,
     `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}`,
-    `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片會寫「未評分」和原因，不算 0 分。`,
+    `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片右上角不放分數、改寫原因（滑鼠移上去看完整說明），不算 0 分。`,
     `<b>表現好／需注意商品</b>只列本月或上月營收 ${e(minRev)} 元以上的商品。`,
   ];
   return `<p class="hl-gt-from">評分標準：${e(_hlYmLabel(R.from || R.firstMonth))} 起適用</p><ol class="hl-ga-list">${pts.map(x => `<li>${x}</li>`).join('')}</ol>`;
@@ -1424,9 +1424,9 @@ function _hlGuideIntro(rules) {
   const share = w.length === 1 ? (SC.items.length === 2 ? `${names}各占一半` : `${names}各占 ${w[0]}%`) : SC.items.map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('＋');
   return [
     `分數顏色：綠 ${L.green} 以上、黃 ${L.yellow}～${L.green - 1}、紅未滿 ${L.yellow}。`,
-    `總分＝${share}；只有${pure ? pure.label : '純利率'}有標準時，總分就是${pure ? pure.label : '純利率'}分數。`,
+    `總分＝${share}；只有${pure ? pure.label : '純利率'}有標準時，總分就是${pure ? pure.label : '純利率'}分數。卡片上${names}旁的小標就是各項分數。`,
     `每項分 ${T.join('／')} 三級，都沒達到是 0 分。`,
-    `沒分數的通路寫「未評分」，不算 0 分；營收未滿 ${R.minRev / 10000} 萬的通路數字是灰字，只供參考。`,
+    `沒分數的通路右上角寫原因（例：標準未設定、KPI 未填完），不算 0 分；營收未滿 ${R.minRev / 10000} 萬的通路數字是灰字，只供參考。`,
     '毛利率只顯示、不計分。',
   ];
 }
@@ -2160,36 +2160,84 @@ function _hlTileDeltaHtml(r, prev) {
 // 卡片三欄（卡片改版塊 1）：上＝小標「純利率／毛利率／動銷率」、中＝大字數值（狀態字灰色、小一點）、
 //   下＝「▲ 上月 22.2%」（方向同塊 2 的上月邏輯；2026-11-10 起字一律灰色、只有小三角形上色，持平不顯示三角形；上月沒資料就是空行，卡片才一樣高）。任何寬度都不截斷（不用 …）。
 //   營收未滿 minRev（c.ref）：中＝灰字數字、下＝「僅供參考」（同評分標準視窗「近 6 月」的灰字參考，css 共用一條規則）。
-function _hlTileMetsHtml(r, prev) {
+//   2026-11-10 統一版型：有計分的指標在小標右邊加分數 chip（_hlTileChipHtml）。
+function _hlTileMetsHtml(r, prev, snap) {
   return HL_OVERVIEW_COLS.map(col => {
     const c = _hlOverviewCell(r, prev, col);
+    const k = `<span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${escapeHtml(col.label)}</span>${_hlTileChipHtml(r, col, snap)}`;
     if (c.ref) {
-      return `<span class="hl-tile-met hl-tile-met-ref"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${escapeHtml(col.label)}</span><span class="hl-tile-met-v" title="${escapeHtml(c.tip)}">${escapeHtml(c.ref)}</span><span class="hl-tile-met-p">僅供參考</span></span>`;
+      return `<span class="hl-tile-met hl-tile-met-ref"><span class="hl-tile-met-kr">${k}</span><span class="hl-tile-met-v" title="${escapeHtml(c.tip)}">${escapeHtml(c.ref)}</span><span class="hl-tile-met-p">僅供參考</span></span>`;
     }
-    const p = c.dir ? `<span class="hl-tile-met-p">${_hlTileTri(c.dir)}${escapeHtml(c.sub.replace(/^[↑↓→]s*/, ''))}</span>` : '<span class="hl-tile-met-p" aria-hidden="true"></span>';
-    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${escapeHtml(col.label)}</span><span class="hl-tile-met-v"${c.tip ? ` title="${escapeHtml(c.tip)}"` : ''}>${escapeHtml(c.text)}</span>${p}</span>`;
+    const p = c.dir ? `<span class="hl-tile-met-p">${_hlTileTri(c.dir)}${escapeHtml(c.sub.replace(/^[↑↓→]\s*/, ''))}</span>` : '<span class="hl-tile-met-p" aria-hidden="true"></span>';
+    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-kr">${k}</span><span class="hl-tile-met-v"${c.tip ? ` title="${escapeHtml(c.tip)}"` : ''}>${escapeHtml(c.text)}</span>${p}</span>`;
   }).join('');
+}
+// 三欄小標旁的分數 chip（2026-11-10 統一版型）：只標這張卡這個月實際計分的項目（純利率、動銷率；毛利率不計分不標）。
+//   有分數＝「80分」，顏色＝分數徽章同一套燈號（_hlLight，依當月規則的 lights）；動銷率在等商品層＝「…」灰色。
+//   沒有總分的卡（未評分、已關站）不標；項目沒標準（lines 空）或沒分數也不標。
+const _HL_TILE_CHIP_ITEM = { pure: 'pureRate', st: 'sellThrough' };
+const _HL_TILE_CHIP_WAIT = { loading: '商品資料載入中', notLoaded: '商品資料未載入', timeout: '商品資料載入逾時' };
+function _hlTileChipHtml(r, col, snap) {
+  const key = _HL_TILE_CHIP_ITEM[col.key];
+  if (!key || (r.score == null && !_HL_TILE_WAIT[r.status])) return '';
+  const it = (r.items || []).find(x => x.key === key);
+  if (!it || !it.lines) return '';
+  if (it.status === 'ok') {
+    const R = healthRulesForMonth(r.month, snap && snap.healthRuleVersions);
+    const share = r.pureOnly ? '總分只看這一項' : `佔總分 ${Math.round(it.w * 100)}%`;   // 只看純利率時權重是 100%，不寫規則上的 50%
+    return `<span class="hl-tile-chip hl-l-${_hlLight(it.score, R)}" title="${escapeHtml(`${it.label} ${it.score} 分（${share}）`)}">${it.score}分</span>`;
+  }
+  if (_HL_TILE_CHIP_WAIT[it.status]) return `<span class="hl-tile-chip hl-l-none" title="${escapeHtml(`${it.label}：${_HL_TILE_CHIP_WAIT[it.status]}`)}">…</span>`;
+  return '';
 }
 // 卡片（卡片改版塊 1）：拿掉「類型第 N」與主要扣分原因句（排名 _hlRank、原因 _hlPlainReason 照算，只是卡片上不顯示；rank 參數留著不用）。
 //   商品層還在載入時沒有總分，卡片標題列的 title 放原因全文（例：仍在載入（已等 N 秒）），滑鼠移上去看得到。
-//   「不排名」小標也拿掉了（排名不顯示）。沒有總分的卡片寫「未評分」＋一行原因（_hlNoScoreWhy），不算 0 分；data-hl-fp 照舊（裡面的總分文字還是 _hlScoreHtml）。
-//   商品層還沒好的卡片（資料到了就會有分數）不是「未評分」：分數那格只寫灰字狀態（_HL_TILE_WAIT）。原因全文在標題列的 title。
-//   版面（2026-11-10 整理，只動顯示）：第一列＝左名稱、右邊徽章（沒分數＝「未評分」或 _HL_TILE_WAIT），徽章正下方「比上月 ±N」灰字（右對齊）；
-//   第二列＝靠右一行灰字（_hlTilePartsHtml）；再來金額列、三欄。卡片用 css subgrid，同一排四列各自對齊。
+//   「不排名」小標也拿掉了（排名不顯示）。沒有總分的卡片右上角寫簡短原因（_hlTileNoScore），不算 0 分；data-hl-fp 照舊（裡面的總分文字還是 _hlScoreHtml）。
+//   商品層還沒好的卡片（資料到了就會有分數）：右上角只寫灰字狀態（_HL_TILE_WAIT）。原因全文在標題列的 title。
+//   版面（2026-11-10 統一版型，只動顯示）：所有卡片同一個結構、三列（css subgrid，同一排各列對齊）：
+//   ① 左名稱；右邊有分數＝徽章（title＝總分算法，_hlTileBadgeHtml）＋正下方「比上月 ±N」灰字；沒分數＝灰字簡短原因（_hlTileNoScore，title＝完整說明）或「載入中…」。
+//   ② 營收／純利金額列；③ 三欄比率，有計分的指標小標旁加分數 chip（_hlTileChipHtml）。以前的第二列「分數：…」拿掉了。
 const _HL_TILE_WAIT = { prodLoading: '載入中…', prodIdle: '未載入', prodTimeout: '載入逾時' };
 function _hlTileHtml(r, prev, rank, open, snap) {
-  const tip = r.score == null && r.reason ? ` title="${escapeHtml(String(r.reason))}"` : '';
-  // 右邊：上＝徽章（或「未評分」／載入中），下＝「比上月 ±N」；沒有比上月也留一個空的位置，同排卡片第一列才一樣高
+  const R = healthRulesForMonth(r.month, snap && snap.healthRuleVersions);
+  const ns = r.score == null ? _hlTileNoScore(r, R) : null;
+  const tip = ns && ns.tip ? ` title="${escapeHtml(ns.tip)}"` : '';
+  // 右邊：上＝徽章（或簡短原因／載入中），下＝「比上月 ±N」；沒有比上月也留一個空的位置，同排卡片第一列才一樣高
   const delta = (r.score == null ? '' : _hlTileDeltaHtml(r, prev)) || '<span class="hl-tile-delta" aria-hidden="true"></span>';
-  const right = (r.score == null
-    ? `<span class="hl-tile-noscore">${_HL_TILE_WAIT[r.status] || '未評分'}</span>`
+  const right = (ns
+    ? `<span class="hl-tile-noscore"${tip}>${escapeHtml(ns.text)}</span>`
     : _hlTileBadgeHtml(r)) + delta;
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span><span class="hl-tile-hd-r">${right}</span></div>
-      ${_hlTilePartsHtml(r, snap)}
       ${_hlTileAmtHtml(r, snap)}
-      <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
+      <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev, snap)}</div>
     </div>`;
+}
+// 沒有總分的卡片右上角（2026-11-10 統一版型）：{ text：灰字簡短原因, tip：title 完整說明 }。只看 status／reason 字串，不改計分。
+//   商品層還沒好（_HL_TILE_WAIT）照舊「載入中…」（tip＝原因全文，例：仍在載入（已等 N 秒））。
+//   reason 原文（computeChannelHealth）：pending「尚未上傳：2026/10 KPI 已填 1/6」、smallRev「營收過小（$465，未滿 $30,000），…」、
+//   insufficient「資料不足：MO+ 玩樂 從 2026/10 起才有 KPI」、nostd「標準未設定」。
+function _hlTileNoScore(r, R) {
+  const t = String(r.reason || '');
+  if (_HL_TILE_WAIT[r.status]) return { text: _HL_TILE_WAIT[r.status], tip: t };
+  if (r.status === 'closed') return { text: '已關站', tip: t || '已關站' };
+  const minRev = R.minRev % 10000 === 0 ? `${R.minRev / 10000} 萬` : _hlFmtMoney(R.minRev);
+  switch (r.status) {
+    case 'nostd': return { text: '標準未設定', tip: '未評分：標準未設定' };
+    case 'smallRev': {
+      const m = /（(\$[\d,]+)，未滿 (\$[\d,]+)）/.exec(t);
+      return { text: `營收未滿 ${minRev}`, tip: m ? `未評分：營收 ${m[1]}，未滿 ${m[2]}` : `未評分：營收未滿 ${_hlFmtMoney(R.minRev)}` };
+    }
+    case 'insufficient': {
+      const m = /從 (\d{4}\/\d{2}) 起/.exec(t);
+      return { text: '資料不足', tip: m ? `未評分：資料不足，${m[1]} 起才有` : `未評分：資料不足${t ? '（' + t + '）' : ''}` };
+    }
+    case 'pending': {
+      const m = /已填 (\d+)\/(\d+)/.exec(t);
+      return m && +m[1] > 0 ? { text: 'KPI 未填完', tip: `未評分：KPI 未填完（已填 ${m[1]}/${m[2]}）` } : { text: '尚未上傳', tip: `未評分：KPI 尚未上傳${t ? '（' + t.replace(/^尚未上傳：/, '') + '）' : ''}` };
+    }
+    default: return { text: '未評分', tip: t ? `未評分：${t}` : '未評分' };
+  }
 }
 // 卡片「上月」小字前面的小三角形（2026-11-10）：上升 ▲ 綠、下降 ▼ 紅、持平不顯示；字本身一律灰色（css .hl-tile-tri）
 function _hlTileTri(dir) {
@@ -2233,38 +2281,22 @@ function _hlTileAmtHtml(r, snap) {
   };
   return `<div class="hl-tile-amt">${cell('營收', 'rev')}${cell('純利', 'pure')}</div>`;
 }
-// 卡片第二列（2026-11-10 整理）：靠右、灰色小字、只佔一行（放不下用 …，完整文字在 title）。
-//   有分數：「分數：純利率 80 · 動銷率 100」；動銷率等商品層：「分數：純利率 80 · 動銷率 載入中…」；
-//   只看純利率（例：蝦皮動銷率未訂標準）：不顯示這行（空的佔位），說明改放分數徽章的 title（_hlTileBadgeHtml）；
-//   未評分：放原因（_hlNoScoreWhy，例：營收未滿 $30,000）；其他（例：商品層載入中、純利率沒分數）也是空的佔位。
-//   空的佔位：同一排有別張卡有這行時跟著留一行高（subgrid），整排都沒有時這一列收起來（css .hl-tile-parts:empty）。
-const _HL_TILE_PARTS_EMPTY = '<div class="hl-tile-parts" aria-hidden="true"></div>';
-const _HL_TILE_WAIT_ST = { loading: '載入中…', notLoaded: '未載入', timeout: '載入逾時' };
-function _hlTilePartsHtml(r, snap) {
-  const line = t => `<div class="hl-tile-parts" title="${escapeHtml(t)}">${escapeHtml(t)}</div>`;
-  if (r.score == null && !_HL_TILE_WAIT[r.status]) return line(_hlNoScoreWhy(r, healthRulesForMonth(r.month, snap && snap.healthRuleVersions)));
-  const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
-  if (!pure || pure.status !== 'ok') return _HL_TILE_PARTS_EMPTY;
-  const right = st && st.status === 'ok' ? `${st.label} ${st.score}`
-    : st && st.lines && _HL_TILE_WAIT_ST[st.status] ? `${st.label} ${_HL_TILE_WAIT_ST[st.status]}` : null;
-  if (right == null) return _HL_TILE_PARTS_EMPTY;   // 只看純利率：說明在徽章 title
-  return line(`分數：${pure.label} ${pure.score} · ${right}`);
+// 分數徽章的 title：總分算法（2026-11-10 統一版型）。只在有總分時呼叫。
+//   兩項都計分：「總分＝純利率 100 分×50%＋動銷率 80 分×50%」（權重從規則來）；只看純利率：「總分＝純利率分數（動銷率未訂標準）」。
+function _hlTileScoreTip(r) {
+  const ok = (r.items || []).filter(it => it.status === 'ok');
+  if (!ok.length) return '';
+  if (r.pureOnly) return `總分＝${ok[0].label}分數（${_hlTilePureOnlyShort(r)}）`;
+  return '總分＝' + ok.map(it => `${it.label} ${it.score} 分×${Math.round(it.w * 100)}%`).join('＋');
 }
-// 只看純利率的卡（純利率有分數、動銷率沒分數也不是在等商品層）→ 徽章 title「分數只看純利率（動銷率未訂標準）」；其他 → ''（判斷同 _hlTilePartsHtml）
-function _hlTilePureOnlyTip(r) {
-  const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
-  if (r.score == null || !pure || pure.status !== 'ok') return '';
-  if (st && (st.status === 'ok' || (st.lines && _HL_TILE_WAIT_ST[st.status]))) return '';
-  return `分數只看${pure.label}（${_hlTilePureOnlyShort(r)}）`;
-}
-// 卡片上的分數徽章＝_hlScoreHtml（文字不變、data-hl-fp 照舊）＋只看純利率時的 title；原本就有 title（參考分）就接在說明後面
+// 卡片上的分數徽章＝_hlScoreHtml（文字不變、data-hl-fp 照舊）＋總分算法 title；原本就有 title（參考分）就接在算法後面
 function _hlTileBadgeHtml(r) {
-  const h = _hlScoreHtml(r), tip = _hlTilePureOnlyTip(r);
+  const h = _hlScoreHtml(r), tip = _hlTileScoreTip(r);
   if (!tip) return h;
   if (/^<span [^>]*title="/.test(h)) return h.replace('title="', `title="${escapeHtml(tip)}&#10;`);
   return h.replace('<span ', `<span title="${escapeHtml(tip)}" `);
 }
-// 卡片第二列括號裡的短說法：「動銷率未訂標準」「動銷率尚未上傳」「動銷率資料不足」…（判斷同 _hlPureOnlyWhy）
+// 只看純利率時括號裡的短說法：「動銷率未訂標準」「動銷率尚未上傳」「動銷率資料不足」…（判斷同 _hlPureOnlyWhy）
 function _hlTilePureOnlyShort(r) {
   const st = (r.items || []).find(it => it.key === 'sellThrough');
   const label = st ? st.label : '動銷率';
@@ -2277,12 +2309,6 @@ function _hlPureOnlyWhy(r) {
   const label = st ? st.label : '動銷率';
   if (!st || st.status === 'nostd' || !st.lines) return `${label}標準未設定`;
   return `${label}${_HL_STATUS_TEXT[st.status] || '沒有分數'}`;
-}
-// 卡片上「未評分」下面那行原因。括號裡不再套括號：「KPI 還沒填完（4/6）」→「KPI 還沒填完 4/6」
-function _hlNoScoreWhy(r, R) {
-  if (r.status === 'closed') return '已關站';
-  if (r.status === 'smallRev') return `營收未滿 ${_hlFmtMoney(R.minRev)}`;
-  return _hlShortReason(r).replace(/（([^（）]*)）$/, ' $1');
 }
 // 總覽「主要扣分原因」白話版（2026-11-03）：只換說法，不碰計分。
 //   挑哪一個子指標＝跟 _hlTopReason 同一條規則（(100 − 得分) × 子指標權重 × 面向權重 最大）；_hlTopReason 本身不動（computeChannelHealth 的 topReason 照舊）。
