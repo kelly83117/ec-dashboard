@@ -2844,10 +2844,13 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile:hover { border-color: var(--primary); }
 .hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
-/* 第一列：左名稱、右「比上月 ±N」灰色小字＋分數徽章（沒分數＝灰字「未評分」／「載入中…」）。名稱太長時名稱自己換行，右邊不縮、不重疊 */
-.hl-tile-hd { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; min-height: 32px; }
-.hl-tile-name { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text); }
-.hl-tile-hd-r { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* 第一列：左名稱；右邊一欄上下疊＝分數徽章（沒分數＝灰字「未評分」／「載入中…」）＋正下方「比上月 ±N」灰色小字（右對齊）。
+   比上月那格一律留一行高（沒有比上月也是空的佔位），同排卡片才一樣高；名稱跟徽章同一行垂直置中。名稱太長時名稱自己換行，右邊不縮、不重疊 */
+.hl-tile-hd { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; row-gap: 1px; align-items: center; min-width: 0; }
+.hl-tile-name { grid-column: 1; grid-row: 1; min-width: 0; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text); }
+.hl-tile-hd-r { display: contents; }
+.hl-tile-hd-r > .hl-score, .hl-tile-hd-r > .hl-tile-noscore { grid-column: 2; grid-row: 1; justify-self: end; white-space: nowrap; }
+.hl-tile-hd-r > .hl-tile-delta { grid-column: 2; grid-row: 2; justify-self: end; min-height: 15px; line-height: 15px; }
 .hl-tile-hd-r .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 48px; padding: 2px 8px; font-size: 22px; }
 .hl-tile-hd-r .hl-score-wait { font-size: 14px; }
 .hl-tile-noscore { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--text-muted); }
@@ -2888,7 +2891,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tier-hit { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
 .hl-tier-miss { border-style: dashed; color: var(--danger); }
 .hl-tier-none { font-size: 11px; color: var(--text-muted); }
-/* 分數徽章左邊「比上月 +8」：整段淺灰小字（數字也不上色） */
+/* 分數徽章正下方「比上月 +8」：整段淺灰小字（數字也不上色） */
 .hl-tile-delta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .hl-tile-delta .hl-delta { color: inherit; font-weight: 400; }
 /* 細項：「看評分細節」預設收合 */

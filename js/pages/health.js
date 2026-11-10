@@ -2174,14 +2174,16 @@ function _hlTileMetsHtml(r, prev) {
 //   商品層還在載入時沒有總分，卡片標題列的 title 放原因全文（例：仍在載入（已等 N 秒）），滑鼠移上去看得到。
 //   「不排名」小標也拿掉了（排名不顯示）。沒有總分的卡片寫「未評分」＋一行原因（_hlNoScoreWhy），不算 0 分；data-hl-fp 照舊（裡面的總分文字還是 _hlScoreHtml）。
 //   商品層還沒好的卡片（資料到了就會有分數）不是「未評分」：分數那格只寫灰字狀態（_HL_TILE_WAIT）。原因全文在標題列的 title。
-//   版面（2026-11-10 整理，只動顯示）：第一列＝左名稱、右「比上月 ±N」灰字＋分數徽章（沒分數＝「未評分」或 _HL_TILE_WAIT）；
+//   版面（2026-11-10 整理，只動顯示）：第一列＝左名稱、右邊徽章（沒分數＝「未評分」或 _HL_TILE_WAIT），徽章正下方「比上月 ±N」灰字（右對齊）；
 //   第二列＝靠右一行灰字（_hlTilePartsHtml）；再來金額列、三欄。卡片用 css subgrid，同一排四列各自對齊。
 const _HL_TILE_WAIT = { prodLoading: '載入中…', prodIdle: '未載入', prodTimeout: '載入逾時' };
 function _hlTileHtml(r, prev, rank, open, snap) {
   const tip = r.score == null && r.reason ? ` title="${escapeHtml(String(r.reason))}"` : '';
-  const right = r.score == null
+  // 右邊：上＝徽章（或「未評分」／載入中），下＝「比上月 ±N」；沒有比上月也留一個空的位置，同排卡片第一列才一樣高
+  const delta = (r.score == null ? '' : _hlTileDeltaHtml(r, prev)) || '<span class="hl-tile-delta" aria-hidden="true"></span>';
+  const right = (r.score == null
     ? `<span class="hl-tile-noscore">${_HL_TILE_WAIT[r.status] || '未評分'}</span>`
-    : `${_hlTileDeltaHtml(r, prev)}${_hlScoreHtml(r)}`;
+    : _hlScoreHtml(r)) + delta;
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span><span class="hl-tile-hd-r">${right}</span></div>
       ${_hlTilePartsHtml(r, snap)}
