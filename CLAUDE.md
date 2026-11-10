@@ -354,7 +354,7 @@ ESM 有個致命陷阱必須牢記：
   主看板分三區（蝦皮／MOMO／其他通路），區內順序寫死在 health.js `HL_BOARD_SECTIONS`、不依分數排，跟評分標準的分組（types）無關。**新增通路要加進去，不然主看板看不到**；官網已關站，不上主看板（所有月份都不上）。沒有總分的通路也有卡片，寫「未評分」＋原因（`_hlNoScoreWhy`），可點開細項；商品層還沒好、資料到了就會有分數的卡片不寫「未評分」，改寫灰字「載入中…」（`_HL_TILE_WAIT`，另有未載入、載入逾時）；`data-hl-fp` 格式不變（仍用 `_hlScoreHtml` 的文字）。
   商品清單的畫面文字是「表現好商品」「需注意商品」（內部仍是 `good` / `bad`）。
   評分標準依月份查版本：`healthRulesForMonth(month, versions)`；BASE＝寫死的 `HEALTH_RULES`（從 `firstMonth` 起適用）；通路可各自覆蓋（`linesByChannel`），查線順序＝通路自己的 → 類型的 → 標準未設定。每版要寫完整（兩項都要有 `w`、`lines`），不沿用前一版：沒寫到的類型／通路就是標準未設定（`provisional` 選填，沒寫沿用 BASE）。版本清單從 `app/health_rules` 來（掛在 `snap.healthRuleVersions`），文件不存在時所有月份都用 BASE。
-  分數一律依規則當場重算；改 BASE 任何門檻要升 `version`（目前 `v6-2026-11`：總分只看 `score` 的純利率、動銷率兩項；舊面向的門檻：獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
+  分數一律依規則當場重算；改 BASE 任何門檻要升 `version`（目前 `v8-2026-11`：蝦皮純利率線 25/20/18（11/10 老闆決定標準不變、KPI 維持含稅）；總分只看 `score` 的純利率、動銷率兩項；舊面向的門檻：獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
   廣告效率、商品結構是 v4 校準值（方案 §2-5、§2-7-2）；毛利率、低利商品營收占比只顯示、不計分；
   動銷率依類型，樣本少於 6 筆的類型標「樣本少」（`stFlag:'few'`），蝦皮等塊 C 資料標「待校準」（`stFlag:'uncal'`））。
   MOMO（甲配、乙配、MO+）動銷率（#416，v6）跟淨利表 MOMO 總覽同一套：`__healthProductSnapshot` 的 `out.st` 直接取 `momoPeriodTotals(通路, 月-FULL)` 的 `soldActive` / `activeTotal`，health.js `_hlMomoStApply` 讀 `raw.st`，**所有月份都用這個口徑**，跟 `minSold` 脫鉤（`minSold` 只擋 PChome 的動銷率與其他商品結構指標）。商品層沒好、上個月快照還在算時仍是「載入中」，當月沒有銷售資料寫「尚未上傳」，都不算 0 分。MOMO 的 `sellThroughPage` 固定「不適用」（定義留著給 PChome）；`deadDupPages` 保留；公司商品口徑只留在逐月表的對照小字（`_hlMomoPageNote`），不計分。
