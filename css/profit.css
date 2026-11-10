@@ -1764,6 +1764,13 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable td.km-f-ro{color:#1a1a2e;font-weight:800;font-size:13px;background:#f8f9fc;}
 .km-ftable th.km-f-rohead{background:#eef0f4;}
 .km-ftable td.km-f-ro-first,.km-ftable th.km-f-ro-first{border-left:2px solid #cbd5e1;}
+/* 成本佔比（2026-11-10）：商品成本後面的唯讀計算欄，沿用 km-f-ro 灰底；百分比不斷行 */
+.km-ftable td.km-f-cpct{white-space:nowrap;}
+/*   表頭「成本／佔比ⓘ」兩段各自不斷行、段與段之間可以折行（其他表頭一律 nowrap；這欄折成兩行才不會撐寬整張表） */
+.km-ftable th.km-f-cpct{white-space:normal;}
+.km-ftable th.km-f-cpct .km-th{flex-wrap:wrap;column-gap:0;}
+.km-ftable td.km-f-cpct .km-roval{padding-left:calc(2px*var(--k));padding-right:calc(2px*var(--k));}
+.km-ftable th.km-f-cpct .km-th>span{white-space:nowrap;}
 .km-roval{box-sizing:border-box;min-height:32px;padding:4px 2px;border:1px solid transparent;line-height:22px;white-space:nowrap;}
 /* 填寫表格：對齊＋不斷行＋等比縮放（2026-10-01）
    · 對齊：數字欄一律靠右＋tabular-nums；每個數字元件（輸入框、灰底自動值、攤到的份額、純利、小計、「—」、欄標題）
