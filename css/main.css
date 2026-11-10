@@ -2839,36 +2839,26 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-group-hd { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--text); }
 /* 組內卡片：每張最小 205px（組寬 215 × 張數 + 間距，正好一張一欄）；卡寬要放得下三欄「↑ 上月 22.2%」不截斷；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。同一排卡片等高 */
 .hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 10px; align-items: stretch; }
-.hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
+/* 卡片四列（名稱／分數一行／金額／三欄）用 subgrid：同一排卡片的每一列一樣高，金額列與三欄自然對齊（名稱換行時整排一起變高） */
+.hl-tile { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
 .hl-tile:hover { border-color: var(--primary); }
 .hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
-/* 名稱列：一行（卡片改版塊 1 拿掉「類型第 N」後不再留兩行高） */
-.hl-tile-hd { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-height: 20px; line-height: 20px; }
-/* 「不排名」標章不能比名稱高（否則業外那張會高 1px，同一排就不等高） */
-.hl-tile-hd .hl-tag { padding: 0 6px; line-height: 18px; }
-.hl-tile-name { font-size: 13px; font-weight: 600; color: var(--text); }
-/* 大字總分＋旁邊比上月分數差 */
-.hl-tile-score { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-height: 32px; }
-/* 卡片上的參考分：「參考」放在數字右邊（不疊在下面），卡片才一樣高 */
-.hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 52px; padding: 2px 8px; font-size: 22px; }
-.hl-tile-score .hl-score-wait { font-size: 14px; }
-.hl-tile-score .hl-delta { font-size: 13px; color: var(--text-muted); }
-/* 沒有總分的卡片：灰字「未評分」＋一行原因（不是 0 分） */
-.hl-tile-score-none { flex-direction: column; align-items: flex-start; gap: 2px; }
-.hl-tile-noscore { font-size: 16px; line-height: 20px; font-weight: 600; color: var(--text-muted); }
-.hl-tile-why { font-size: 12px; line-height: 16px; color: var(--text-muted); }
-/* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「↑ 上月 x%」（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
-   卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「↓ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
-.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; margin-top: auto; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
+/* 第一列：左名稱、右「比上月 ±N」灰色小字＋分數徽章（沒分數＝灰字「未評分」／「載入中…」）。名稱太長時名稱自己換行，右邊不縮、不重疊 */
+.hl-tile-hd { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; min-height: 32px; }
+.hl-tile-name { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text); }
+.hl-tile-hd-r { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.hl-tile-hd-r .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 48px; padding: 2px 8px; font-size: 22px; }
+.hl-tile-hd-r .hl-score-wait { font-size: 14px; }
+.hl-tile-noscore { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--text-muted); }
+/* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「▲ 上月 x%」（灰字、只有三角形上色）（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
+   卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「▼ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
+.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; align-self: start; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
 .hl-tile-met { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
 .hl-tile-met-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; cursor: help; }
 .hl-tile-met-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; }
 .hl-tile-met-off .hl-tile-met-v { font-size: 13px; line-height: 18px; font-weight: 400; color: var(--text-muted); white-space: normal; }
 .hl-tile-met-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: normal; word-break: keep-all; }
-.hl-tile-met-p.hl-ov-up { color: var(--success); }
-.hl-tile-met-p.hl-ov-down { color: var(--danger); }
-.hl-tile-met-p.hl-ov-flat { color: var(--text-muted); }
 .hl-tile-detail { flex: 0 0 100%; min-width: 0; }
 /* 卡片上「⚠ 待處理商品 N 個」（紅、可點）／「✓ 沒有待處理商品」（灰綠）；沒有商品層的通路是空的佔位列，卡片才一樣高 */
 .hl-tile-todo { min-height: 18px; font-size: 12px; line-height: 1.5; }
@@ -2878,20 +2868,19 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-todo-warn:focus-visible, .hl-todo-ok:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-todo-wait { color: var(--text-muted); }
 /* 卡片金額列（2026-11-10）：分數下方淺底兩格「營收／純利」，數字同三欄大字；下面「↑ 上月 X」同三欄小字 */
-.hl-tile-amt { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 6px; padding: 4px 8px; background: var(--hl-amt-bg); border-radius: var(--radius); }
+.hl-tile-amt { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 6px; align-self: start; padding: 4px 8px; background: var(--hl-amt-bg); border-radius: var(--radius); }
 .hl-tile-amt-c { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
 .hl-tile-amt-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
 .hl-tile-amt-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; cursor: help; }
 .hl-tile-amt-v.hl-tile-amt-none { font-weight: 400; color: var(--text-muted); cursor: default; }
 .hl-tile-amt-v.hl-tile-amt-neg { color: var(--danger); }
 .hl-tile-amt-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: nowrap; }
-.hl-tile-amt-p.hl-ov-up { color: var(--success); }
-.hl-tile-amt-p.hl-ov-down { color: var(--danger); }
-/* 分數下面一行「分數：純利率 80 · 動銷率 60」（沒有總分的卡片也留這一行的高度，卡片才一樣高） */
-.hl-tile-parts { min-height: 16px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
-/* 只看純利率時寫出原因（「分數：純利率 80・動銷率標準未設定，暫時只看純利率」）：字比較長，允許在段與段之間換行 */
-.hl-tile-parts.hl-tile-parts-why { white-space: normal; }
-.hl-tile-parts-why > span { white-space: nowrap; }
+/* 五個「上月」小字一律灰色，只有前面的小三角形上色（上升綠、下降紅；持平沒有三角形） */
+.hl-tile-tri { margin-right: 2px; font-size: 8px; vertical-align: 1px; }
+.hl-tile-tri-up { color: var(--success); }
+.hl-tile-tri-down { color: var(--danger); }
+/* 第二列：靠右、灰色小字、只佔一行（放不下以 … 收尾，完整文字在 title）；沒內容也留一行高，卡片才一樣高 */
+.hl-tile-parts { min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
 .hl-score-tbl { margin-top: 8px; }
 .hl-score-tbl .hl-tiers { white-space: normal; }
@@ -2899,8 +2888,9 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tier-hit { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
 .hl-tier-miss { border-style: dashed; color: var(--danger); }
 .hl-tier-none { font-size: 11px; color: var(--text-muted); }
-/* 總分旁「比上月 +8」 */
+/* 分數徽章左邊「比上月 +8」：整段淺灰小字（數字也不上色） */
 .hl-tile-delta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.hl-tile-delta .hl-delta { color: inherit; font-weight: 400; }
 /* 細項：「看評分細節」預設收合 */
 .hl-score-more { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .hl-score-more > summary { cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--info); }
