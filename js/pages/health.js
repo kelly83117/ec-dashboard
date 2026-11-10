@@ -59,7 +59,7 @@ function _hlDeepFreeze(o) {
 //     MO+ 不含 2026-09：下半月幾乎沒有資料（MO+ 麻吉 8 個商品、約 2 千元），未來補齊後可重算。
 //     🔴 這裡只改 BASE（2026-10 以前）。2026-11 起吃雲端 app/health_rules 那一版，要管理員在「⚙ 評分標準」另存。
 const HEALTH_RULES = _hlDeepFreeze({
-  version: 'v7-2026-11',   // v7（2026-11-09）：蝦皮純利率線換成含稅口徑（見 score.items 的 pureRate）
+  version: 'v8-2026-11',   // v8（2026-11-10）：蝦皮純利率線改回 25/20/18（見 score.items 的 pureRate）
   from: '2026-01',                     // 這份規則從哪個月起適用（第一版＝firstMonth；之後的版本見 healthRulesForMonth）
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
@@ -71,13 +71,13 @@ const HEALTH_RULES = _hlDeepFreeze({
   //   純利率＝獲利面向的「純利 ÷ 實際營收」（KPI）、動銷率＝商品結構面向的動銷率（MOMO＝同淨利表 MOMO 總覽，以商品頁計；PChome＝公司商品口徑；蝦皮＝整月商品表現）。
   //   比較用畫面顯示的 0.1% 精度（_hlTier）：畫面寫 20.0% 就算達到 20% 線，手算核對跟畫面一致。
   //   provisional＝暫定（畫面標「暫定」）。之後做「標準設定頁」時才改成可設定；現在寫死在這裡，改數字要升 version。
-  //   蝦皮純利率線（v7，2026-11-09）：KPI 蝦皮改含稅、純利扣稅金（v881），同一個標準換成新量尺：25/20/18 → 22.5/17.5/16
-  //     （2026-01～10 四店 40 個店月回測：新資料配新線的分數＝舊資料配舊線，40/40 相同）。雲端版本由 __healthShopeeTaxInLines 換。
+  //   蝦皮純利率線（v8，2026-11-10）：11/10 老闆決定標準維持 25/20/18，KPI 資料維持含稅（v881 起含稅、純利扣稅金）。
+  //     v7（2026-11-09）的改線已撤回。2026-11 起的線在雲端 app/health_rules，由管理員在「⚙ 評分標準」改。
   score: {
     tiers: [100, 80, 60],
     items: [
       { key: 'pureRate', label: '純利率', short: '純利', w: 0.5, dim: 'profit', provisional: false,
-        lines: { shopee: [0.225, 0.175, 0.16], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20] } },
+        lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20] } },
       { key: 'sellThrough', label: '動銷率', short: '動銷', w: 0.5, dim: 'structure', provisional: true,
         lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14] } },
     ],
@@ -158,13 +158,12 @@ const HEALTH_RULES = _hlDeepFreeze({
   },
   // 依通路類型的門檻（[零分線, 滿分線]）。order＝總覽分組順序。
   //   純利率 v2 校準（真實 KPI 2026-01～10 的 P50 → 滿分線取 P75）：蝦皮自營 P50 20.3%、MOMO 自出貨 37.8%、MOMO 寄倉 24.3%、MO+ 28.1%、酷澎商城 26.8%（樣本 6）。
-  //     蝦皮 v7（2026-11-09）改成含稅口徑：滿分線 0.24 → 0.215（跟 100 分線一樣降 2.5pp；線性分無法精確等比，只影響獲利面向的分數條，不影響總分）。
   //   label＝評分標準視窗、完整規則上的類型名稱，跟主看板卡片的名稱一致（2026-11-05；以前是蝦皮自營、MOMO 自出貨、MOMO 寄倉、酷澎商城）。只是顯示文字，key 不動。
   //   sellThrough（動銷率）＝v4 校準值（__healthCalibrate 依實測 P10／P50／P75 算的建議值，方案 §2-7-2）；null＝這類型不評動銷率。
   //     MOMO 三類是 v6 用新口徑 2026-05～10 重算（MO+ 不含 2026-09）。只給舊面向函式用，不影響總分（總分看 score.items 的 lines）。
   //     stFlag：'few'＝樣本少（< HEALTH_CALIB.minN 筆，門檻用最小間距），畫面標「樣本少」；'uncal'＝還沒有實測資料、仍是起始值，標「待校準」。
   types: {
-    shopee:  { label: '蝦皮',         order: 1, pureRate: [0, 0.215], sellThrough: [0.30, 0.65], stFlag: 'uncal', members: '好麻吉、玩樂、森之旅、維克' },
+    shopee:  { label: '蝦皮',         order: 1, pureRate: [0, 0.24], sellThrough: [0.30, 0.65], stFlag: 'uncal', members: '好麻吉、玩樂、森之旅、維克' },
     momoJia: { label: 'MOMO 甲配',    order: 2, pureRate: [0, 0.39], sellThrough: [0.42, 0.50], members: 'MOMO 甲配' },
     momoYi:  { label: 'MOMO 乙配（寄倉）', order: 3, pureRate: [0, 0.26], sellThrough: [0.65, 0.73], members: 'MOMO 乙配（寄倉）' },
     moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
@@ -1402,8 +1401,6 @@ function _hlRangeLabel(from, to) {
 
 // 「看算法說明」折疊（預設收合）：5 點白話，粗體用 <b>。營收門檻、商品門檻、暫定、不算動銷率的類型都從規則產生，不寫死。
 //   分數線不在這裡寫（只在評分標準視窗看）。最上面一行「評分標準：X 起適用」隨選定月份變。
-// 蝦皮純利率口徑說明（「看算法說明」第 6 點、評分標準視窗說明區共用）。只是說明文字，不影響計算。
-const HL_SHOPEE_TAXIN_NOTE = '2026/11/09 起 KPI 蝦皮改含稅、純利扣稅金，蝦皮純利率分數線由 25/20/18 等比換算為 22.5/17.5/16（同一標準）。';
 function _hlGuideFullHtml(rules) {
   const R = rules || HEALTH_RULES, e = escapeHtml;
   const st = R.score.items.find(it => it.key === 'sellThrough');
@@ -1415,7 +1412,6 @@ function _hlGuideFullHtml(rules) {
     `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}`,
     `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片會寫「未評分」和原因，不算 0 分。`,
     `<b>表現好／需注意商品</b>只列本月或上月營收 ${e(minRev)} 元以上的商品。`,
-    e(HL_SHOPEE_TAXIN_NOTE),
   ];
   return `<p class="hl-gt-from">評分標準：${e(_hlYmLabel(R.from || R.firstMonth))} 起適用</p><ol class="hl-ga-list">${pts.map(x => `<li>${x}</li>`).join('')}</ol>`;
 }
@@ -2898,7 +2894,6 @@ function _hlStdBodyHtml() {
         <li>選「從哪個月開始適用」，填各通路 100／80／60 分的門檻（%），按儲存。之前的月份照舊。</li>
         <li>每類第一列是整類共用的線；展開「個別通路」只填要不一樣的那家，沒填就照整類。</li>
         <li>整組留空＝標準未設定（不給分），三格要全填或全空。「近 6 月」是實際數字，訂線時參考。</li>
-        <li>${escapeHtml(HL_SHOPEE_TAXIN_NOTE)}</li>
       </ol>
       <label class="hl-std-field">從哪個月開始適用
         <select data-hl-std-from>${_hlStdMonths().map(m => `<option value="${m}"${m === from ? ' selected' : ''}>${escapeHtml(_hlYmLabel(m))}</option>`).join('')}</select></label>
@@ -3269,115 +3264,6 @@ Object.assign(App, {
   },
 });
 
-/* ---------- Console：蝦皮純利率線換成含稅口徑（2026-11-09，管理員；評分標準視窗只能改 2026/11 以後，這次是口徑換算，要套到所有雲端版本） ----------
- *   __healthShopeeTaxInLines()               試跑：列出每一版的蝦皮純利率線（整類＋個別通路覆蓋）要怎麼處理，不寫。
- *   __healthShopeeTaxInLines({commit:true})  真的寫：有改的版本整版覆蓋（跟 _hlStdSave 同寫法）＋第一次寫入時存快照，一次 writePaths，寫完讀回比對。
- *   規則（純函式 _hlShopeeTaxInPlanVersion，node 測過）：只看 items.pureRate.lines.shopee 和 items.pureRate.linesByChannel['shopee-*']；
- *     剛好 25/20/18（0.1% 精度比）⇒ 換成 22.5/17.5/16；已經是 22.5/17.5/16 ⇒ 跳過；其他值 ⇒ 列出、不動、請人工確認。
- *     動銷率、其他類型、其他通路一律原樣。有改到的版本加 shopeeTaxIn:1（版本頂層欄位，驗證不看）；by／byName／at 保持原作者。
- *   快照：app/health_rules 頂層 preShopeeTaxIn＝{ atMs, by, byName, schema, versions:改之前整份 versions }，只在第一次寫（已存在就不覆蓋）。
- *     _hlRuleVersionsFromDoc 只讀 schema／versions，頂層多的欄位不影響驗證，也不影響評分標準視窗「有人剛改過」的比對。
- *   還原：__healthShopeeTaxInLinesRestore()，同樣預設試跑、{commit:true} 才寫。🔴 回滾順序：先還原資料、再還原程式。
- *   寫入走 __cloudHealthRules.writePaths（沒有新雲端物件，本機防護物件數不變）；被防護擋下時回 undefined → 回 {ok:false,blocked:true}。 */
-// HL_SHOPEE_TAXIN_PURE_BEGIN（node 測試會擷取這一段，只能放純函式與常數）
-const HL_SHOPEE_TAXIN_OLD = Object.freeze([0.25, 0.20, 0.18]);
-const HL_SHOPEE_TAXIN_NEW = Object.freeze([0.225, 0.175, 0.16]);
-// 一組線 → 'convert'｜'done'｜'other'。用 0.1% 精度比（同 _hlTier）。
-function _hlShopeeTaxInLineAct(a) {
-  const k = x => Math.round(x * 1000);
-  const same = ref => Array.isArray(a) && a.length === 3 && a.every((x, i) => typeof x === 'number' && isFinite(x) && k(x) === k(ref[i]));
-  if (same(HL_SHOPEE_TAXIN_OLD)) return 'convert';
-  if (same(HL_SHOPEE_TAXIN_NEW)) return 'done';
-  return 'other';
-}
-// 一版 → { next:有改就是新版本（深拷貝）否則 null, rows:[{ 版本, 位置, 現值, 處理 }] }
-function _hlShopeeTaxInPlanVersion(key, v) {
-  const rows = [], pct = a => (Array.isArray(a) ? a.map(x => Math.round(x * 1000) / 10).join('/') : JSON.stringify(a));
-  const pr = v && v.items && v.items.pureRate;
-  if (!pr || typeof pr !== 'object') { rows.push({ 版本: key, 位置: '—', 現值: '—', 處理: '這版沒有純利率，不動' }); return { next: null, rows }; }
-  const next = JSON.parse(JSON.stringify(v));
-  let changed = false;
-  const one = (where, a, set) => {
-    const act = _hlShopeeTaxInLineAct(a);
-    rows.push({ 版本: key, 位置: where, 現值: pct(a), 處理: act === 'convert' ? '換成 22.5/17.5/16' : act === 'done' ? '已是含稅口徑，跳過' : '不是 25/20/18，不動，請人工確認' });
-    if (act === 'convert') { set(HL_SHOPEE_TAXIN_NEW.slice()); changed = true; }
-  };
-  if (pr.lines && Object.prototype.hasOwnProperty.call(pr.lines, 'shopee')) one('蝦皮整類', pr.lines.shopee, a => { next.items.pureRate.lines.shopee = a; });
-  else rows.push({ 版本: key, 位置: '蝦皮整類', 現值: '（沒有）', 處理: '標準未設定，不動' });
-  Object.keys(pr.linesByChannel || {}).filter(id => id.indexOf('shopee-') === 0).sort()
-    .forEach(id => one('個別通路 ' + id, pr.linesByChannel[id], a => { next.items.pureRate.linesByChannel[id] = a; }));
-  if (changed) next.shopeeTaxIn = 1;
-  return { next: changed ? next : null, rows };
-}
-// HL_SHOPEE_TAXIN_PURE_END
-async function _hlStiRead(tag) {
-  if (!_hlStdCanEdit()) { console.error(tag + ' 只限管理員（唯讀帳號也不行）'); return null; }
-  const be = window.__cloudHealthRules;
-  if (!be || typeof be.writePaths !== 'function' || typeof be.getDoc !== 'function') { console.error(tag + ' 雲端未連線'); return null; }
-  try { return { be, d: await _hlStdReadServer(be) }; }
-  catch (e) { console.error(tag + ' 讀取伺服器失敗：' + ((e && e.message) || e)); return null; }
-}
-window.__healthShopeeTaxInLines = async function (opts) {
-  const tag = '[健檢 蝦皮線含稅]', commit = !!(opts && opts.commit);
-  const r0 = await _hlStiRead(tag); if (!r0) return null;
-  const { be, d } = r0;
-  if (!d || !_hlIsObj(d.versions)) { console.log(tag + ' 雲端沒有任何版本（全部用程式內的 BASE，BASE 已是 22.5/17.5/16），不用換'); return { ok: true, items: 0 }; }
-  if (d.schema !== 1) { console.error(tag + ' schema 不認得（' + d.schema + '），不處理'); return null; }
-  const keys = Object.keys(d.versions).sort(), rows = [], nexts = {};
-  keys.forEach(k => { const p = _hlShopeeTaxInPlanVersion(k, d.versions[k]); rows.push(...p.rows); if (p.next) nexts[k] = p.next; });
-  console.table(rows);
-  const todo = Object.keys(nexts);
-  // 換完整份還要合法（_hlBuildRuleChain 有任何問題就不寫：不合法會讓全公司整份退回 BASE）
-  const after = Object.assign({}, d.versions, nexts);
-  const { problems } = _hlBuildRuleChain(_hlRuleVersionsFromDoc({ schema: 1, versions: after }));
-  if (problems.length) { console.error(tag + ' 換完的版本不合法，不寫：' + problems.join('；')); return { ok: false, problems }; }
-  if (!commit) {
-    console.log('%c' + tag + ' 試跑：要換 ' + todo.length + ' 版（' + (todo.join('、') || '無') + '），沒有寫入。快照：' + (d.preShopeeTaxIn ? '已存在（不會覆蓋）' : '第一次寫入時存') + '。真的寫入：__healthShopeeTaxInLines({commit:true})', 'color:#5b5fcf;font-weight:700');
-    return { dryRun: true, todo, rows, versionsAfter: _hlRuleVersionsFromDoc({ schema: 1, versions: after }) };   // versionsAfter：給 __healthRegressionSnap({versions}) 模擬換線後
-  }
-  if (!todo.length) { console.log(tag + ' 沒有要換的版本'); return { ok: true, items: 0 }; }
-  const u = App.currentUser || {};
-  const payload = todo.map(k => [['versions', k], nexts[k]]);
-  if (!d.preShopeeTaxIn) payload.push([['preShopeeTaxIn'], { atMs: Date.now(), by: u.username || '', byName: u.name || '', schema: d.schema, versions: JSON.parse(JSON.stringify(d.versions)) }]);
-  console.log(tag + ' 寫入（一次）', payload);
-  let r;
-  try { r = await be.writePaths(payload); } catch (e) { console.error(tag + ' 寫入失敗', e); return { ok: false, error: String((e && e.message) || e) }; }
-  if (!(r && r.ok)) { console.warn(tag + ' 這次沒有寫進雲端（防寫或唯讀狀態）'); return { ok: false, blocked: true }; }
-  const r1 = await _hlStiRead(tag);
-  const bad = r1 && r1.d && r1.d.versions ? todo.filter(k => _hlStableJson(r1.d.versions[k]) !== _hlStableJson(nexts[k])) : todo;
-  if (bad.length) console.error(tag + ' 讀回不一致：' + bad.join('、'));
-  else console.log('%c' + tag + ' 已換 ' + todo.length + ' 版，讀回一致', 'color:#16a34a;font-weight:700');
-  return { ok: !bad.length, items: todo.length, bad };
-};
-// 依 preShopeeTaxIn.versions 把「帶 shopeeTaxIn 標記」的版本整版寫回；沒標記的（換完後有人用評分標準視窗存過）不動、列出來；快照標 restoredAt。
-window.__healthShopeeTaxInLinesRestore = async function (opts) {
-  const tag = '[健檢 蝦皮線含稅還原]', commit = !!(opts && opts.commit);
-  const r0 = await _hlStiRead(tag); if (!r0) return null;
-  const { be, d } = r0, snap = d && d.preShopeeTaxIn;
-  if (!snap || !_hlIsObj(snap.versions)) { console.error(tag + ' 沒有快照 preShopeeTaxIn'); return null; }
-  if (snap.restoredAt) console.warn(tag + ' 快照已經還原過一次（' + new Date(snap.restoredAt).toLocaleString('zh-TW') + '）');
-  const cur = (d && d.versions) || {}, rows = [], todo = [];
-  Object.keys(snap.versions).sort().forEach(k => {
-    const c = cur[k];
-    if (!c) rows.push({ 版本: k, 處理: '雲端已經沒有這版，不動，請人工確認' });
-    else if (c.shopeeTaxIn !== 1) rows.push({ 版本: k, 處理: '沒有換線標記（沒換過，或換完後有人存過），不動' });
-    else { rows.push({ 版本: k, 處理: '整版寫回換線前的內容' }); todo.push(k); }
-  });
-  console.table(rows);
-  const after = Object.assign({}, cur); todo.forEach(k => { after[k] = snap.versions[k]; });
-  const { problems } = _hlBuildRuleChain(_hlRuleVersionsFromDoc({ schema: 1, versions: after }));
-  if (problems.length) { console.error(tag + ' 還原後的版本不合法，不寫：' + problems.join('；')); return { ok: false, problems }; }
-  if (!commit) { console.log('%c' + tag + ' 試跑：要還原 ' + todo.length + ' 版，沒有寫入。真的寫入加 {commit:true}', 'color:#5b5fcf;font-weight:700'); return { dryRun: true, todo }; }
-  if (!todo.length) { console.log(tag + ' 沒有要還原的版本'); return { ok: true, items: 0 }; }
-  const payload = todo.map(k => [['versions', k], snap.versions[k]]).concat([[['preShopeeTaxIn', 'restoredAt'], Date.now()]]);
-  let r;
-  try { r = await be.writePaths(payload); } catch (e) { console.error(tag + ' 寫入失敗', e); return { ok: false }; }
-  if (!(r && r.ok)) { console.warn(tag + ' 這次沒有寫進雲端（防寫或唯讀狀態）'); return { ok: false, blocked: true }; }
-  const r1 = await _hlStiRead(tag);
-  const bad = r1 && r1.d && r1.d.versions ? todo.filter(k => _hlStableJson(r1.d.versions[k]) !== _hlStableJson(snap.versions[k])) : todo;
-  if (bad.length) console.error(tag + ' 讀回不一致：' + bad.join('、')); else console.log('%c' + tag + ' 已還原 ' + todo.length + ' 版，讀回一致', 'color:#16a34a;font-weight:700');
-  return { ok: !bad.length, items: todo.length, bad };
-};
 /* ---------- Console：唯讀回測 ---------- */
 //   opts：{ from, to, products:true（也算商品層面向；只算「已經載入」的平台，其他平台當成只算 KPI）, adsRules:true（蝦皮廣告致虧三條候選規則逐通路逐月比較） }
 //   沒有 products ⇒ 跟塊 A 一樣只算 KPI（商品層面向「不適用」，不會因為商品層沒載入而沒有總分）。
@@ -3411,9 +3297,9 @@ function _hlBacktestSnap(o) {
   _HL_PLATFORMS.forEach(p => { snap.prodState[p] = need.indexOf(p) >= 0 ? 'ready' : 'off'; });
   return { snap, months, from, to, need };
 }
-// 唯讀回歸快照（蝦皮純利率線換含稅口徑用；不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭，不影響本機防寫物件數）。
+// 唯讀回歸快照（改分數線前後比對用；不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭，不影響本機防寫物件數）。
 //   __healthRegressionSnap({ from, to, versions })：healthBacktest 對全部通路逐月的 raws（各項目原始值、分數、狀態、線、總分）。
-//   versions＝要模擬的版本清單（例：換線後的雲端版本）；沒傳＝用這頁讀到的雲端版本。只算 KPI（商品層面向不載入，跟 __healthBacktest 預設相同）。
+//   versions＝要模擬的版本清單（例：改線後的雲端版本）；沒傳＝用這頁讀到的雲端版本。只算 KPI（商品層面向不載入，跟 __healthBacktest 預設相同）。
 window.__healthRegressionSnap = function (opts) {
   const o = opts || {};
   if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健檢」頁再跑'); return null; }
