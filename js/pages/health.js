@@ -2183,7 +2183,7 @@ function _hlTileHtml(r, prev, rank, open, snap) {
   const delta = (r.score == null ? '' : _hlTileDeltaHtml(r, prev)) || '<span class="hl-tile-delta" aria-hidden="true"></span>';
   const right = (r.score == null
     ? `<span class="hl-tile-noscore">${_HL_TILE_WAIT[r.status] || '未評分'}</span>`
-    : _hlScoreHtml(r)) + delta;
+    : _hlTileBadgeHtml(r)) + delta;
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span><span class="hl-tile-hd-r">${right}</span></div>
       ${_hlTilePartsHtml(r, snap)}
@@ -2235,21 +2235,34 @@ function _hlTileAmtHtml(r, snap) {
 }
 // 卡片第二列（2026-11-10 整理）：靠右、灰色小字、只佔一行（放不下用 …，完整文字在 title）。
 //   有分數：「分數：純利率 80 · 動銷率 100」；動銷率等商品層：「分數：純利率 80 · 動銷率 載入中…」；
-//   只看純利率：「分數：純利率 80（動銷率未訂標準）」（括號裡＝_hlTilePureOnlyShort；title 放 _hlPureOnlyWhy 的完整說法）；
-//   未評分：放原因（_hlNoScoreWhy，例：營收未滿 $30,000）；其他（例：商品層載入中、純利率沒分數）留空行，卡片才等高。
+//   只看純利率（例：蝦皮動銷率未訂標準）：不顯示這行（空的佔位），說明改放分數徽章的 title（_hlTileBadgeHtml）；
+//   未評分：放原因（_hlNoScoreWhy，例：營收未滿 $30,000）；其他（例：商品層載入中、純利率沒分數）也是空的佔位。
+//   空的佔位：同一排有別張卡有這行時跟著留一行高（subgrid），整排都沒有時這一列收起來（css .hl-tile-parts:empty）。
+const _HL_TILE_PARTS_EMPTY = '<div class="hl-tile-parts" aria-hidden="true"></div>';
+const _HL_TILE_WAIT_ST = { loading: '載入中…', notLoaded: '未載入', timeout: '載入逾時' };
 function _hlTilePartsHtml(r, snap) {
   const line = t => `<div class="hl-tile-parts" title="${escapeHtml(t)}">${escapeHtml(t)}</div>`;
   if (r.score == null && !_HL_TILE_WAIT[r.status]) return line(_hlNoScoreWhy(r, healthRulesForMonth(r.month, snap && snap.healthRuleVersions)));
   const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
-  if (!pure || pure.status !== 'ok') return '<div class="hl-tile-parts" aria-hidden="true"></div>';
-  const waitTxt = { loading: '載入中…', notLoaded: '未載入', timeout: '載入逾時' };
+  if (!pure || pure.status !== 'ok') return _HL_TILE_PARTS_EMPTY;
   const right = st && st.status === 'ok' ? `${st.label} ${st.score}`
-    : st && st.lines && waitTxt[st.status] ? `${st.label} ${waitTxt[st.status]}` : null;
-  if (right == null) {
-    const t = `分數：${pure.label} ${pure.score}（${_hlTilePureOnlyShort(r)}）`;
-    return `<div class="hl-tile-parts" title="${escapeHtml(`分數：${pure.label} ${pure.score}・${_hlPureOnlyWhy(r)}，暫時只看${pure.label}`)}">${escapeHtml(t)}</div>`;
-  }
+    : st && st.lines && _HL_TILE_WAIT_ST[st.status] ? `${st.label} ${_HL_TILE_WAIT_ST[st.status]}` : null;
+  if (right == null) return _HL_TILE_PARTS_EMPTY;   // 只看純利率：說明在徽章 title
   return line(`分數：${pure.label} ${pure.score} · ${right}`);
+}
+// 只看純利率的卡（純利率有分數、動銷率沒分數也不是在等商品層）→ 徽章 title「分數只看純利率（動銷率未訂標準）」；其他 → ''（判斷同 _hlTilePartsHtml）
+function _hlTilePureOnlyTip(r) {
+  const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
+  if (r.score == null || !pure || pure.status !== 'ok') return '';
+  if (st && (st.status === 'ok' || (st.lines && _HL_TILE_WAIT_ST[st.status]))) return '';
+  return `分數只看${pure.label}（${_hlTilePureOnlyShort(r)}）`;
+}
+// 卡片上的分數徽章＝_hlScoreHtml（文字不變、data-hl-fp 照舊）＋只看純利率時的 title；原本就有 title（參考分）就接在說明後面
+function _hlTileBadgeHtml(r) {
+  const h = _hlScoreHtml(r), tip = _hlTilePureOnlyTip(r);
+  if (!tip) return h;
+  if (/^<span [^>]*title="/.test(h)) return h.replace('title="', `title="${escapeHtml(tip)}&#10;`);
+  return h.replace('<span ', `<span title="${escapeHtml(tip)}" `);
 }
 // 卡片第二列括號裡的短說法：「動銷率未訂標準」「動銷率尚未上傳」「動銷率資料不足」…（判斷同 _hlPureOnlyWhy）
 function _hlTilePureOnlyShort(r) {

@@ -2884,6 +2884,8 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile-tri-down { color: var(--danger); }
 /* 第二列：靠右、灰色小字、只佔一行（放不下以 … 收尾，完整文字在 title）；沒內容也留一行高，卡片才一樣高 */
 .hl-tile-parts { min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 空的佔位（只看純利率、商品層載入中…）：自己不撐高；同一排有別張卡有字時，subgrid 讓這一列跟著留一行高，金額列照樣對齊 */
+.hl-tile-parts:empty { min-height: 0; }
 /* v5 細項「看評分細節」：分數線三格，達到的那一級標出來 */
 .hl-score-tbl { margin-top: 8px; }
 .hl-score-tbl .hl-tiers { white-space: normal; }
