@@ -11933,12 +11933,38 @@ function _kpiFillGroupObj(){return KPI_GROUPS.find(g=>g.key===_kpiFillGroup)||KP
 // 欄位＝該組 manual 欄位，順序照 group.order（order 裡的公式欄位跳過；沒排到的 manual 接在後面）。
 //   例外：group.fillFormula 列的公式欄（MOMO 實際營收）也放進來，回傳的物件帶 fx:true（灰底、可覆蓋、不算填寫進度）。
 //   group.commonAsColumn：共同費用也當一欄（k:'_common'、common:true），位置照 order。
+//   成本佔比（2026-11-10）：每組都在「商品成本」後面插一欄唯讀計算欄（k:'_costPct'、ro:true，_kpiFillCell 回 kind:'ro'）。
+//   🔴 放在 cols 裡（不是只畫在畫面上）：貼上 Excel（kpiFillPaste）照 cols 的位置對欄，少了這一欄，從下載的 Excel 整列貼回來會整列錯一欄。
 function _kpiFillCols(group){
   const man=group.manual.map(f=>f.k), fx=group.fillFormula||[], cm=!!(group.commonAsColumn&&group.commonCostLabel);
   const ord=(group.order||man).filter(k=>man.includes(k)||fx.includes(k)||(cm&&k==='_common'));
   man.forEach(k=>{if(!ord.includes(k))ord.push(k);});
   if(cm&&!ord.includes('_common'))ord.push('_common');
-  return ord.map(k=>k==='_common'?{k:'_common',l:group.commonCostShortLabel||'共同費用',common:true}:man.includes(k)?group.manual.find(f=>f.k===k):Object.assign({},group.formula.find(f=>f.k===k),{fx:true}));
+  const ci=ord.indexOf('cost');if(ci>=0)ord.splice(ci+1,0,'_costPct');
+  return ord.map(k=>k==='_costPct'?KPI_COST_PCT_COL:k==='_common'?{k:'_common',l:group.commonCostShortLabel||'共同費用',common:true}:man.includes(k)?group.manual.find(f=>f.k===k):Object.assign({},group.formula.find(f=>f.k===k),{fx:true}));
+}
+// ── 成本佔比（2026-11-10，Vanessa 需求）：商品成本 ÷ 實際營收（_kpiRealRev：MOMO＝實際營收欄，其他通路＝營收欄）──
+//   🔴 只顯示、不存、不能編輯：沒有輸入框、不在 KPI_GROUPS.formula（_kpiCalcAll 的輸出不變、不會寫進 app/kpi），貼上時略過。
+//   顯示到小數兩位百分比；商品成本沒填、營收沒填、營收 ≤ 0 ⇒ null（畫面「—」、Excel 空白）。
+//   小計／總計＝加總後的成本 ÷ 加總後的營收（不是平均）。異常警示不標這欄（成本率警示 R2 照舊標在商品成本格）。
+const KPI_COST_PCT_COL=Object.freeze({k:'_costPct',l:'成本佔比',ro:true,desc:'商品成本 ÷ 實際營收（營收含稅、成本不含稅，跟 KPI 試算表算法一致）'});
+const _kpiFilled=v=>v!=null&&v!=='';
+// 一家店：rf＝_kpiRawForCalc 之後的資料（關站月份全 0）；d＝_kpiCalcAll 結果
+function _kpiShopCostPct(rf,d){
+  const revFilled=_kpiFilled(rf.rev)||_kpiFilled(rf.actualRev);
+  if(!_kpiFilled(rf.cost)||!revFilled)return null;
+  const rev=_kpiRealRev(d);
+  return rev>0?(Number(rf.cost)||0)/rev:null;
+}
+// 一組（小計）：{cost, rev, pct}。cost＝有填成本的店加總；rev＝_kpiGroupTotals 的 totalRev（跟小計純利率同一個分母）；沒有任何一家填成本、或 rev ≤ 0 ⇒ pct null
+function _kpiGroupCostPct(row,group){
+  let cost=0,any=false;
+  group.shops.forEach(shop=>{
+    const rf=_kpiRawForCalc(((row&&row[group.key])||{})[shop]||{},group,shop,row);
+    if(_kpiFilled(rf.cost)){any=true;cost+=Number(rf.cost)||0;}
+  });
+  const rev=_kpiGroupTotals(row,group).totalRev;
+  return{cost,any,rev,pct:any&&rev>0?cost/rev:null};
 }
 // 公式欄「不覆蓋時」的值（placeholder 用）：把這一格的覆蓋值拿掉再跑一次 _kpiCalcAll。
 function _kpiFxDefault(row,group,shop,k){
@@ -11947,6 +11973,7 @@ function _kpiFxDefault(row,group,shop,k){
 }
 // 一格的種類：cell 一般｜merge 合併欄位領頭店（存總額）｜share 合併欄位其他店（唯讀份額）｜na 不適用｜common 共同費用
 function _kpiFillCell(group,shop,f,month){
+  if(f.ro)return{kind:'ro'};   // 成本佔比：唯讀計算欄，沒有 segs（不能寫、不比異常、貼上略過）
   if(f.common)return shop===_kpiCommonShop(group)?{kind:'common',segs:[group.key+'Common']}:{kind:'na'};   // 物流運費只在轉單列（PChome 寄倉列不適用）
   const st=_kpiFieldMergeStatus(group,f.k,shop,month);
   if(st&&st.type==='na')return{kind:'na'};
@@ -12108,7 +12135,7 @@ function _kpiAnomSkipGroup(group,month){return !!((group.since&&month<group.sinc
 function _kpiAnomCellVal(row,group,shop,f){
   if(!row||_kpiAnomSkipGroup(group,row.month))return null;
   const cell=_kpiFillCell(group,shop,f,row.month);
-  if(cell.kind==='na'||cell.kind==='share')return null;
+  if(cell.kind==='na'||cell.kind==='share'||cell.kind==='ro')return null;   // ro＝成本佔比（唯讀計算欄，不比）
   if(f.fx)return null;
   let v=_kpiFillCur(row,cell).v;
   if((v==null||v==='')&&cell.kind==='cell'&&_kpiIsAutoFill(group,shop,f.k)){const c=_kpiShopCalc(row,group,shop)[f.k];v=c==null?null:c;}
@@ -12168,7 +12195,7 @@ function _kpiAnomalies(month,rows){
     group.shops.forEach(shop=>{
       chk.forEach(f=>{
         const cell=_kpiFillCell(group,shop,f,month);
-        if(cell.kind==='na'||cell.kind==='share')return;
+        if(cell.kind==='na'||cell.kind==='share'||cell.kind==='ro')return;   // ro＝成本佔比：不另外標警示（成本率照舊標在商品成本格）
         const key=JSON.stringify(cell.segs);
         if(seen.has(key))return;seen.add(key);
         const who=cell.kind==='common'?'':(cell.kind==='merge'?_kpiMergeHint(group,cell.st,f.k)+' ':_kpiShopLabel(shop)+' ');
@@ -12420,6 +12447,8 @@ function _kpiFillHtml(row){
     // 有備註：蝦皮（#332）保留可點的鉛筆＋旁邊「備註」小標（整個 span 都可點）；其他組照舊用 ●。
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
       ?`<span class="km-note${note?' has':''}${note&&group.key==='shopee'?' km-note-pen':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'備註'}">${note?(group.key==='shopee'?'✎<span class="km-note-tag">備註</span>':'●'):'✎'}</span>`:'';
+    // 表頭拆兩段（成本／佔比）可以折成兩行：表頭不折的話這一欄要 74px 寬，1200px 寬 MOMO 會多出水平捲軸
+    if(f.ro)return `<th class="km-n km-f-rohead km-f-cpct" title="依公式自動計算，不能直接改"><div class="km-th"><span>${f.l.slice(0,2)}</span><span>${f.l.slice(2)}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</span></div></th>`;
     if(f.common)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[group.commonCostLabel])}</div></th>`;
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     const af=group.autoFill&&group.autoFill[f.k];
@@ -12431,6 +12460,7 @@ function _kpiFillHtml(row){
     const d=_kpiShopCalc(row,group,shop);
     const cells=cols.map((f,ci)=>{
       const cell=_kpiFillCell(group,shop,f,month);
+      if(cell.kind==='ro'){const cp=_kpiShopCostPct(_kpiRawForCalc(((row&&row[group.key])||{})[shop]||{},group,shop,row),d);return `<td class="km-n km-f-ro km-f-cpct"><div class="km-roval">${cp==null?'—':_kpiRatePct(cp)}</div></td>`;}
       if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
       // 合併欄位的小字要短：欄很窄，長句會折成三四行把整列撐高。完整說明放 title（滑鼠停上去看）。
       if(cell.kind==='share'){
@@ -12478,6 +12508,7 @@ function _kpiFillHtml(row){
   const t=_kpiGroupTotals(row,group);
   const fc=_kpiFillCount(row,group);
   const subCells=cols.map(f=>{
+    if(f.ro){const gc=_kpiGroupCostPct(row,group);return `<td class="km-n km-f-cpct">${gc.pct==null?'—':_kpiRatePct(gc.pct)}</td>`;}
     if(f.fx){const s=group.shops.reduce((a,shop)=>a+(Number(_kpiShopCalc(row,group,shop)[f.k])||0),0);return `<td class="km-n">${_kpiMoney(s)}</td>`;}
     let sum=0,any=false;const seen=new Set();
     group.shops.forEach(shop=>{
@@ -12698,6 +12729,7 @@ function kpiFillPaste(e,inp){
     const t=txt.trim();if(t==='')return;
     const g=at(r0+i,c0+j);
     if(!g){skipped.push(`第 ${i+1} 列第 ${j+1} 欄「${t}」：超出表格`);return;}
+    if(g.cell.kind==='ro'){skipped.push(`${g.label}「${t}」：自動計算欄，不能填`);return;}   // 成本佔比：照 Excel 整列貼回來時跳過這一欄，後面的欄位照常對位
     if(g.cell.kind==='na'||g.cell.kind==='share'){skipped.push(`${g.label}「${t}」：這格不能填`);return;}
     const n=_kpiParseNum(t);
     if(n==null){skipped.push(`${g.label}「${t}」：不是數字`);return;}
@@ -15434,16 +15466,19 @@ function kpiFillDownloadExcel(){
   const wb=XLSX.utils.book_new();
   // ① 總表
   {
-    const aoa=[['通路','營收','純利','純利率','填寫進度']],fmt=[[]];
+    // 商品成本、成本佔比（2026-11-10）：通路列＝有填成本的店加總、÷ 通路實際營收；合計＝各通路成本加總 ÷ 合計營收（_kpiGroupCostPct，同畫面小計）
+    const aoa=[['通路','營收','商品成本','成本佔比','純利','純利率','填寫進度']],fmt=[[]];
+    let allCost=0,allAny=false;
     KPI_GROUPS.forEach(g=>{
-      const t=_kpiGroupTotals(row,g),fc=_kpiFillCount(row,g);
-      aoa.push([g.title,t.totalRev,t.totalPure,t.totalRev>0?t.pureRateAgg:'',fc.total?fc.filled+' / '+fc.total:'不列入']);
-      fmt.push([null,MONEY,MONEY,PCT,null]);
+      const t=_kpiGroupTotals(row,g),fc=_kpiFillCount(row,g),gc=_kpiGroupCostPct(row,g);
+      if(gc.any){allAny=true;allCost+=gc.cost;}
+      aoa.push([g.title,t.totalRev,gc.any?gc.cost:'',gc.pct==null?'':gc.pct,t.totalPure,t.totalRev>0?t.pureRateAgg:'',fc.total?fc.filled+' / '+fc.total:'不列入']);
+      fmt.push([null,MONEY,MONEY,PCT,MONEY,PCT,null]);
     });
     const a=_kpiAllTotals(row),fa=_kpiFillCountAll(row);
-    aoa.push(['合計',a.rev,a.pure,a.rev>0?a.rate:'',fa.filled+' / '+fa.total]);
-    fmt.push([null,MONEY,MONEY,PCT,null]);
-    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[12,16,16,10,12]),'總表');
+    aoa.push(['合計',a.rev,allAny?allCost:'',allAny&&a.rev>0?allCost/a.rev:'',a.pure,a.rev>0?a.rate:'',fa.filled+' / '+fa.total]);
+    fmt.push([null,MONEY,MONEY,PCT,MONEY,PCT,null]);
+    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[12,16,16,10,16,10,12]),'總表');
   }
   // ② 各通路
   KPI_GROUPS.forEach(g=>{
@@ -15451,12 +15486,13 @@ function kpiFillDownloadExcel(){
     const pureKey=_kpiGroupTotals(row,g).pureKey;
     const aoa=[['店名','客單價'].concat(cols.map(f=>f.l),['純利','純利率'])];
     const fmt=[[]];
-    const colFmt=f=>_kpiIsMoneyField(f.k)?MONEY:COUNT;
+    const colFmt=f=>f.ro?PCT:_kpiIsMoneyField(f.k)?MONEY:COUNT;
     g.shops.forEach(shop=>{
       const d=_kpiShopCalc(row,g,shop);
       const aov=_kpiAovOf(d,g);
       const vals=cols.map(f=>{
         const cell=_kpiFillCell(g,shop,f,row.month);
+        if(cell.kind==='ro'){const cp=_kpiShopCostPct(_kpiRawForCalc(((row&&row[g.key])||{})[shop]||{},g,shop,row),d);return cp==null?'':cp;}   // 成本佔比（同畫面）
         if(cell.kind==='na')return '—';
         if(cell.fx)return Number(d[f.k])||0;   // 公式欄（實際營收）：匯出算出來的值（含手動覆蓋）
         if(cell.kind==='share')return g.fieldMerge?.[f.k]?.shareBy?(Number(d[f.k])||0):'—';   // 不攤的共用格（應收帳款）：跟畫面一樣寫「—」
@@ -15477,6 +15513,7 @@ function kpiFillDownloadExcel(){
     const t=_kpiGroupTotals(row,g);
     const ap=_kpiAovPool(row,[g]);   // 小計客單價：只算營收、訂單數都有填的店（同畫面）
     const sums=cols.map(f=>{
+      if(f.ro){const gc=_kpiGroupCostPct(row,g);return gc.pct==null?'':gc.pct;}   // 成本佔比小計＝加總後的成本 ÷ 加總後的營收
       if(f.fx)return g.shops.reduce((a,shop)=>a+(Number(_kpiShopCalc(row,g,shop)[f.k])||0),0);   // 公式欄：各店算出來的值加總
       let sum=0,any=false;const seen=new Set();
       g.shops.forEach(shop=>{
