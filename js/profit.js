@@ -19080,10 +19080,12 @@ function momoSaveF1102(shop,data){ const k=momoF1102Key(shop);
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{} }
 // F1102 檔名時間戳 → 「資料時間」顯示字串（F1102_YYYYMMDDHHMMSS → YYYY/MM/DD HH:MM）
 // ══════ F1102 → 庫存頁 MOMO倉＋盤點（MOMO）自動填入（比照 KPI 自動帶入：直接填格子、標「自動」、手動改後標籤消失）══════
-//   金額 ＝ Σ（F1102 寄倉數 consigned × 乙配 product.cost）；不含寄倉在途量。缺成本、F1102 品號不在乙配主檔的列出來，不默默少算。
+//   金額 ＝ Σ（F1102 寄倉數 consigned × 乙配 product.cost）× MOMO_INV_TAX（含 5% 營業稅；product.cost 是未稅）；不含寄倉在途量。
+//   2026-11-11 起庫存表統一含稅：之前寫進去的自動值是未稅、不回頭改（src 沒有 tax:'incl'）。缺成本、F1102 品號不在乙配主檔的列出來，不默默少算。
 //   歸屬月份看檔名時間戳（momoF1102TimeFromName）：檔案時間在每月 1～MOMO_INV_AUTO_DAY_MAX 號 → 預設上個月（月初匯出代表月底）；
 //   檔名沒有時間戳 → 不預設、要使用者選月份才寫；其他日期 → 不寫入，只顯示「目前寄倉庫存金額」。寫進 app/inventory 後固定，不回頭重算。舊的並行欄位 momoWhAuto / momoWhAutoSrc 不再寫入、不搬移、不刪（畫面不顯示）。
 const MOMO_INV_AUTO_DAY_MAX=5;
+const MOMO_INV_TAX=1.05;   // 庫存表金額含 5% 營業稅（成本表是未稅）
 const _momoPad2=n=>String(n).padStart(2,'0');
 let _momoUpF1102Month='';   // 使用者在上傳頁選的庫存月份：''＝用預設、'none'＝明確選「不寫入」、'YYYY-MM'
 function momoF1102InvMode(name){
@@ -19112,7 +19114,7 @@ function momoF1102InvCalc(f){
   Object.keys(skus).forEach(sku=>{ const q=Number(skus[sku]&&skus[sku].consigned)||0; if(!(q>0)) return; qty+=q;
     const p=by[sku]; if(!p){ notInMaster.push(sku+'×'+q); return; }
     const c=Number(p.cost); if(c>0) sum+=q*c; else missingCost.push(sku+'×'+q); });
-  return { amount:Math.round(sum), qty, skuN:Object.keys(skus).length, missingCost, notInMaster };
+  return { amount:Math.round(sum*MOMO_INV_TAX), qty, skuN:Object.keys(skus).length, missingCost, notInMaster };
 }
 function momoInvCanEdit(){   // 庫存表編輯權限：跟庫存頁 _invCanEdit 同一支（inventory.js 掛 window.__invCanEdit）；沒載到就用同樣的判斷
   try{ if(typeof window.__invCanEdit==='function') return !!window.__invCanEdit(); }catch(e){}
@@ -19160,7 +19162,7 @@ async function momoF1102InvWrite(inv){
   const u=window.App.currentUser||{}; const by=(typeof window.__invBy==='function')?window.__invBy():{ username:u.username||'', name:u.name||'' }; const TS=be.TS; const at=Date.now();
   const pairs=[];
   if(pick.momoWh){
-    const src={ src:'F1102', exportedAt:inv.exportedAt||'', qty:inv.qty, skuN:inv.skuN, missingCost:inv.missingCost||[], notInMaster:inv.notInMaster||[], by, at };   // 只放有值的欄位（不留 undefined）
+    const src={ src:'F1102', tax:'incl', exportedAt:inv.exportedAt||'', qty:inv.qty, skuN:inv.skuN, missingCost:inv.missingCost||[], notInMaster:inv.notInMaster||[], by, at };   // 只放有值的欄位（不留 undefined）
     pairs.push([['months',inv.ym,'momoWh'], inv.amount], [['months',inv.ym,'momoWhSrc'], src]);
   }
   if(pick.count) pairs.push([['months',inv.ym,'countNoteMomo'], today], [['months',inv.ym,'countNoteMomoSrc'], { src:'F1102', exportedAt:inv.exportedAt||'', by, at }]);
@@ -19190,7 +19192,7 @@ function momoF1102InvPreviewHtml(P){
   else if(!ym) line=`MOMO倉 <b>$${iv.amount.toLocaleString()}</b>：${m.mode==='needMonth'?'檔名沒有時間戳、尚未選月份':'已選擇不寫入'}，<b>不會寫入庫存表</b>。`;
   else line=`將寫入庫存表 <b>${ym}</b> 的 MOMO倉 <b>$${iv.amount.toLocaleString()}</b>與盤點（MOMO）日期（上傳當天）${m.mode==='auto'&&ym===m.defYm?`（依 F1102 檔案時間 ${m.time.slice(5)}）`:''}。${canEdit?'':'<span style="color:#b45309">沒有庫存表編輯權限，只計算、不寫入。</span>'}`;
   return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#78350f;line-height:1.6">
-    📊 <b>庫存頁 MOMO倉自動填入</b>：寄倉數 ${iv.qty.toLocaleString()} × 乙配成本（${iv.skuN} 個品號，不含在途）
+    📊 <b>庫存頁 MOMO倉自動填入</b>：寄倉數 ${iv.qty.toLocaleString()} × 乙配成本（未稅）× 1.05（含 5% 營業稅；${iv.skuN} 個品號，不含在途）
     <div style="margin-top:2px">${line}</div>${miss}</div>`;
 }
 function momoF1102TimeFromName(name){ const m=String(name||'').match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/); return m?(m[1]+'/'+m[2]+'/'+m[3]+' '+m[4]+':'+m[5]):''; }

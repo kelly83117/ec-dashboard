@@ -2586,14 +2586,14 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-/* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1052px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
-   月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 40（蝦皮）＋52（MOMO）＋40（酷澎）＋54（PChome）＋42（博客來）+ 叫貨 76 + 備註 76 ≈ 1052px。
+/* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 946px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
+   月份 64 + 公司 82 + 在途 76 + MOMO 76 + PChome／博客來 66×2 + 總計 84 + 較上月 92 + 盤點 40（蝦皮）＋52（MOMO）＋54（PChome）＋42（博客來）+ 叫貨 76 + 備註 76 ≈ 946px（2026-11-11 拿掉酷澎兩欄）。
    表格滿版：寬螢幕多出來的寬度由瀏覽器按各欄比例分給所有欄，不留白。
    盤點欄內容只有「11/2」，所以很窄；省下的寬度給備註。備註還是窄：滑鼠移上去（title）看全文、點進去輸入框往左展開成寬框（.inv-in-note:focus）。
-   公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
-   整張表最窄 1052px；更窄才由 .inv-table-wrap 左右捲動。
-   ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；酷澎／PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
-.inv-table { width: 100%; min-width: 1052px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+   公司比別欄寬一點（數字不要貼著月份）；PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
+   整張表最窄 946px；更窄才由 .inv-table-wrap 左右捲動。
+   ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
+.inv-table { width: 100%; min-width: 946px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 .inv-col-ym { width: 64px; }
 .inv-col-num { width: 76px; }
 .inv-col-num.inv-col-num-co { width: 82px; }
@@ -2698,7 +2698,7 @@
    手機寬度沿用全站 stat-grid 規則（2 欄／1 欄，那邊用 !important），這裡把跨欄取消。 */
 .inv-stat-grid { margin-bottom: 8px; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
 .inv-stat-grid .inv-stat:nth-child(-n+3) { grid-column: span 4; }
-.inv-stat-grid .inv-stat:nth-child(n+4) { grid-column: span 3; }
+.inv-stat-grid .inv-stat:nth-child(n+4) { grid-column: span 4; }   /* 2026-11-11 拿掉酷澎卡後 6 張：兩排各 3 張 */
 @media (max-width: 768px) { .inv-stat-grid .inv-stat { grid-column: auto !important; } }
 .inv-stat .stat-value { font-variant-numeric: tabular-nums; }
 .inv-stat-ym {
