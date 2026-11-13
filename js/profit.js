@@ -10951,7 +10951,7 @@ function kpiWriteCell(month,segsOrPairs,value,opts){
   });
 }
 function _kpiOnCloud(data){
-  _kpiV2.cloud=data;_kpiV2.cloudErr=null;
+  _kpiV2.cloud=_kpiShopeeMockApply(data);_kpiV2.cloudErr=null;   // 沒開本機模擬時＝原樣 data（見 __kpiShopeeMatchedMock）
   // 已送出且已確認的寫入，快照裡一定已經有了 → 從疊加層拿掉。還沒確認的留著（快照可能是別人更早的寫入）。
   _kpiV2.overlay=_kpiV2.overlay.filter(o=>!o.resolved);
   if(_kpiMigrated()&&_kpiV2.unsubLegacy){try{_kpiV2.unsubLegacy();}catch{}_kpiV2.unsubLegacy=null;}
@@ -15130,6 +15130,104 @@ function __kpiShopeeRegressionSnap(opts){
   });
   return{totals,shopee,plans,shipByMonth:pchomeKpiShipByMonth()};
 }
+// ── 蝦皮成本跟著撥款走 塊 3（2026-11-13）：改前／改後的「從對帳單帶入」快照（只讀：不寫、不訂閱、不碰 DOM；名稱不以 __cloud 開頭）──
+//   copy(JSON.stringify(__kpiShopeeAutoSnap()))  → 貼進檔案（ec-backup，不進 repo），改程式前後各拍一次，node 比對。
+//   回 {ver, at, appVersion, ready, mock, from, to, months:{月:{sources, calc:{店:_kpiShopeeCalc 結果}, plan:{topHtml, items}, snap:{v1,v2}}}, regression}
+//     sources＝app/kpi sources.{月}.shopee（只有彙總數字；Timestamp 轉成 {__ts:毫秒}）；plan.items 只留可比對的欄位。
+//     regression＝__kpiShopeeRegressionSnap()（月結表 totals 與蝦皮 _kpiShopCalc，證明只改程式時月結表沒變）。
+//   ⚠ app/kpi 第一個快照還沒到（_kpiShopeeDataLoaded 是 false）⇒ 回 {ready:false}，不要拿來比。先進 KPI 頁等資料載入。
+function __kpiShopeeAutoSnap(opts){
+  const from=(opts&&opts.from)||'2026-01',to=(opts&&opts.to)||'2026-10';
+  const out={ver:1,at:Date.now(),appVersion:(document.querySelector('meta[name="app-version"]')||{}).content||null,
+    ready:_kpiShopeeDataLoaded(),mock:!!_kpiShopeeMock,from,to,months:{}};
+  if(!out.ready){console.warn('[KPI 蝦皮快照] app/kpi 還沒載入完成，先進 KPI 頁等資料出現再拍');return out;}
+  const clone=v=>JSON.parse(JSON.stringify(v===undefined?null:v,(k,x)=>(x&&typeof x==='object'&&typeof x.toDate==='function')?{__ts:x.toDate().getTime()}:x));
+  const KEEP=['shop','field','label','status','val','cur','src','comp','note','warnNote','auto','metaVal','srcChanged'];
+  const cloud=_kpiV2.cloud;
+  const shops=KPI_GROUPS.find(g=>g.key==='shopee').shops;
+  for(let y=+from.slice(0,4),m=+from.slice(5,7);;){
+    const ym=y+'-'+String(m).padStart(2,'0');
+    if(ym>to)break;
+    const one={};
+    try{
+      one.sources=clone(cloud&&cloud.sources&&cloud.sources[ym]&&cloud.sources[ym].shopee);
+      const src=_kpiShopeeSources(ym,cloud);
+      one.calc={};shops.forEach(s=>{one.calc[s]=clone(_kpiShopeeCalc(src,s));});
+      const p=_kpiShopeeAutoPlan(ym);
+      one.plan={topHtml:p.topHtml,items:p.items.map(it=>{const o={};KEEP.forEach(k=>{if(it[k]!==undefined)o[k]=clone(it[k]);});return o;})};
+      const sn=cloud&&cloud.snapshots&&cloud.snapshots[ym];
+      one.snap={v1:!!(sn&&sn.preAutofillShopee),v2:!!(sn&&sn.preAutofillShopeeV2)};
+    }catch(e){one.err=String((e&&e.message)||e);}
+    out.months[ym]=one;
+    m++;if(m>12){m=1;y++;}
+  }
+  try{out.regression=clone(__kpiShopeeRegressionSnap());}catch(e){out.regression='ERR '+String((e&&e.message)||e);}
+  const n=Object.keys(out.months).length,errs=Object.keys(out.months).filter(k=>out.months[k].err);
+  console.log('%c[KPI 蝦皮快照] '+from+'～'+to+' 共 '+n+' 個月'+(errs.length?'，失敗：'+errs.join('、'):'')+(out.mock?'（⚠ 含本機模擬的 matched）':'')+'。複製：copy(JSON.stringify(__kpiShopeeAutoSnap()))','color:#5b5fcf;font-weight:700');
+  return out;
+}
+// ── 本機模擬 matched（塊 3 驗收用；只在 localhost 生效、資料只在記憶體，不寫雲端）──
+//   __kpiShopeeMatchedMock({'2026-10':{維克:{orders:709,matched:695,cost:92596.79,ordersPlain:473,ordersNoPack:222}}})
+//     → 把這些當成 app/kpi sources.{月}.shopee.matched.{店} 疊進記憶體裡的 _kpiV2.cloud（拷貝），沒給的欄位補 0／空；
+//       之後 app/kpi 快照再來也會照樣疊上去（_kpiOnCloud → _kpiShopeeMockApply）。可以分次呼叫累加。
+//   __kpiShopeeMatchedMock(false) → 拿掉模擬，回到雲端原樣。__kpiShopeeMatchedMock() → 回目前模擬內容。
+//   🔴 模擬開著的時候不要按任何存檔／帶入（畫面上的數字是假的）；重新整理就沒了。
+let _kpiShopeeMock=null;      // {'YYYY-MM':{店:matched}}
+let _kpiShopeeMockBase=null;  // 套模擬前的雲端原樣
+function _kpiIsLocalHost(){
+  const h=String((window.location&&window.location.hostname)||'').toLowerCase();
+  return h==='localhost'||h==='127.0.0.1'||h==='[::1]'||h==='::1'||h.endsWith('.localhost');
+}
+// 雲端資料 → 疊上模擬 matched 的拷貝。沒有模擬時原樣回傳（同一個物件，行為跟改版前完全相同）。
+function _kpiShopeeMockApply(data){
+  if(!_kpiShopeeMock)return data;
+  _kpiShopeeMockBase=data;
+  const c=Object.assign({},data||{});
+  c.sources=Object.assign({},c.sources||{});
+  Object.keys(_kpiShopeeMock).forEach(m=>{
+    const mo=c.sources[m]=Object.assign({},c.sources[m]||{});
+    const sh=mo.shopee=Object.assign({},mo.shopee||{});
+    sh.matched=Object.assign({},sh.matched||{},_kpiShopeeMock[m]);
+  });
+  return c;
+}
+function __kpiShopeeMatchedMock(arg){
+  if(arg===undefined)return _kpiShopeeMock?JSON.parse(JSON.stringify(_kpiShopeeMock)):null;
+  if(!_kpiIsLocalHost()){console.warn('[KPI 模擬] 只在 localhost 可用');return null;}
+  // app/kpi 還沒到就疊模擬 ⇒ _kpiV2.cloud 會從 undefined 變成物件，_kpiReady 會誤判已載入。
+  if(!_kpiShopeeMock&&_kpiV2.cloud===undefined){console.warn('[KPI 模擬] KPI 雲端資料還沒載入，先進 KPI 頁等資料出現');return null;}
+  if(!_kpiShopeeMock)_kpiShopeeMockBase=_kpiV2.cloud;
+  if(arg===false){
+    const base=_kpiShopeeMockBase;
+    _kpiShopeeMock=null;_kpiShopeeMockBase=null;
+    if(base!==undefined)_kpiV2.cloud=base;
+    console.warn('[KPI 模擬] 已關閉，回到雲端原樣');
+  }else{
+    if(!arg||typeof arg!=='object'){console.error('用法：__kpiShopeeMatchedMock({"2026-10":{維克:{orders,matched,cost,ordersPlain,ordersNoPack}}}) 或 false');return null;}
+    const shops=KPI_GROUPS.find(g=>g.key==='shopee').shops;
+    const num=v=>(typeof v==='number'&&Number.isFinite(v))?v:0;
+    const next=_kpiShopeeMock?JSON.parse(JSON.stringify(_kpiShopeeMock)):{};
+    for(const m of Object.keys(arg)){
+      if(!/^\d{4}-\d{2}$/.test(m)){console.error('[KPI 模擬] 月份格式不對：'+m);return null;}
+      for(const s of Object.keys(arg[m]||{})){
+        if(shops.indexOf(s)<0){console.error('[KPI 模擬] 不認識的店：'+s);return null;}
+        const x=arg[m][s]||{};
+        (next[m]=next[m]||{})[s]={schema:1,orders:num(x.orders),matched:num(x.matched),cost:num(x.cost),ordersPlain:num(x.ordersPlain),ordersNoPack:num(x.ordersNoPack),
+          refund:Object.assign({orders:0,cost:0,amt:0},x.refund||{}),cancelled:Object.assign({n:0,amt:0},x.cancelled||{}),
+          missing:Object.assign({n:0,amt:0,noFile:0,byMonth:{}},x.missing||{}),needMonths:Object.assign({},x.needMonths||{}),
+          mobicFiles:{},income:{file:'（本機模擬）',fileModified:null,sheets:0,range:null,dupRows:0,dupCross:0},ack:null,
+          by:{username:'mock',name:'本機模擬'},at:null,mock:true};
+      }
+    }
+    _kpiShopeeMock=next;
+    _kpiV2.cloud=_kpiShopeeMockApply(_kpiShopeeMockBase);
+    console.warn('[KPI 模擬] 已疊上 matched（只在記憶體）：'+Object.keys(next).map(m=>m+' '+Object.keys(next[m]).join('／')).join('；'));
+  }
+  try{_kpiPublish();}catch(e){console.warn('[KPI 模擬] 重畫失敗',e);}
+  try{if(document.getElementById('recon-content-shopee'))renderReconTab();}catch{}
+  return __kpiShopeeMatchedMock();
+}
+Object.assign(window,{__kpiShopeeAutoSnap,__kpiShopeeMatchedMock});
 // ── 蝦皮四欄 未稅 → 含稅（2026-11，KPI 月結表金額一律含稅；塊 1 共同費用見 __kpiCommonTaxInMigrate）──
 //   新程式：_kpiShopeeCalc 四格照對帳單原值（不除 1.05）、各項費用改用進帳報表 coupon；營業稅由「稅金」公式欄扣。
 //   __kpiShopeeTaxInMigrate()              試跑：console.table 列每格「現值 → 新值」，不寫。
