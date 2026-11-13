@@ -197,6 +197,29 @@ const S2 = { name: 'Income - 2', aoa: head('2026-09-01', '2026-10-31').concat([I
   eq(NEW._reconMatchVerify(null, pay), ['（雲端沒有這筆）'], '讀回：沒有');
 }
 
+// ════ 1-2. KPI 蝦皮成本口徑小字（塊 3 commit C）════
+{
+  const B = new Function(between(cur, '// KPI_SHOPEE_BASIS_PURE_BEGIN', '// KPI_SHOPEE_BASIS_PURE_END', '目前版本') + ';return{_kpiShopeeBasisOf,KPI_SHOPEE_BASIS_MARK};')();
+  ok(cur.includes("comp:mk+'" + B.KPI_SHOPEE_BASIS_MARK + " '"), '口徑：標記字＝_kpiShopeeCalc 有 matched 時 cost 算式的開頭');
+  const shops = ['好麻吉', '玩樂', '維克', '森之旅'];
+  const NEWM = { src: 'auto', from: '撥款單配到莫筆克 695 單的商品成本 92,596.79；…', val: 1 };
+  const MOCK = { src: 'auto', from: '（本機模擬）撥款單配到莫筆克 695 單的商品成本 …', val: 1 };
+  const OLDM = { src: 'auto', from: '莫筆克銷售金額明細（2026-11-01 10:00 下載）「建立」分頁、已出貨，商品成本逐列加總 1', val: 1 };
+  const of = map => s => map[s] || null;
+  const r1 = B._kpiShopeeBasisOf(shops, of({ 好麻吉: NEWM, 玩樂: NEWM, 維克: MOCK, 森之旅: NEWM }));
+  eq([r1.kind, r1.text], ['new', '撥款單'], '口徑：四店都是撥款單（含本機模擬）');
+  ok(/^成本口徑：撥款單。/.test(r1.title), '口徑：撥款單的提示開頭');
+  const r2 = B._kpiShopeeBasisOf(shops, of({ 好麻吉: OLDM, 玩樂: OLDM, 維克: OLDM, 森之旅: OLDM }));
+  eq([r2.kind, r2.text], ['old', '舊口徑'], '口徑：四店都是下單月');
+  ok(/^成本口徑：下單月（舊）。/.test(r2.title) && /重新「從對帳單帶入」/.test(r2.title), '口徑：下單月的提示');
+  const r3 = B._kpiShopeeBasisOf(shops, of({ 好麻吉: NEWM, 玩樂: OLDM, 維克: NEWM, 森之旅: OLDM }));
+  eq([r3.kind, r3.text, r3.title], ['mixed', '混合', '成本口徑：混合（撥款單 2 店、下單月 2 店）。撥款單：好麻吉、維克；下單月（舊）：玩樂、森之旅。還沒做的店到對帳分頁做「成本配對」後重新帶入。'], '口徑：混合');
+  eq(B._kpiShopeeBasisOf(shops, of({})), null, '口徑：四店都沒有 meta ⇒ 不顯示');
+  eq(B._kpiShopeeBasisOf(shops, of({ 好麻吉: { src: 'manual', from: '撥款單配到莫筆克' }, 玩樂: { src: 'restore' }, 維克: Object.assign({}, NEWM, { del: true }) })), null, '口徑：手填、還原、已刪 ⇒ 不算、不顯示');
+  const r4 = B._kpiShopeeBasisOf(shops, of({ 好麻吉: OLDM, 玩樂: { src: 'manual' } }));
+  eq([r4.kind, r4.old], ['old', ['好麻吉']], '口徑：只算自動帶入的店');
+}
+
 // ════ 2. 真樣本（SHOPEE_SAMPLE_DIR，找不到就略過）════
 // 基準只放彙總數字。樣本：2026-10 四店進帳 Excel、2026-08 / 2026-09 莫筆克（2026-11-13 首次產生）。
 const BASE = {

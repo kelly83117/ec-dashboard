@@ -11123,12 +11123,12 @@ const KPI_GROUPS=[
     // manual 的 desc＝填寫模式表頭 ⓘ：來源、算法（「從對帳單帶入」見 _kpiShopeeCalc；改算法要同步改這裡）。
     //   2026-11 起 KPI 月結表金額一律含稅：營收、手續費、廣告費、各項費用都照對帳單原值（不除 1.05），營業稅另由「稅金」欄扣。
     manual:[
-      {k:'qty',l:'訂單數',desc:'訂單數：從對帳單帶入＝莫筆克銷售金額明細「建立」分頁、已出貨的平台訂單編號去重數（筆數）'},
+      {k:'qty',l:'訂單數',desc:'訂單數：從對帳單帶入＝這個月有撥款的訂單數（對帳分頁「成本配對」：進帳報表 Excel 的撥款訂單，含已取消／退貨、找不到成本的單）。還沒做成本配對的月份是舊口徑：莫筆克銷售金額明細「建立」分頁、已出貨的平台訂單編號去重數'},
       {k:'rev',l:'實際營收',desc:'實際營收：從對帳單帶入＝進帳報表「買家支付商品金額」（含稅，不除 1.05；營業稅由「稅金」欄扣）'},
-      {k:'cost',l:'商品成本',desc:'商品成本：從對帳單帶入＝莫筆克「建立」分頁、已出貨的商品成本逐列加總'},
+      {k:'cost',l:'商品成本',desc:'商品成本：從對帳單帶入＝這個月有撥款的訂單，配對莫筆克「建立」分頁已出貨列的商品成本加總（已取消／退貨、找不到的單不算成本；退款單照算）。還沒做成本配對的月份是舊口徑：莫筆克「建立」分頁、已出貨的商品成本逐列加總'},
       {k:'ads',l:'廣告費',desc:'廣告費：從對帳單帶入＝廣告報表「總體」數據的花費加總（含賣場廣告與沒有商品 ID 的列）− 廣告回饋金（含稅）'},
       {k:'fee',l:'手續費'},
-      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費 ＋ 賣家負擔優惠券（進帳報表）＋ 聯盟行銷 AMS（進帳報表）＋ 無包裝 $1／筆（媒合費用報表的環保無包裝筆數×$1，沒上傳的月份用手填）＋ 其他 − 退貨運費補助（含稅）'},
+      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費（筆數＝這個月有撥款、配到莫筆克的訂單；還沒做成本配對的月份用莫筆克下單月）＋ 賣家負擔優惠券（進帳報表）＋ 聯盟行銷 AMS（進帳報表）＋ 無包裝 $1／筆（媒合費用報表的環保無包裝筆數×$1，沒上傳的月份用手填）＋ 其他 − 退貨運費補助（含稅）'},
     ],
     formula:[
       // desc：純顯示用的白話公式（ⓘ 說明從這裡產生），必須跟 calc 一字不差；改 calc 要同步改 desc。
@@ -11884,7 +11884,7 @@ function _kpiChannelTableHtml(row,prevRow){
     const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)}:null;
     const open=_kpiExpandedGroups.has(month+':'+g.key);
     let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
-      '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title,
+      '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+(g.key==='shopee'?_kpiShopeeBasisHtml(month,''):''),
       '<span class="'+neg(cur.rev).trim()+'">'+_kpiMoney(cur.rev)+'</span>',cc.rev,
       '<span class="'+neg(cur.pure).trim()+'">'+_kpiMoney(cur.pure)+'</span>',cc.pure,
       cur.rev>0?_kpiRatePct(cur.rate):'—',cc.pp,
@@ -12583,7 +12583,7 @@ function _kpiFillHtml(row){
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
-      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span>${_kpiAnomTitleHtml(ax,group)}${autoBtn}</div>
+      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span><span class="km-fill-name">${group.title}</span><span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}${group.key==='shopee'?_kpiShopeeBasisHtml(month,' · '):''}</span>${_kpiAnomTitleHtml(ax,group)}${autoBtn}</div>
       ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${group.noSubtotal?'':subRow}</tbody></table></div>${_kpiAnomListHtml(ax,group,month)}`}
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
@@ -13185,6 +13185,38 @@ function _kpiShopeeCalc(src,shop){
 const KPI_SHOPEE_AUTO_FIELDS=['qty','rev','cost','ads','fee','misc'];
 // 舊口徑提示（塊 3）：這個月這家還沒在對帳分頁存成本配對 ⇒ qty／cost／misc 照莫筆克下單月算，黃字、預設不勾。
 const KPI_SHOPEE_LEGACY_NOTE='舊口徑（下單月）：這個月還沒在對帳分頁做成本配對';
+// 蝦皮組標題旁的「成本口徑」小字（塊 3 過渡期；填寫模式標題列、月結表蝦皮那一列兩處）。只讀 meta，不寫任何東西。
+//   看各店「商品成本」格的帶入紀錄：自動帶入（src:'auto'）而且算式有 KPI_SHOPEE_BASIS_MARK ⇒ 撥款單；自動帶入但沒有 ⇒ 下單月（舊）；
+//   不是自動帶入（手填、空白、已刪）的店不算。四店都不算 ⇒ 不顯示。等 1～10 月都回補完（塊 4）可以考慮拿掉。
+// KPI_SHOPEE_BASIS_PURE_BEGIN（node 測試 scripts/shopee-cost-match.test.cjs 會擷取這一段，只能放純函式與常數）
+const KPI_SHOPEE_BASIS_MARK='撥款單配到莫筆克';   // 跟 _kpiShopeeCalc 有 matched 時 cost 的算式開頭一致；改算式要一起改
+// 標籤只放短字（撥款單／舊口徑／混合，2026-11-13 驗收：長字會蓋到月結表營收欄、擠歪填寫模式標題），完整說明放 title。
+// shops＝店名陣列；metaOf(店)＝那家商品成本格的 meta（或 null）。回 null（不顯示）或 {kind:'new'|'old'|'mixed', neu:[店], old:[店], text, title}。
+function _kpiShopeeBasisOf(shops,metaOf){
+  const neu=[],old=[];
+  (shops||[]).forEach(s=>{
+    const m=metaOf(s);
+    if(!(m&&typeof m==='object'&&m.src==='auto'&&!m.del))return;
+    (String(m.from||'').indexOf(KPI_SHOPEE_BASIS_MARK)>=0?neu:old).push(s);
+  });
+  if(!neu.length&&!old.length)return null;
+  if(!old.length)return{kind:'new',neu,old,text:'撥款單',
+    title:'成本口徑：撥款單。這個月的訂單數、商品成本、包裝費筆數＝有撥款的訂單（對帳分頁「成本配對」）。'};
+  if(!neu.length)return{kind:'old',neu,old,text:'舊口徑',
+    title:'成本口徑：下單月（舊）。這個月的訂單數、商品成本是用莫筆克下單月帶入的（成本跟著撥款走改版前）。到對帳分頁做「成本配對」後，回來重新「從對帳單帶入」。'};
+  return{kind:'mixed',neu,old,text:'混合',
+    title:'成本口徑：混合（撥款單 '+neu.length+' 店、下單月 '+old.length+' 店）。撥款單：'+neu.join('、')+'；下單月（舊）：'+old.join('、')+'。還沒做的店到對帳分頁做「成本配對」後重新帶入。'};
+}
+// KPI_SHOPEE_BASIS_PURE_END
+// sep＝前面要接的字（填寫模式用 ' · '，月結表用空字串）。不顯示時回 ''。
+function _kpiShopeeBasisHtml(month,sep){
+  const g=KPI_GROUPS.find(x=>x.key==='shopee');
+  if(!g)return '';
+  let b=null;
+  try{b=_kpiShopeeBasisOf(g.shops,s=>_kpiMetaAt(month,['shopee',s,'cost']));}catch(e){console.warn('[KPI] 蝦皮成本口徑判斷失敗',e);return '';}
+  if(!b)return '';
+  return (sep||'')+'<span class="km-basis km-basis-'+b.kind+'" title="'+_kpiEscAttr(b.title)+'">'+_kpiEscAttr(b.text)+'</span>';
+}
 function _kpiShopeeAutoPlan(month,row){
   row=row||getOrCreateKpiRow(month);
   const group=KPI_GROUPS.find(g=>g.key==='shopee');
@@ -29151,10 +29183,10 @@ function reconMobicHtml(){
   const msg=(mm&&m&&mm.month===_reconMonth&&mm.file===m.name&&mm.modified===m.modified)
     ?'<span class="recon-save-msg '+(mm.kind==='ok'?'recon-ok':mm.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(mm.text)+'</span>':'';
   return '<div class="recon-wrap recon-mobic">'
-    +'<div class="recon-hd"><span class="recon-title">莫筆克銷售金額明細（全賣場）</span>'
+    +'<div class="recon-hd"><span class="recon-title">莫筆克銷售金額明細（全賣場）（舊口徑，只給還沒做成本配對的月份用）</span>'
     +'<input type="file" accept=".xlsx" class="recon-file recon-mobic-file" onchange="reconMobicPick(event)"'+(_reconMobicBusy?' disabled':'')+'>'
     +(m&&!_reconMobicBusy?'<button type="button" class="recon-btn" onclick="clearReconMobic()">清除</button>':'')
-    +'<span class="recon-note">上傳莫筆克匯出的 xlsx（只讀「…建立」分頁、只算「已出貨」）。月份用上方同一個下拉。<b>按「存檔」才會存到雲端</b>，只存四店彙總數字（訂單數、商品成本、折扣），不存任何訂單或買家資料。</span></div>'
+    +'<span class="recon-note"><b>每月流程已改用上面的「成本配對」，這裡不用再傳；只有還沒做成本配對的月份，KPI 才會讀這裡的數字。</b>上傳莫筆克匯出的 xlsx（只讀「…建立」分頁、只算「已出貨」）。月份用上方同一個下拉。<b>按「存檔」才會存到雲端</b>，只存四店彙總數字（訂單數、商品成本、折扣），不存任何訂單或買家資料。</span></div>'
     +info+tbl
     +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
     +'</div>';
@@ -29898,30 +29930,33 @@ Object.assign(window,{reconSaveShop});
 Object.assign(window,{reconMobicPick,clearReconMobic,reconMobicSave});
 // 廣告與各項費用區塊的 inline handler（選檔 onchange / 清除 / 輸入框 oninput / 存檔）。
 Object.assign(window,{reconAdsPick,clearReconAds,reconAdsInput,reconAdsSave});
-// ═══ 蝦皮對帳 · 每月操作說明（2026-10-27）═══
+// ═══ 蝦皮對帳 · 每月操作說明（2026-10-27；2026-11-13 成本跟著撥款走改版，使用者核准新稿）═══
 //   對帳分頁第一個標題列、KPI 填寫模式「蝦皮」組標題各一顆，開同一份（App.openGuide → App.openModal，hideFooter，只有 ✕ 和底部「關閉」）。
 //   文字是使用者提供的定稿，改內容要先問；結構：p＝段落、h＝小標、ol＝編號清單（項目可用 \n 分行）、warn＝⚠ 提醒。
 //   🔴 「已存過的月份要改回饋金…」那句依附在回饋金可事後修改（_reconAdsCheck 的 rebateOnly）；那個功能拿掉時這句要一起拿掉。
 const RECON_GUIDE=[
   {p:'每月 5 號以後再做（莫筆克會因為退貨、取消回頭改數字，太早下載會不準）。'},
-  {h:'一、先準備 9 個檔（都是整月）',ol:[
+  {h:'一、先準備 15 個檔（都是整月）',ol:[
     '蝦皮進帳報表 PDF × 4（好麻吉、玩樂、維克、森之旅）',
-    '莫筆克「銷售金額明細」xlsx × 1（全通路，系統只讀「建立」分頁的已出貨）',
+    '蝦皮進帳報表 Excel × 4（蝦皮後台「已撥款」匯出同一個月，檔名像「維Income.進帳.tw.20261001_20261031.xlsx」）',
+    '莫筆克「銷售金額明細」xlsx × 2：這個月＋上個月（全通路，系統只讀「建立」分頁；上個月那份用上個月做對帳時下載的就可以）',
+    '蝦皮「店到店個案派車物流媒合費用」xlsx × 1（全通路，分頁名稱像「202610_蝦皮店到店個案派車物流媒合費用」）',
     '蝦皮廣告「所有CPC成效報告」總體 CSV × 4（不要用關鍵字層級的報表）；該月沒投廣告的通路不用傳。',
   ]},
   {h:'二、淨利表 → 蝦皮 → 「對帳」',ol:[
     '上方月份選要做的月份。',
     '上傳四家進帳 PDF，確認「小計 − 子項加總」是 ✓0，四家各按「存檔」，看到「✓ 已存進雲端」。',
-    '上傳莫筆克 xlsx，按「存檔（四店一起）」。',
-    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」）：廣告回饋金、無包裝 $1／筆 金額、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。\n廣告回饋金要先上傳該店的廣告 CSV 才能填；格子是灰色＝這個月這家還沒有廣告報表，沒投廣告就不用填回饋金。\n沒投廣告的通路不用傳 CSV，只填無包裝、退貨運費補助、其他這幾項也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
+    '「成本配對」區：四家各傳進帳 Excel，再一次選兩份莫筆克（這個月＋上個月）。看「還沒上傳莫筆克」有沒有紅字；有「找不到」的單，點單數看是哪幾單，確認後勾選，四家各按「存檔」。\n已取消／退貨、找不到的單不算成本；退款單的成本照算。',
+    '「無包裝」區：上傳媒合費用報表，按「存檔（四店一起）」。',
+    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」）：廣告回饋金、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。\n無包裝 $1／筆不用填，系統用上一步的媒合費用報表自動帶入。\n廣告回饋金要先上傳該店的廣告 CSV 才能填；格子是灰色＝這個月這家還沒有廣告報表，沒投廣告就不用填回饋金。\n沒投廣告的通路不用傳 CSV，只填退貨運費補助、其他這幾項也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
   ]},
   {h:'三、KPI → 選月份 → 填寫模式 → 蝦皮',ol:[
     '按右上「從對帳單帶入 YYYY/MM」。',
-    '檢查視窗裡的數字；跟目前值差超過 10% 的格子預設不勾，確認來源沒問題再勾。',
+    '檢查視窗裡的數字；跟目前值差超過 10% 的格子預設不勾，確認來源沒問題再勾。標「舊口徑（下單月）」的格子＝這個月還沒做成本配對，回對帳分頁補做。',
     '按「確認寫入」。',
     '共同費用（物流運費）：含稅，照帳單填。',
   ]},
-  {warn:'⚠ 營收照撥款日、成本照下單日，所以月與月之間會有起伏（例如過年撥款延後）。'},
+  {warn:'⚠ 營收、訂單數、商品成本都照撥款日（同一批撥款的單）；月與月之間仍會因撥款時間有起伏（例如過年撥款延後）。'},
   {warn:'⚠ 每格滑鼠移上去可以看到算式。'},
 ];
 const RECON_GUIDE_BTN='<button type="button" class="recon-btn recon-guide-btn" onclick="openReconGuide()">📖 每月操作說明</button>';
