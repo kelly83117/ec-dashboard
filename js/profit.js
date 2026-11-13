@@ -13060,11 +13060,11 @@ async function kpiMomoAutoFill(){
 //   來源＝淨利表「對帳」分頁存在 app/kpi 的 sources.{YYYY-MM}.shopee（payout／mobic／ads／manual），
 //   直接讀記憶體裡的 _kpiV2.cloud（KPI 本來就訂閱 app/kpi），【不再】載入 profits collection、不讀首頁每日廣告費。
 //   六格（月 M、店 S；中間不四捨五入，最後各自 Math.round 一次）：
-//     訂單數 qty   ＝ mobic.shops[S].orders
+//     訂單數 qty   ＝ matched[S].orders（撥款單數）；沒有 matched ⇒ 舊口徑 mobic.shops[S].orders（見下方「成本跟著撥款走」）
 //   2026-11 起 KPI 月結表金額一律含稅：四格照對帳單原值、不除 1.05，營業稅由 KPI_GROUPS 蝦皮的「稅金」公式欄（營收×5/105）扣。
 //     （改版前是 ÷1.05 的未稅；2026-01～10 已存的值由 __kpiShopeeTaxInMigrate 轉成含稅，舊公式留在 _kpiShopeeCalcOld 只給它比對用。）
 //     實際營收 rev ＝ payout[S].buyerPaid（進帳報表 36 份驗證：錢包入帳＝buyerPaid＋coupon＋shipTotal＋手續費 ⇒ buyerPaid 未扣優惠券）
-//     商品成本 cost＝ mobic.shops[S].cost（莫筆克成本，不除 1.05）
+//     商品成本 cost＝ matched[S].cost（撥款單配到莫筆克的成本）；沒有 matched ⇒ 舊口徑 mobic.shops[S].cost（莫筆克成本，不除 1.05）
 //     手續費 fee   ＝ −(feeDeal ＋ feeOther ＋ feeFlow ＋ shipTotal)（照 PDF 正負號；不含 feeAms、不含 coupon；shipTotal 正數自然抵減；退貨運費在 shipTotal 底下）
 //     廣告費 ads   ＝ ads[S].spend − (ads[S].rebate ?? 0)
 //     各項費用 misc＝ 一般筆數×2.5 ＋ 無包裝筆數×2 ＋ (−coupon) ＋ (−feeAms ?? 0) ＋ 無包裝$1 ＋ 其他 − 退貨運費補助
@@ -13072,15 +13072,22 @@ async function kpiMomoAutoFill(){
 //       無包裝$1＝nopack.shops[S].amount（媒合費用報表，2026-11-04）；沒有 nopack 才用 manual.noPackPerOrder。
 //   缺來源 → status:'wait'、note「等上傳：對帳分頁的○○」，不寫 0。手填項（manual）沒存過 → 以 0 計、warnNote 預設不勾。
 //   payout.feeAms 為 null（PDF 沒有 AMS 那行）→ 以 0 計，不算缺。物流運費（共同費用）不帶入、維持手填。
-//   快照存 snapshots.{月}.preAutofillShopee（MOMO 已占用 preAutofill、而且只存第一次 → 共用會存不到蝦皮的舊值），還原用 __kpiShopeeRestore。
+//   ── 成本跟著撥款走（2026-11-13，塊 3）：訂單數、商品成本、包裝費筆數改成「這個月有撥款的單」，跟營收同一批 ──
+//     來源＝sources.{月}.shopee.matched.{店}（對帳分頁「成本配對」存的彙總：進帳報表 Excel 撥款單 × 莫筆克，_reconMatchPayload）。
+//     有 matched（orders／cost／ordersPlain／ordersNoPack 都是數字）⇒ qty＝orders、cost＝cost、包裝費筆數＝ordersPlain／ordersNoPack。
+//       已取消／退貨、找不到的單不算成本（退貨會補回莫筆克庫存）；退款單成本照算。訂單數含已取消／退貨、找不到的單（＝撥款單數）。
+//     沒有 matched ⇒ 照舊用 mobic（下單月），數字與算式一個字不改，只多 legacy:true；_kpiShopeeAutoPlan 看到 legacy 加黃字「舊口徑」、預設不勾。
+//     rev／fee／ads 與包裝費以外的各項費用完全不受影響。
+//   快照存 snapshots.{月}.preAutofillShopeeV2（塊 3 起；V1＝preAutofillShopee 是 2026-10-16 回補時存的、只存一次，
+//     不換 key 的話塊 4 重算不會留快照）。V2 只在還沒有 V2 時寫一次；還原用 __kpiShopeeRestore（預設 V2，{ver:1} 用 V1）。
 // 包裝費單價 KPI_SHOPEE_PACK_PLAIN／KPI_SHOPEE_PACK_NOPACK 宣告在 KPI_GROUPS 前面（廠商調價時改那裡）。
 // 按鈕 hover：六格來源（與 _kpiShopeeCalc 一致；改算法要同步改）
 const KPI_SHOPEE_AUTO_TITLE='六格從淨利表「對帳」分頁存的對帳單資料帶入：'
-  +'訂單數、商品成本＝莫筆克銷售金額明細（建立分頁、已出貨）；'
+  +'訂單數、商品成本＝這個月有撥款的訂單（進帳報表 Excel）配對莫筆克銷售金額明細的成本（已取消／退貨、找不到的單不算成本），還沒做成本配對的月份退回莫筆克下單月（舊口徑，預設不勾）；'
   +'實際營收＝進帳報表 買家支付商品金額；'
   +'手續費＝進帳報表（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費）；'
   +'廣告費＝廣告報表花費−廣告回饋金；'
-  +'各項費用＝包裝費＋賣家負擔優惠券＋聯盟行銷 AMS＋無包裝$1（媒合費用報表）＋手填項。'
+  +'各項費用＝包裝費（撥款單的一般／無包裝筆數）＋賣家負擔優惠券＋聯盟行銷 AMS＋無包裝$1（媒合費用報表）＋手填項。'
   +'金額都是含稅（不除 1.05），營業稅由「稅金」欄另外扣。物流運費維持手填。按下去會先預覽，確認後才寫入。';
 // 對帳單資料到了沒＝app/kpi 的快照到了（sources 跟 KPI 同一份文件）。
 function _kpiShopeeDataLoaded(){
@@ -13098,7 +13105,7 @@ async function _kpiEnsureShopeeData(month){
 function _kpiShopeeSources(month,cloud){
   const s=(cloud&&cloud.sources&&cloud.sources[month]&&cloud.sources[month].shopee)||{};
   const m=x=>_kpiIsMap(x)?x:{};
-  return{payout:m(s.payout),mobic:_kpiIsMap(s.mobic)?s.mobic:null,ads:m(s.ads),manual:m(s.manual),nopack:_kpiIsMap(s.nopack)?s.nopack:null};
+  return{payout:m(s.payout),mobic:_kpiIsMap(s.mobic)?s.mobic:null,ads:m(s.ads),manual:m(s.manual),nopack:_kpiIsMap(s.nopack)?s.nopack:null,matched:m(s.matched)};
 }
 const _kpiShopeeFin=v=>typeof v==='number'&&Number.isFinite(v);
 function _kpiShopeeN(v){return Math.abs(Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:2});}
@@ -13120,9 +13127,24 @@ function _kpiShopeeCalc(src,shop){
   const okM=k=>Ms&&_kpiShopeeFin(Ms[k]);
   const dl=src.mobic?_kpiShopeeTime(src.mobic.fileModified):'';
   const mobicLbl='莫筆克銷售金額明細（'+(dl?dl+' 下載':'下載時間不明')+'）「建立」分頁、已出貨';
+  // 成本配對（撥款單）。四個數字都在才用；不然整店退回舊口徑（下單月）。
+  const Mt=src.matched&&_kpiIsMap(src.matched[shop])?src.matched[shop]:null;
+  const okT=k=>Mt&&_kpiShopeeFin(Mt[k]);
+  const useT=!!(okT('orders')&&okT('cost')&&okT('ordersPlain')&&okT('ordersNoPack'));
   const out={};
-  out.qty=okM('orders')?{val:Math.round(Ms.orders),comp:mobicLbl+'，平台訂單編號去重 '+_kpiShopeeN(Ms.orders)+' 筆'}:{wait:W.mobic};
-  out.cost=okM('cost')?{val:Math.round(Ms.cost),comp:mobicLbl+'，商品成本逐列加總 '+_kpiShopeeN(Ms.cost)}:{wait:W.mobic};
+  if(useT){
+    const g=(o,k)=>(_kpiIsMap(o)&&_kpiShopeeFin(o[k]))?o[k]:0;
+    const cn=g(Mt.cancelled,'n'),mn=g(Mt.missing,'n'),ma=g(Mt.missing,'amt'),rn=g(Mt.refund,'orders'),rc=g(Mt.refund,'cost');
+    const mk=Mt.mock?'（本機模擬）':'';
+    out.qty={val:Math.round(Mt.orders),comp:mk+'成本配對（進帳報表 Excel × 莫筆克）：撥款訂單 '+_kpiShopeeN(Mt.orders)+' 單（配到 '+_kpiShopeeN(Mt.matched)+'、已取消／退貨 '+_kpiShopeeN(cn)+'、找不到 '+_kpiShopeeN(mn)+'）'};
+    out.cost={val:Math.round(Mt.cost),comp:mk+'撥款單配到莫筆克 '+_kpiShopeeN(Mt.matched)+' 單的商品成本 '+_kpiShopeeN(Mt.cost)
+      +'；已取消／退貨 '+_kpiShopeeN(cn)+' 單、找不到 '+_kpiShopeeN(mn)+' 單'+(mn?'（商品原價 '+_kpiShopeeN(ma)+'）':'')+'不算成本'
+      +(rn?'；其中退款單 '+_kpiShopeeN(rn)+' 單成本 '+_kpiShopeeN(rc)+' 照算':'')};
+  }else{
+    // ⚠ 舊口徑：數字與算式跟塊 3 以前逐字相同，只多 legacy（node 比對 commit A 版本證明）
+    out.qty=okM('orders')?{val:Math.round(Ms.orders),comp:mobicLbl+'，平台訂單編號去重 '+_kpiShopeeN(Ms.orders)+' 筆',legacy:true}:{wait:W.mobic};
+    out.cost=okM('cost')?{val:Math.round(Ms.cost),comp:mobicLbl+'，商品成本逐列加總 '+_kpiShopeeN(Ms.cost),legacy:true}:{wait:W.mobic};
+  }
   out.rev=okP('buyerPaid')?{val:Math.round(P.buyerPaid),comp:'進帳報表 買家支付商品金額 '+_kpiShopeeN(P.buyerPaid)+'（含稅）'}:{wait:W.payout};
   const feeKeys=[['feeDeal','成交手續費'],['feeOther','其他服務費'],['feeFlow','金流與系統處理費'],['shipTotal','賣家運費']];
   if(feeKeys.every(([k])=>okP(k))){
@@ -13138,7 +13160,7 @@ function _kpiShopeeCalc(src,shop){
   }else out.ads={wait:W.ads};
   {
     const miss=[];
-    if(!(okM('ordersPlain')&&okM('ordersNoPack')))miss.push(W.mobic);
+    if(!useT&&!(okM('ordersPlain')&&okM('ordersNoPack')))miss.push(W.mobic);
     if(!okP('coupon'))miss.push(W.payout+'的賣家負擔優惠券');
     if(miss.length)out.misc={wait:miss.join('、')};
     else{
@@ -13148,17 +13170,21 @@ function _kpiShopeeCalc(src,shop){
       const NP=src.nopack&&_kpiIsMap(src.nopack.shops)&&_kpiIsMap(src.nopack.shops[shop])&&_kpiShopeeFin(src.nopack.shops[shop].amount)?src.nopack.shops[shop]:null;
       const np=NP?NP.amount:mv('noPackPerOrder'),ot=mv('other'),rs=mv('returnSubsidy');
       const cp=-P.coupon;   // 賣家負擔優惠券（PDF ≤0）→ 費用為正
-      const sum=Ms.ordersPlain*KPI_SHOPEE_PACK_PLAIN+Ms.ordersNoPack*KPI_SHOPEE_PACK_NOPACK+cp+ams+np+ot-rs;
-      const comp='一般 '+_kpiShopeeN(Ms.ordersPlain)+' 筆×'+KPI_SHOPEE_PACK_PLAIN+'＋無包裝 '+_kpiShopeeN(Ms.ordersNoPack)+' 筆×'+KPI_SHOPEE_PACK_NOPACK
+      const PK=useT?Mt:Ms;   // 包裝費筆數：有成本配對用撥款單，沒有用莫筆克（舊口徑）
+      const sum=PK.ordersPlain*KPI_SHOPEE_PACK_PLAIN+PK.ordersNoPack*KPI_SHOPEE_PACK_NOPACK+cp+ams+np+ot-rs;
+      const comp='一般 '+_kpiShopeeN(PK.ordersPlain)+' 筆×'+KPI_SHOPEE_PACK_PLAIN+'＋無包裝 '+_kpiShopeeN(PK.ordersNoPack)+' 筆×'+KPI_SHOPEE_PACK_NOPACK+(useT?'（撥款單）':'')
         +_kpiShopeeTerm('賣家負擔優惠券',cp)+_kpiShopeeTerm('聯盟行銷 AMS',ams)+(_kpiShopeeFin(P.feeAms)?'':'（PDF 沒有這行）')
         +_kpiShopeeTerm('無包裝$1',np)+(NP?'（媒合費用報表 '+_kpiShopeeN(NP.orders)+' 筆）':'（手填）')+_kpiShopeeTerm('其他',ot)+_kpiShopeeTerm('退貨運費補助',-rs)+'（含稅）';
       out.misc={val:Math.round(sum),comp,
         warnNote:Man?null:'各項費用的手填項尚未存檔，以 0 計'};
+      if(!useT)out.misc.legacy=true;
     }
   }
   return out;
 }
 const KPI_SHOPEE_AUTO_FIELDS=['qty','rev','cost','ads','fee','misc'];
+// 舊口徑提示（塊 3）：這個月這家還沒在對帳分頁存成本配對 ⇒ qty／cost／misc 照莫筆克下單月算，黃字、預設不勾。
+const KPI_SHOPEE_LEGACY_NOTE='舊口徑（下單月）：這個月還沒在對帳分頁做成本配對';
 function _kpiShopeeAutoPlan(month,row){
   row=row||getOrCreateKpiRow(month);
   const group=KPI_GROUPS.find(g=>g.key==='shopee');
@@ -13181,13 +13207,15 @@ function _kpiShopeeAutoPlan(month,row){
       const c=calc[f];
       // src 會存進 meta.from（「自動」標籤的 hover），所以直接放算式＋數字
       if(c.wait)Object.assign(it,{status:'wait',note:'等上傳：對帳分頁的'+c.wait});
-      else Object.assign(it,{status:'write',val:c.val,src:c.comp,comp:c.comp,warnNote:c.warnNote||null});
+      else Object.assign(it,{status:'write',val:c.val,src:c.comp,comp:c.comp,
+        warnNote:c.legacy?(c.warnNote?c.warnNote+'；':'')+KPI_SHOPEE_LEGACY_NOTE:(c.warnNote||null),legacy:!!c.legacy});
       push(it);
     });
   });
   const has=o=>group.shops.filter(s=>_kpiIsMap(o[s])).length;
   const dl=src.mobic?_kpiShopeeTime(src.mobic.fileModified):'';
-  const topHtml='<div class="km-au-snap">對帳單來源（'+_kpiEscAttr(month)+'）：進帳報表 '+has(src.payout)+'／4 店　莫筆克 '
+  const topHtml='<div class="km-au-snap">對帳單來源（'+_kpiEscAttr(month)+'）：進帳報表 '+has(src.payout)+'／4 店　成本配對 '+has(src.matched)+'／4 店'
+    +(has(src.matched)<group.shops.length?'（沒做的店訂單數、商品成本、各項費用用舊口徑：莫筆克下單月）':'')+'　莫筆克 '
     +(src.mobic?'✓（'+_kpiEscAttr(dl||'下載時間不明')+' 下載）':'未存')+'　廣告報表 '+has(src.ads)+'／4 店　手填項 '+has(src.manual)+'／4 店</div>';
   return{items,checks:{},groupName:'蝦皮',restoreFn:'__kpiShopeeRestore',subLabel:'蝦皮 好麻吉／玩樂／維克／森之旅',topHtml};
 }
@@ -13205,10 +13233,15 @@ function _kpiShopeeCells(row){
   const o=(row&&row.kpiFieldNotes)||{};Object.keys(o).forEach(x=>{if(x.startsWith('shopee:')&&o[x]!=null)cells.push([['kpiFieldNotes',x],o[x]]);});
   return cells;
 }
-function _kpiShopeeSnapGet(month){
-  const c=_kpiV2.cloud&&_kpiV2.cloud.snapshots&&_kpiV2.cloud.snapshots[month]&&_kpiV2.cloud.snapshots[month].preAutofillShopee;
-  if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
-  return _kpiShopeeSnapLocal.get(month)||null;
+// 帶入前快照有兩份（塊 3）：V1＝preAutofillShopee（2026-10-16 回補時存的）、V2＝preAutofillShopeeV2（塊 3 改口徑後第一次帶入時存）。
+//   ver 不給＝2。本機暫存（寫入還沒確認前）用 '月|版' 當 key。
+const KPI_SHOPEE_SNAP_KEYS={1:'preAutofillShopee',2:'preAutofillShopeeV2'};
+function _kpiShopeeSnapGet(month,ver){
+  ver=ver===1?1:2;
+  const c=_kpiV2.cloud&&_kpiV2.cloud.snapshots&&_kpiV2.cloud.snapshots[month]&&_kpiV2.cloud.snapshots[month][KPI_SHOPEE_SNAP_KEYS[ver]];
+  if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at),ver});
+  const l=_kpiShopeeSnapLocal.get(month+'|'+ver);
+  return l?Object.assign({},l,{ver}):null;
 }
 async function kpiShopeeAutoFill(){
   const month=_kpiYM();
@@ -13230,12 +13263,12 @@ async function kpiShopeeAutoFill(){
       const sel=new Set([...document.querySelectorAll('.km-au-chk:checked')].map(x=>+x.dataset.i));
       const chosen=writes.filter(it=>sel.has(plan.items.indexOf(it)));
       if(!chosen.length)return true;
-      // 第一次帶入這個月：舊值快照跟帶入值【同一次 updateDoc】寫進 snapshots.{月}.preAutofillShopee（只存一次）
+      // 塊 3 起第一次帶入這個月：舊值快照跟帶入值【同一次 updateDoc】寫進 snapshots.{月}.preAutofillShopeeV2（只存一次；V1 不動）
       let extra=null;
       if(snapCells&&!_kpiShopeeSnapGet(month)){
         const by=_kpiWho();
-        extra=[[['snapshots',month,'preAutofillShopee'],{by,at:window.__cloudKpi.TS,n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))}]];
-        _kpiShopeeSnapLocal.set(month,{by,atMs:Date.now(),n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))});
+        extra=[[['snapshots',month,KPI_SHOPEE_SNAP_KEYS[2]],{by,at:window.__cloudKpi.TS,n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))}]];
+        _kpiShopeeSnapLocal.set(month+'|2',{by,atMs:Date.now(),n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))});
       }
       const pairs=[];
       chosen.forEach(it=>{
@@ -13243,7 +13276,7 @@ async function kpiShopeeAutoFill(){
         const sd=((getOrCreateKpiRow(month).shopee||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);
       });
       kpiWriteCell(month,pairs,undefined,{extra}).then(ok=>{
-        if(!ok&&extra)_kpiShopeeSnapLocal.delete(month);
+        if(!ok&&extra)_kpiShopeeSnapLocal.delete(month+'|2');
         if(ok&&typeof showToast==='function')showToast('已帶入 '+chosen.length+' 格（蝦皮 '+month+'）'+(extra?'，已保留舊值快照':''),'success');
       });
       _kpiFillRerender();
@@ -13251,11 +13284,15 @@ async function kpiShopeeAutoFill(){
     }});
   renderKpiTab();
 }
-// __kpiShopeeRestore('2026-06')：用 preAutofillShopee 快照把該月蝦皮還原回帶入前的值。先預覽，確認後一次原子寫入。
-async function __kpiShopeeRestore(month){
-  if(!/^\d{4}-\d{2}$/.test(month||'')){console.error('用法：__kpiShopeeRestore("2026-06")');return null;}
-  const snap=_kpiShopeeSnapGet(month);
-  if(!snap){console.warn('[KPI 還原] '+month+' 沒有蝦皮帶入前快照（這個月還沒用「從對帳單帶入」寫過）');if(typeof showToast==='function')showToast(month+' 沒有蝦皮帶入前快照','error');return null;}
+// __kpiShopeeRestore('2026-06')：用帶入前快照把該月蝦皮還原回帶入前的值。先預覽，確認後一次原子寫入。
+//   預設用 V2（塊 3 改口徑後第一次帶入前的值），沒有 V2 才用 V1；__kpiShopeeRestore('2026-06',{ver:1}) 強制用 V1（2026-10-16 回補前）。
+async function __kpiShopeeRestore(month,opts){
+  if(!/^\d{4}-\d{2}$/.test(month||'')){console.error('用法：__kpiShopeeRestore("2026-06") 或 __kpiShopeeRestore("2026-06",{ver:1})');return null;}
+  const wantVer=(opts&&(opts.ver===1||opts.ver===2))?opts.ver:null;
+  const snap=wantVer?_kpiShopeeSnapGet(month,wantVer):(_kpiShopeeSnapGet(month,2)||_kpiShopeeSnapGet(month,1));
+  if(!snap){const vt=wantVer?'（V'+wantVer+'）':'';console.warn('[KPI 還原] '+month+' 沒有蝦皮帶入前快照'+vt+'（這個月還沒用「從對帳單帶入」寫過）');if(typeof showToast==='function')showToast(month+' 沒有蝦皮帶入前快照'+vt,'error');return null;}
+  const verTxt=snap.ver===2?'V2：成本跟著撥款走改版後第一次帶入前':'V1：2026-10-16 對帳單回補前';
+  console.log('[KPI 還原] '+month+' 用 '+verTxt+' 的快照');
   const key=p=>p.join('\u0001');
   const cur=new Map(_kpiShopeeCells(getOrCreateKpiRow(month)).map(([p,v])=>[key(p),{p,v}]));
   const want=new Map((snap.cells||[]).map(c=>[key(c.p),{p:c.p,v:c.v}]));
@@ -13270,8 +13307,8 @@ async function __kpiShopeeRestore(month){
   const lbl=p=>p[0]==='shopee'?_kpiShopLabel(p[1])+' '+fl(p[2]):p.join(' › ');
   const rows=changes.map(c=>`<tr><td>${_kpiEscAttr(lbl(c.p))}</td><td class="km-n">${fmt(c.from)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${c.to===undefined?'（刪除）':c.tagOnly?fmt(c.to)+'<div class="km-au-note">值不變，只清「自動」標籤</div>':fmt(c.to)}</td></tr>`).join('');
   return new Promise(resolve=>{
-    App.openModal({title:'還原蝦皮 '+month.replace('-','/')+' 到帶入前',width:'720px',
-      bodyHtml:`<div class="km-au"><div class="km-au-sub">快照：${_kpiEscAttr(snap.by||'?')} ${snap.atMs?_kpiFmtTime(snap.atMs):''} · 會改 <b>${changes.length}</b> 格（一次寫入）</div>
+    App.openModal({title:'還原蝦皮 '+month.replace('-','/')+' 到帶入前（'+verTxt+'）',width:'720px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">快照（${_kpiEscAttr(verTxt)}）：${_kpiEscAttr(snap.by||'?')} ${snap.atMs?_kpiFmtTime(snap.atMs):''} · 會改 <b>${changes.length}</b> 格（一次寫入）</div>
         <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>格子</th><th class="km-n">目前值</th><th></th><th class="km-n">還原成</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
       saveLabel:'確認還原 '+changes.length+' 格',
       onCancel:()=>resolve({cancelled:true}),
