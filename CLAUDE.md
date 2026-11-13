@@ -241,6 +241,20 @@ ESM 有個致命陷阱必須牢記：
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
   填寫模式的**異常警示**（格子下方「⚠」、標題「⚠ 有 N 格請再確認」、左側清單 ⚠、「ⓘ 警示規則」）是純前端即時算、
   **不寫雲端、不擋存檔**；門檻只改 profit.js `KPI_ANOMALY_RULES`（說明彈窗從它產生），Console 只讀查看 `__kpiAnomalyReport('YYYY-MM')`。
+  - **蝦皮成本跟著撥款走**（2026-11-13，老闆決定；塊 1～3）：KPI 蝦皮的訂單數、商品成本、包裝費筆數改成「這個月有撥款的訂單」，跟營收（進帳報表）同一批。
+    - 來源：淨利表 → 蝦皮 → 對帳 →「成本配對（進帳 Excel × 莫筆克）」區（profit.js `reconMatchHtml`／`reconMatchSave`），存在 `sources.{撥款月}.shopee.matched.{店}`，
+      形狀 `{ schema:1, orders, matched, cost, ordersPlain, ordersNoPack, refund:{orders,cost,amt}, cancelled:{n,amt}, missing:{n,amt,noFile,byMonth}, needMonths, mobicFiles:{月:{file,fileModified}}, income:{file,fileModified,sheets,range,dupRows,dupCross}, ack:{n,amt}|null, by, at }`。
+      🔴 **只存彙總**：訂單編號、買家帳號、賣家帳號、已取消／找不到的明細、取消原因一律不上雲（只在記憶體、只顯示在畫面）。
+    - 進帳報表 Excel 讀所有 `Income`／`Income - N` 分頁，**照每筆「錢包入帳日期」分月**（一份可以是一個月或好幾個月，多月勾選後同一次 `writePaths` 寫入）。莫筆克可傳多份，一份一個下單月（「建立」分頁、整月）。
+    - 配對規則（純函式在 profit.js `SHOPEE_COST_MATCH_PURE_BEGIN/END`，`RECON_MOBIC_PURE_BEGIN/END` 是 `_reconMobicCalc`）：撥款單配到莫筆克已出貨列 ⇒ 算成本；
+      莫筆克只有已取消列（幾乎都是退貨：客辦退貨／未取退貨／退換貨取消，退回的貨補回莫筆克庫存）⇒ **不算成本**、列出來；找不到 ⇒ 不算成本、要勾確認才能存；退款單成本照算；訂單數＝撥款單數（含已取消、找不到）。
+      缺莫筆克的下單月份（noFile）> 20 單或 > 撥款單 1% ⇒ 擋下（`RECON_MATCH_NOFILE_MAX`／`_PCT`）；同一個賣家帳號傳兩欄 ⇒ 擋下。
+    - KPI「從對帳單帶入」（`_kpiShopeeCalc`）：有 matched 的店用它；**沒有的店照舊用 `sources.{月}.shopee.mobic`（下單月），數字與算式不變**，帶入視窗加黃字「舊口徑（下單月）」預設不勾。rev／fee／ads 不受影響。
+    - 帶入前快照：塊 3 起寫 `snapshots.{月}.preAutofillShopeeV2`（V1＝`preAutofillShopee` 是 2026-10-16 回補時存的、只存一次）；`__kpiShopeeRestore(月)` 預設 V2，`{ver:1}` 用 V1。
+    - 驗證工具（唯讀，不以 `__cloud` 開頭）：`__kpiShopeeAutoSnap()`（2026-01～10 的 sources／calc／帶入計畫／regression 快照，`copy(JSON.stringify(...))` 存 ec-backup，改程式前後各拍一次，用 `scripts/kpi-shopee-matched.regress.cjs` 比對）；
+      `__kpiShopeeMatchedMock({...}|false)`（只在 localhost、只改記憶體裡 `_kpiV2.cloud` 的拷貝，模擬開著時不要按存檔／帶入）。node 測試：`scripts/shopee-cost-match.test.cjs`（`SHOPEE_SAMPLE_DIR` 指真樣本，樣本不進 repo）。
+    - 沒有新增雲端物件或寫入方法（讀寫都走 `__cloudKpi.getDoc`／`writePaths`），本機防寫物件數不變。
+    - 部署這版後要請大家重新整理：舊分頁按「從對帳單帶入」會用舊口徑覆蓋，而且不會留 V2 快照。
 - `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
   `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
   **洞察表正式資料只在這四份 doc。** `app/main`、`app/insight` 裡若有 `ec.insight_*` 欄位，一律在讀取端忽略

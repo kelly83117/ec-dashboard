@@ -1441,6 +1441,30 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .recon-mobic-save .recon-save-why,
 .recon-mobic-save .recon-save-msg{display:inline;margin:0;}
 
+/* 成本配對（進帳 Excel × 莫筆克，2026-11-13 塊 2）：放在進帳 PDF 表和莫筆克區塊中間（sources.{撥款月}.shopee.matched.{店}）。 */
+.recon-match{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
+.recon-tbl td.rm-cell{white-space:normal;vertical-align:top;min-width:150px;font-size:12px;}
+.rm-mobic{margin:12px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;}
+.rm-lbl{font-size:12.5px;font-weight:600;color:var(--text);}
+.rm-chips{flex-basis:100%;font-size:12px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.rm-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text);}
+.rm-chip-x{border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:13px;line-height:1;padding:0 4px;font-family:inherit;}
+.rm-chip-x:hover{color:var(--danger);}
+.rm-need{margin:10px 0 0;font-size:12px;color:var(--text-muted);line-height:1.8;}
+.rm-need-miss{color:var(--danger);font-weight:700;}
+.rm-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 6px;}
+.rm-tab{padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-muted);font-size:12px;font-family:inherit;cursor:pointer;}
+.rm-tab:hover{border-color:var(--primary);color:var(--primary);}
+.rm-tab.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700;}
+.rm-tbl{min-width:720px;}
+.rm-tbl + .recon-scroll,.recon-scroll + .recon-scroll{margin-top:8px;}
+.rm-ack{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;cursor:pointer;}
+.rm-ack input{margin-top:2px;flex:none;}
+.rm-link{border:none;background:none;padding:0;color:var(--primary);text-decoration:underline;cursor:pointer;font:inherit;}
+.rm-detail{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);}
+.rm-detail-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;font-weight:600;margin-bottom:6px;}
+.rm-detail-tbl{min-width:520px;}
+
 /* 廣告與各項費用（每店）：放在莫筆克區塊下方，一店一欄、一顆存檔（sources.{月}.shopee.ads / manual.{店}）。 */
 .recon-ads{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
 .recon-ads-desc{display:block;margin:-4px 0 8px;}
@@ -1720,7 +1744,16 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-fill-main{min-width:0;}
 .km-fill-title{display:flex;align-items:baseline;gap:10px;font-size:15px;font-weight:800;color:#1a1a2e;margin-bottom:10px;}
 .km-fill-title .km-dot{align-self:center;width:10px;height:10px;}
+/* 通路名、月份與填寫進度不換行（2026-11-13：蝦皮標題列多了口徑標籤後，1000px 寬「蝦皮」被擠成兩行、標籤掉到下一行）。
+   放不下時改成右邊的警示／按鈕整組換到下一行（flex-wrap），左邊「通路名 月份 · 已填 · 口徑」維持一行。 */
+.km-fill-title{flex-wrap:wrap;row-gap:6px;}
+.km-fill-name{white-space:nowrap;flex-shrink:0;}
+.km-fill-sub{white-space:nowrap;}
 .km-fill-sub{font-size:12px;font-weight:600;color:#6b7280;}
+/* 蝦皮成本口徑小字（2026-11-13 塊 3 過渡期；填寫模式標題列、月結表蝦皮那一列）：撥款單＝灰字；下單月（舊）／混合＝橘色底提醒。顏色只用 :root 變數 */
+.km-basis{font-size:11.5px;font-weight:600;color:var(--text-muted);white-space:nowrap;cursor:help;}
+.km-basis-old,.km-basis-mixed{color:var(--text);background:var(--warn-soft);border:1px solid var(--warn);border-radius:var(--radius-sm);padding:0 6px;}
+.kc-c .km-basis{margin-left:6px;font-weight:600;}
 /* 鍵盤操作：一列橫排，每一項自己不斷行（整項換到下一行，不會拆成一字一行） */
 .km-ftable{font-size:12.5px;color:#374151;}
 .km-ftable th{vertical-align:bottom;white-space:normal;padding:7px 5px;font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;border-bottom:1px solid #e5e7eb;}
