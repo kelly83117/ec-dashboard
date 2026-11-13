@@ -1441,6 +1441,30 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .recon-mobic-save .recon-save-why,
 .recon-mobic-save .recon-save-msg{display:inline;margin:0;}
 
+/* 成本配對（進帳 Excel × 莫筆克，2026-11-13 塊 2）：放在進帳 PDF 表和莫筆克區塊中間（sources.{撥款月}.shopee.matched.{店}）。 */
+.recon-match{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
+.recon-tbl td.rm-cell{white-space:normal;vertical-align:top;min-width:150px;font-size:12px;}
+.rm-mobic{margin:12px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;}
+.rm-lbl{font-size:12.5px;font-weight:600;color:var(--text);}
+.rm-chips{flex-basis:100%;font-size:12px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.rm-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text);}
+.rm-chip-x{border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:13px;line-height:1;padding:0 4px;font-family:inherit;}
+.rm-chip-x:hover{color:var(--danger);}
+.rm-need{margin:10px 0 0;font-size:12px;color:var(--text-muted);line-height:1.8;}
+.rm-need-miss{color:var(--danger);font-weight:700;}
+.rm-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 6px;}
+.rm-tab{padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-muted);font-size:12px;font-family:inherit;cursor:pointer;}
+.rm-tab:hover{border-color:var(--primary);color:var(--primary);}
+.rm-tab.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700;}
+.rm-tbl{min-width:720px;}
+.rm-tbl + .recon-scroll,.recon-scroll + .recon-scroll{margin-top:8px;}
+.rm-ack{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;cursor:pointer;}
+.rm-ack input{margin-top:2px;flex:none;}
+.rm-link{border:none;background:none;padding:0;color:var(--primary);text-decoration:underline;cursor:pointer;font:inherit;}
+.rm-detail{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);}
+.rm-detail-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;font-weight:600;margin-bottom:6px;}
+.rm-detail-tbl{min-width:520px;}
+
 /* 廣告與各項費用（每店）：放在莫筆克區塊下方，一店一欄、一顆存檔（sources.{月}.shopee.ads / manual.{店}）。 */
 .recon-ads{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
 .recon-ads-desc{display:block;margin:-4px 0 8px;}

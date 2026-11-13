@@ -28422,7 +28422,404 @@ function _reconCostMatch(orders,paidMonth,mobics){
   out.cancelled.amt=r2(out.cancelled.amt);out.missing.amt=r2(out.missing.amt);
   return out;
 }
+// ── 塊 2：存檔用純函式（對帳分頁「成本配對」區塊用；存到 app/kpi sources.{撥款月}.shopee.matched.{店}）──
+// 缺莫筆克檔的門檻（2026-11-13 決定 A）：某店某月「下單月份沒上傳莫筆克」的找不到單數 > 20 單、或 > 撥款單數 1% ⇒ 擋下要先補檔；
+//   沒超過就能存，但要勾確認（找不到的單成本以 0 計）。
+const RECON_MATCH_NOFILE_MAX=20;
+const RECON_MATCH_NOFILE_PCT=0.01;
+function _reconMatchNoFile(m){return (m&&m.missing&&Array.isArray(m.missing.items))?m.missing.items.filter(x=>x.noFile).length:0;}
+// 勾確認的簽章：找不到的單數、金額、已載入的莫筆克月份任一個變了，之前的勾選就不算數。
+function _reconMatchAckSig(m){return m?[m.missing.n,m.missing.amt,(m.loadedMonths||[]).join(',')].join('|'):'';}
+// 能不能存某店某月：c＝{readOnly, ready, inc:{ok,err}|null, dupSeller, match, single, pickedMonth, month, acked, busy}。回 {ok, reasons[]}。
+function _reconMatchCheck(c){
+  const reasons=[];
+  c=c||{};
+  if(c.readOnly)reasons.push('檢視帳號為唯讀');
+  if(!c.ready)reasons.push('雲端尚未就緒');
+  if(!c.inc)reasons.push('尚未上傳進帳 Excel');
+  else if(!c.inc.ok)reasons.push('檔案解析失敗');
+  else{
+    if(c.dupSeller)reasons.push('跟其他店是同一個賣家帳號（同一份檔傳了兩次？）');
+    const m=c.match;
+    if(!m||!m.ok)reasons.push('配對失敗'+(m&&m.err?'：'+m.err:''));
+    else{
+      if(c.single&&c.pickedMonth&&c.month!==c.pickedMonth)reasons.push('檔案是 '+c.month+'，與上方選的 '+c.pickedMonth+' 不符');
+      if(!m.orders)reasons.push('這個月沒有撥款訂單');
+      const nf=_reconMatchNoFile(m);
+      if(nf>RECON_MATCH_NOFILE_MAX||nf>m.orders*RECON_MATCH_NOFILE_PCT){
+        const ms=Object.keys(m.missing.byMonth||{}).filter(x=>m.missing.items.some(i=>i.noFile&&String(i.created).slice(0,7)===x)).sort();
+        reasons.push('有 '+nf+' 單的下單月份沒上傳莫筆克（'+ms.join('、')+'），請先上傳');
+      }
+      else if(m.missing.n>0&&!c.acked)reasons.push('找不到成本的 '+m.missing.n+' 單還沒勾確認');
+    }
+  }
+  if(c.busy)reasons.push('存檔中');
+  return{ok:!reasons.length,reasons};
+}
+// 要寫上雲的內容（不含 at）。🔴 只放彙總數字：訂單編號、買家帳號、賣家帳號、已取消／找不到的明細一律不放。
+//   inc＝{file, fileModified, res:_reconIncomeParse 結果}；mobicInfo＝{'YYYY-MM':{file, fileModified}}（只收需要的下單月）。
+//   Firestore 不收 undefined ⇒ 沒有值一律 null。
+function _reconMatchPayload(m,inc,mobicInfo,acked,user){
+  const nn=v=>v==null?null:v;
+  const files={};
+  (m.loadedMonths||[]).forEach(mm=>{
+    if(m.needMonths&&m.needMonths[mm]&&mobicInfo&&mobicInfo[mm])files[mm]={file:String(mobicInfo[mm].file||''),fileModified:nn(mobicInfo[mm].fileModified)};
+  });
+  const res=(inc&&inc.res)||{};
+  return{
+    schema:1,
+    orders:m.orders,matched:m.matched,cost:m.cost,ordersPlain:m.ordersPlain,ordersNoPack:m.ordersNoPack,
+    refund:{orders:m.refund.orders,cost:m.refund.cost,amt:m.refund.amt},
+    cancelled:{n:m.cancelled.n,amt:m.cancelled.amt},
+    missing:{n:m.missing.n,amt:m.missing.amt,noFile:_reconMatchNoFile(m),byMonth:Object.assign({},m.missing.byMonth)},
+    needMonths:Object.assign({},m.needMonths),
+    mobicFiles:files,
+    income:{file:String((inc&&inc.file)||''),fileModified:nn(inc&&inc.fileModified),sheets:(res.sheets||[]).length,
+      range:res.range?{from:res.range.from,to:res.range.to}:null,dupRows:res.dupRows||0,dupCross:(res.dupCross||[]).length},
+    ack:(acked&&m.missing.n>0)?{n:m.missing.n,amt:m.missing.amt}:null,
+    by:{username:String((user&&user.username)||''),name:String((user&&user.name)||'')},
+  };
+}
+// 舊存檔 vs 新內容（同一店同一月）：不同的地方 → [{l,a,b}]。沒有舊存檔回 []。
+const RECON_MATCH_DIFF_KEYS=[
+  ['orders','撥款訂單'],['matched','配到'],['cost','商品成本'],['ordersPlain','一般'],['ordersNoPack','無包裝'],
+  ['refund.orders','退款單'],['refund.cost','退款單成本'],['cancelled.n','已取消'],['missing.n','找不到'],['missing.amt','找不到（商品原價）'],
+  ['income.file','進帳 Excel 檔名'],
+];
+function _reconMatchDiff(oldRec,neu){
+  if(!oldRec||typeof oldRec!=='object')return [];
+  const get=(o,p)=>p.split('.').reduce((a,k)=>(a&&typeof a==='object')?a[k]:undefined,o);
+  const out=[];
+  RECON_MATCH_DIFF_KEYS.forEach(([p,l])=>{
+    const a=get(oldRec,p),b=get(neu,p);
+    if((a==null?null:a)!==(b==null?null:b))out.push({l,a:a==null?'（無）':String(a),b:b==null?'（無）':String(b)});
+  });
+  const fm=o=>JSON.stringify(Object.entries((o&&o.mobicFiles)||{}).map(([k,v])=>[k,v&&v.file]).sort());
+  if(fm(oldRec)!==fm(neu))out.push({l:'莫筆克檔',a:Object.keys(oldRec.mobicFiles||{}).sort().join('、')||'（無）',b:Object.keys(neu.mobicFiles||{}).sort().join('、')||'（無）'});
+  return out;
+}
+// key 排序後的 JSON（Firestore 讀回來的 map 欄位順序不保證跟寫入時一樣）。
+function _reconMatchCanon(v){
+  if(Array.isArray(v))return '['+v.map(_reconMatchCanon).join(',')+']';
+  if(v&&typeof v==='object')return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+_reconMatchCanon(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined?null:v);
+}
+// 寫入後讀回比對：回不一致的項目（[]＝一致）。at 要是 null 或 Timestamp（serverTimestamp 剛寫完可能先是 null）。
+function _reconMatchVerify(got,want){
+  if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
+  const bad=[];
+  Object.keys(want).forEach(k=>{if(_reconMatchCanon(got[k])!==_reconMatchCanon(want[k]))bad.push(k);});
+  const at=got.at;
+  if(!(at===null||!!(at&&typeof at==='object'&&typeof at.toDate==='function')))bad.push('時間');
+  return bad;
+}
 // SHOPEE_COST_MATCH_PURE_END
+
+// ═══ 對帳分頁 · 成本配對（進帳 Excel × 莫筆克）畫面＋存檔（2026-11-13，塊 2）═══
+//   位置：進帳 PDF 表和莫筆克區塊中間（renderReconTab）。上面那張 PDF 表、下面的莫筆克／無包裝／廣告區塊都不動。
+//   🔴 檔案、orderMap、明細清單、勾選全部只在記憶體（重新整理就沒了，同對帳分頁其他區塊）；存雲端只有 _reconMatchPayload 的彙總。
+//   一份進帳 Excel 可以是一個月或好幾個月：照撥款月分頁籤，每店勾要存的月份，一次 writePaths 寫入（同一店的多個月是原子的）。
+//   塊 2 還沒有任何讀取端：KPI「從對帳單帶入」要到塊 3 才改讀 matched。
+let _rmInc={};        // 店 → {name, modified, ok, err, res}
+let _rmIncBusy={};    // 店 → true（解析中）
+let _rmMob={};        // 'YYYY-MM' → {name, modified, sheet, orderMap}
+let _rmMobBusy=null;  // {i, n, name}
+let _rmMobNotes=[];   // 最近一次選莫筆克的提示（取代、失敗）
+let _rmTab='';        // 目前看的撥款月
+let _rmAck={};        // '店|月' → 勾選當下的 _reconMatchAckSig
+let _rmSel={};        // '店|月' → true／false（沒設＝能存就勾）
+let _rmSaving={};     // 店 → true
+let _rmMsg={};        // 店 → {kind, text, file}
+let _rmDetail=null;   // {shop, month, kind:'missing'|'cancelled'}
+let _rmVer=0,_rmCache=null;
+function _rmBump(){_rmVer++;_rmCache=null;}
+const _rmKey=(s,m)=>s+'|'+m;
+// 全部店 × 撥款月的配對結果（有變動才重算；renderReconTab 很常被呼叫）
+function _rmMatches(){
+  if(_rmCache&&_rmCache.ver===_rmVer)return _rmCache.out;
+  const out={};
+  const months=Object.keys(_rmMob).sort();
+  RECON_SHOPS.forEach(s=>{
+    const d=_rmInc[s];
+    if(!d||!d.ok)return;
+    const ms=months.map(m=>({month:m,map:_rmMob[m].orderMap[s]}));
+    out[s]={};
+    Object.keys(d.res.months).sort().forEach(pm=>{out[s][pm]=_reconCostMatch(d.res.orders,pm,ms);});
+  });
+  _rmCache={ver:_rmVer,out};
+  return out;
+}
+function _rmPaidMonths(){const set=new Set();RECON_SHOPS.forEach(s=>{const d=_rmInc[s];if(d&&d.ok)Object.keys(d.res.months).forEach(m=>set.add(m));});return [...set].sort();}
+function _rmSingle(s){const d=_rmInc[s];return !!(d&&d.ok&&Object.keys(d.res.months).length===1);}
+function _rmDupSeller(s){
+  const d=_rmInc[s],me=d&&d.ok&&d.res.seller;
+  return !!me&&RECON_SHOPS.some(o=>o!==s&&_rmInc[o]&&_rmInc[o].ok&&_rmInc[o].res.seller===me);
+}
+function _rmCheck(s,m){
+  const match=(_rmMatches()[s]||{})[m];
+  return _reconMatchCheck({
+    readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
+    ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
+    inc:_rmInc[s]||null,dupSeller:_rmDupSeller(s),match:match||null,single:_rmSingle(s),pickedMonth:_reconMonth,month:m,
+    acked:!!(match&&_rmAck[_rmKey(s,m)]===_reconMatchAckSig(match)),busy:!!_rmSaving[s]});
+}
+function _rmChecked(s,m){const v=_rmSel[_rmKey(s,m)];return _rmCheck(s,m).ok&&(v===undefined?true:!!v);}
+function _rmSavedOf(cloud,month,shop){
+  const r=cloud&&cloud.sources&&cloud.sources[month]&&cloud.sources[month].shopee&&cloud.sources[month].shopee.matched;
+  const x=r&&r[shop];
+  return (x&&typeof x==='object')?x:null;
+}
+function _rmCurTab(){
+  const ms=_rmPaidMonths();
+  if(_rmTab&&ms.includes(_rmTab))return _rmTab;
+  if(_reconMonth&&ms.includes(_reconMonth))return _reconMonth;
+  return ms.length?ms[ms.length-1]:'';
+}
+function _rmReadBuf(f){return new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result);rd.onerror=()=>rej(rd.error||new Error('讀檔失敗'));rd.readAsArrayBuffer(f);});}
+// 選進帳 Excel（一店一份）→ 解析 Income 分頁 → 重畫
+async function reconMatchPick(e,shop){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f||RECON_SHOPS.indexOf(shop)<0||_rmIncBusy[shop])return;
+  _rmIncBusy[shop]=true;renderReconTab();
+  const base={name:f.name,modified:(typeof f.lastModified==='number'&&f.lastModified>0)?f.lastModified:null};
+  try{
+    const X=window.XLSX;
+    if(!X||!X.read)throw new Error('XLSX 函式庫尚未載入，請硬重整（Ctrl+F5）後再試');
+    await new Promise(r=>setTimeout(r,50));
+    const buf=await _rmReadBuf(f);
+    const names=X.read(buf,{type:'array',bookSheets:true}).SheetNames||[];
+    const inc=names.filter(n=>RECON_INCOME_SHEET_RE.test(String(n).trim()));
+    const wb=inc.length?X.read(buf,{type:'array',dense:true,sheets:inc}):{Sheets:{}};
+    const res=_reconIncomeParse(names.map(n=>({name:n,aoa:(inc.includes(n)&&wb.Sheets[n])?X.utils.sheet_to_json(wb.Sheets[n],{header:1}):[]})));
+    if(!res.ok)throw new Error(res.err);
+    _rmInc[shop]=Object.assign(base,{ok:true,err:'',res});
+    const ms=Object.keys(res.months);
+    // 單月的檔：上方月份還沒選、也沒親手動過才自動帶（同進帳 PDF、莫筆克）
+    if(ms.length===1&&!_reconMonthTouched&&!_reconMonth)_reconMonth=ms[0];
+    if(res.dupRows||res.dupCross.length)console.warn('[對帳·成本配對] '+shop+' 進帳 Excel 有重複的訂單編號：同月 '+res.dupRows+' 列、跨月 '+res.dupCross.length+' 筆');
+  }catch(err){
+    console.warn('[對帳·成本配對] 進帳 Excel 解析失敗',shop,f.name,err);
+    _rmInc[shop]=Object.assign(base,{ok:false,err:(err&&err.message)||String(err),res:null});
+  }
+  delete _rmMsg[shop];
+  _rmIncBusy[shop]=false;_rmBump();renderReconTab();
+}
+// 選莫筆克（可多份）→ 一份一份讀，只留 orderMap → 重畫
+async function reconMatchMobicPick(e){
+  const files=[...((e&&e.target&&e.target.files)||[])];
+  try{e.target.value='';}catch{}
+  if(!files.length||_rmMobBusy)return;
+  const X=window.XLSX;
+  _rmMobNotes=[];
+  if(!X||!X.read){_rmMobNotes.push({bad:true,t:'XLSX 函式庫尚未載入，請硬重整（Ctrl+F5）後再試'});renderReconTab();return;}
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    _rmMobBusy={i:i+1,n:files.length,name:f.name};renderReconTab();
+    await new Promise(r=>setTimeout(r,50));
+    try{
+      const buf=await _rmReadBuf(f);
+      const names=(X.read(buf,{type:'array',bookSheets:true}).SheetNames||[]).filter(n=>/建立$/.test(String(n)));
+      if(!names.length)throw new Error('找不到名稱結尾為「建立」的分頁');
+      if(names.length>1)throw new Error('有 '+names.length+' 個「…建立」分頁');
+      const range=_reconMobicRange(names[0]);
+      if(!range||!range.month)throw new Error('「建立」分頁的期間不是整月（'+names[0]+'）');
+      const wb=X.read(buf,{type:'array',dense:true,sheets:[names[0]]});
+      const res=_reconMobicCalc(X.utils.sheet_to_json(wb.Sheets[names[0]],{header:1}),{orderMap:true});
+      if(!res.ok)throw new Error(res.err);
+      if(_rmMob[range.month])_rmMobNotes.push({t:'已用新檔取代 '+range.month+'（'+f.name+'）'});
+      _rmMob[range.month]={name:f.name,modified:(typeof f.lastModified==='number'&&f.lastModified>0)?f.lastModified:null,sheet:names[0],orderMap:res.orderMap};
+    }catch(err){
+      console.warn('[對帳·成本配對] 莫筆克解析失敗',f.name,err);
+      _rmMobNotes.push({bad:true,t:f.name+'：'+((err&&err.message)||String(err))});
+    }
+  }
+  _rmMobBusy=null;_rmBump();renderReconTab();
+}
+function reconMatchMobicRemove(m){if(_rmMobBusy||!_rmMob[m])return;delete _rmMob[m];_rmMobNotes=[];_rmBump();renderReconTab();}
+function reconMatchTab(m){_rmTab=m||'';_rmDetail=null;renderReconTab();}
+function reconMatchAck(s,m,on){
+  const match=(_rmMatches()[s]||{})[m];
+  if(on&&match)_rmAck[_rmKey(s,m)]=_reconMatchAckSig(match);else delete _rmAck[_rmKey(s,m)];
+  renderReconTab();
+}
+function reconMatchSel(s,m,on){_rmSel[_rmKey(s,m)]=!!on;renderReconTab();}
+function reconMatchDetail(s,m,kind){
+  _rmDetail=(_rmDetail&&_rmDetail.shop===s&&_rmDetail.month===m&&_rmDetail.kind===kind)?null:{shop:s,month:m,kind};
+  renderReconTab();
+}
+function clearReconMatch(){
+  if(_rmMobBusy||RECON_SHOPS.some(s=>_rmIncBusy[s]||_rmSaving[s]))return;
+  _rmInc={};_rmMob={};_rmMobNotes=[];_rmTab='';_rmAck={};_rmSel={};_rmMsg={};_rmDetail=null;_rmBump();renderReconTab();
+}
+// 存檔：一店的「勾選的月份」一次寫入。讀現值 → 有不同先確認 → writePaths → 讀回逐月比對。
+async function reconMatchSave(shop){
+  if(RECON_SHOPS.indexOf(shop)<0||_rmSaving[shop])return;
+  const months=_rmPaidMonths().filter(m=>(_rmMatches()[shop]||{})[m]&&_rmChecked(shop,m));
+  if(!months.length){if(typeof showToast==='function')showToast('沒有可以存的月份（看各月下方的原因）','error',5000);return;}
+  const d=_rmInc[shop],ck=window.__cloudKpi;
+  const u=(window.App&&App.currentUser)||{};
+  const mobicInfo={};Object.keys(_rmMob).forEach(m=>{mobicInfo[m]={file:_rmMob[m].name,fileModified:_rmMob[m].modified};});
+  const want={};
+  months.forEach(m=>{
+    const match=_rmMatches()[shop][m];
+    want[m]=_reconMatchPayload(match,{file:d.name,fileModified:d.modified,res:d.res},mobicInfo,_rmAck[_rmKey(shop,m)]===_reconMatchAckSig(match),u);
+  });
+  const done=(kind,text)=>{_rmMsg[shop]={kind,text,file:d.name};_rmSaving[shop]=false;renderReconTab();};
+  _rmSaving[shop]=true;renderReconTab();
+  let cloud=null;
+  try{const s=await ck.getDoc();cloud=(s&&s.exists&&s.exists())?(s.data()||{}):null;}
+  catch(err){console.error('[對帳·成本配對] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  const diffs=[];
+  months.forEach(m=>{
+    const old=_rmSavedOf(cloud,m,shop);
+    const df=_reconMatchDiff(old,want[m]);
+    if(df.length){const who=old.by&&(old.by.name||old.by.username);diffs.push(m+(who?'（'+who+(_reconFmtAt(old.at)?' · '+_reconFmtAt(old.at):'')+' 存的）':'')+'：\n'+df.map(x=>'　'+x.l+'：'+x.a+' → '+x.b).join('\n'));}
+  });
+  if(diffs.length){
+    if(!confirm(shop+' 以下月份已經有存檔，數字不同：\n\n'+diffs.join('\n\n')+'\n\n確定用這份進帳 Excel（'+d.name+'）覆蓋嗎？')){done('info','已取消，雲端維持原本的存檔');return;}
+  }
+  try{await ck.writePaths(months.map(m=>[['sources',m,'shopee','matched',shop],Object.assign({},want[m],{at:ck.TS})]));}
+  catch(err){console.error('[對帳·成本配對] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
+  // 🔴 被擋下（本機防寫、唯讀層）時 writePaths 不會丟錯，只有讀回看得出來 —— 不一致一律當失敗。
+  let bad=[];
+  try{
+    const s=await ck.getDoc();const g=(s&&s.exists&&s.exists())?(s.data()||{}):null;
+    months.forEach(m=>{const b=_reconMatchVerify(_rmSavedOf(g,m,shop),want[m]);if(b.length)bad.push(m+'（'+b.join('、')+'）');});
+  }catch(err){console.error('[對帳·成本配對] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
+  if(bad.length){console.warn('[對帳·成本配對] 讀回不一致',shop,bad);done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('；')+'）');return;}
+  done('ok','✓ 已存進雲端（'+months.join('、')+'）');
+}
+const _rmN=v=>_reconPayoutFmt(v),_rmAmt=v=>_reconMoneyFmt(v);
+function reconMatchHtml(){
+  const matches=_rmMatches(),months=_rmPaidMonths(),tab=_rmCurTab(),cloud=_kpiV2.cloud;
+  const anyInc=RECON_SHOPS.some(s=>_rmInc[s]);
+  // (b) 進帳 Excel 上傳列＋檔案資訊列
+  const th=RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('');
+  const upRow='<tr><th class="recon-rowhead">上傳進帳 Excel</th>'+RECON_SHOPS.map(s=>{
+    const d=_rmInc[s];
+    return '<td class="recon-cell-upload"><input type="file" accept=".xlsx" class="recon-file" onchange="reconMatchPick(event,\''+s+'\')"'+(_rmIncBusy[s]?' disabled':'')+'>'
+      +(_rmIncBusy[s]?'<span class="recon-fname">解析中…</span>':(d?'<span class="recon-fname" title="'+escapeHtmlLike(d.name)+'">'+escapeHtmlLike(d.name)+'</span>':''))
+      +'</td>';
+  }).join('')+'</tr>';
+  let infoRow='';
+  if(anyInc){
+    infoRow='<tr><th class="recon-rowhead">檔案內容</th>'+RECON_SHOPS.map(s=>{
+      const d=_rmInc[s];
+      if(!d)return '<td><span class="recon-empty">—</span></td>';
+      if(!d.ok)return '<td class="rm-cell"><span class="recon-miss">解析失敗：'+escapeHtmlLike(d.err)+'</span></td>';
+      const r=d.res,ms=Object.keys(r.months).sort();
+      return '<td class="rm-cell">'+r.sheets.length+' 張 Income 分頁・'+_rmN(r.orders.length)+' 單'
+        +'<div class="recon-note">撥款月 '+escapeHtmlLike(ms.length>1?ms[0]+' ~ '+ms[ms.length-1]+'（'+ms.length+' 個月）':ms[0])+'</div>'
+        +(r.seller?'<div class="recon-note">賣家帳號 '+escapeHtmlLike(r.seller)+'</div>':'')
+        +(_rmDupSeller(s)?'<div class="recon-miss">⚠ 跟其他欄是同一個賣家帳號，可能同一份檔傳了兩次</div>':'')
+        +((r.dupRows||r.dupCross.length)?'<div class="recon-miss">⚠ 有重複的訂單編號（同月 '+r.dupRows+' 列、跨月 '+r.dupCross.length+' 筆，跨月的只算最早那個月）</div>':'')
+        +'</td>';
+    }).join('')+'</tr>';
+  }
+  // (c) 莫筆克（多份）
+  const mobMs=Object.keys(_rmMob).sort();
+  const mobBusy=_rmMobBusy?'<div class="recon-mobic-busy"><span class="recon-spin"></span>讀取莫筆克 '+_rmMobBusy.i+'／'+_rmMobBusy.n+'：'+escapeHtmlLike(_rmMobBusy.name)+'…（請用電腦，一份約 5～15 秒）</div>':'';
+  const chips=mobMs.length?'<div class="rm-chips">已載入：'+mobMs.map(m=>'<span class="rm-chip" title="'+escapeHtmlLike(_rmMob[m].name+'｜檔案時間 '+(_reconFmtAt(_rmMob[m].modified)||'—'))+'">'+escapeHtmlLike(m)+' ✓'
+      +'<button type="button" class="rm-chip-x" title="移除這個月" onclick="reconMatchMobicRemove(\''+m+'\')"'+(_rmMobBusy?' disabled':'')+'>×</button></span>').join('')+'</div>'
+    :'<div class="recon-note">還沒載入莫筆克。</div>';
+  const notes=_rmMobNotes.map(n=>'<div class="'+(n.bad?'recon-err':'recon-note')+'">'+(n.bad?'❌ ':'')+escapeHtmlLike(n.t)+'</div>').join('');
+  const mobRow='<div class="rm-mobic"><span class="rm-lbl">莫筆克銷售金額明細（可選多份，一份一個月）</span>'
+    +'<input type="file" accept=".xlsx" multiple class="recon-file recon-mobic-file" onchange="reconMatchMobicPick(event)"'+(_rmMobBusy?' disabled':'')+'>'
+    +mobBusy+chips+notes+'</div>';
+  // (d) 需要哪幾個月的莫筆克（四店撥款單的下單月份合併）
+  let need='';
+  if(months.length){
+    const agg={};
+    RECON_SHOPS.forEach(s=>Object.values(matches[s]||{}).forEach(m=>{if(m&&m.ok)Object.entries(m.needMonths).forEach(([k,v])=>{agg[k]=(agg[k]||0)+v;});}));
+    const ks=Object.keys(agg).sort();
+    const miss=ks.filter(k=>!_rmMob[k]);
+    need='<div class="rm-need">這批撥款單的下單月份：'+ks.map(k=>'<span class="'+(_rmMob[k]?'':'rm-need-miss')+'">'+escapeHtmlLike(k)+'（'+_rmN(agg[k])+' 單）</span>').join('、')
+      +(miss.length?'<br>還沒上傳莫筆克：<b class="rm-need-miss">'+escapeHtmlLike(miss.join('、'))+'</b>'
+        +(miss.some(k=>agg[k]<=RECON_MATCH_NOFILE_MAX)?'<span class="recon-note">（單數少的月份可以不傳，存檔時要勾確認）</span>':''):'')
+      +'</div>';
+  }
+  // (e) 撥款月頁籤＋配對結果表
+  let res='';
+  if(tab){
+    const tabs=months.length>1?'<div class="rm-tabs">'+months.map(m=>'<button type="button" class="rm-tab'+(m===tab?' active':'')+'" onclick="reconMatchTab(\''+m+'\')">'+escapeHtmlLike(m)+'</button>').join('')+'</div>':'';
+    const M=s=>(matches[s]||{})[tab];
+    const cell=(s,fn)=>{const m=M(s);return '<td>'+(m&&m.ok?fn(m,s):'<span class="recon-empty">—</span>')+'</td>';};
+    const row=(lbl,fn,cls)=>'<tr'+(cls?' class="'+cls+'"':'')+'><th class="recon-rowhead'+(lbl.indexOf('└')===0?' recon-sub':'')+'">'+lbl+'</th>'+RECON_SHOPS.map(s=>cell(s,fn)).join('')+'</tr>';
+    const det=(s,kind,n,amt)=>n?'<button type="button" class="rm-link" onclick="reconMatchDetail(\''+s+'\',\''+tab+'\',\''+kind+'\')">'+_rmN(n)+' 單</button>（'+_rmAmt(amt)+'）':'0';
+    let body=row('撥款訂單',m=>_rmN(m.orders))
+      +row('配到（商品成本）',m=>_rmN(m.matched)+' 單・'+_rmAmt(m.cost),'recon-sumrow')
+      +row('└ 一般／無包裝',m=>_rmN(m.ordersPlain)+'／'+_rmN(m.ordersNoPack))
+      +row('└ 其中退款單（成本照算）',m=>m.refund.orders?_rmN(m.refund.orders)+' 單・成本 '+_rmAmt(m.refund.cost)+'<div class="recon-note">退款 '+_rmAmt(m.refund.amt)+'</div>':'0')
+      +row('已取消（不算成本）',(m,s)=>det(s,'cancelled',m.cancelled.n,m.cancelled.amt))
+      +row('找不到（不算成本）',(m,s)=>{
+        if(!m.missing.n)return '<span class="recon-ok">0</span>';
+        const nf=_reconMatchNoFile(m);
+        return det(s,'missing',m.missing.n,m.missing.amt)+'<div class="recon-note">沒上傳那個月的莫筆克 '+_rmN(nf)+' 單・有上傳但找不到 '+_rmN(m.missing.n-nf)+' 單</div>';
+      })
+      +row('目前 KPI 用的莫筆克（下單月，對照）',(m,s)=>{
+        const o=cloud&&cloud.sources&&cloud.sources[tab]&&cloud.sources[tab].shopee&&cloud.sources[tab].shopee.mobic;
+        const x=o&&o.shops&&o.shops[s];
+        return x?_rmN(x.orders)+' 單・'+_rmAmt(x.cost):'<span class="recon-empty">沒有存</span>';
+      });
+    // (f) 確認勾選＋要存這個月
+    body+='<tr><th class="recon-rowhead">找不到的單</th>'+RECON_SHOPS.map(s=>{
+      const m=M(s);
+      if(!m||!m.ok||!m.missing.n)return '<td><span class="recon-empty">—</span></td>';
+      const on=_rmAck[_rmKey(s,tab)]===_reconMatchAckSig(m);
+      return '<td class="rm-cell"><label class="rm-ack"><input type="checkbox"'+(on?' checked':'')+' onchange="reconMatchAck(\''+s+'\',\''+tab+'\',this.checked)">'
+        +'我知道有 '+_rmN(m.missing.n)+' 單（商品原價 '+_rmAmt(m.missing.amt)+'）找不到成本，這些單成本以 0 計</label></td>';
+    }).join('')+'</tr>';
+    body+='<tr><th class="recon-rowhead">存這個月（'+escapeHtmlLike(tab)+'）</th>'+RECON_SHOPS.map(s=>{
+      const m=M(s);
+      if(!m)return '<td><span class="recon-empty">—</span></td>';
+      const chk=_rmCheck(s,tab),on=_rmChecked(s,tab);
+      const saved=_rmSavedOf(cloud,tab,s);
+      const st=cloud===undefined?'讀取雲端中…':saved?'<span class="recon-save-has">已存：'+escapeHtmlLike((saved.by&&(saved.by.name||saved.by.username))||'?')+'・'+escapeHtmlLike(_reconFmtAt(saved.at)||'時間確認中')+'</span>':'尚未存檔';
+      return '<td class="rm-cell"><label class="rm-ack"><input type="checkbox"'+(on?' checked':'')+(chk.ok?'':' disabled')+' onchange="reconMatchSel(\''+s+'\',\''+tab+'\',this.checked)">要存</label>'
+        +'<span class="recon-save-st">'+st+'</span>'
+        +(chk.ok?'':'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>')+'</td>';
+    }).join('')+'</tr>';
+    // 明細（只在畫面上；訂單編號不存、不寫 localStorage）
+    let detail='';
+    if(_rmDetail&&_rmDetail.month===tab){
+      const m=M(_rmDetail.shop);
+      const items=m&&m.ok?(_rmDetail.kind==='missing'?m.missing.items:m.cancelled.items):[];
+      const lim=200;
+      detail='<div class="rm-detail"><div class="rm-detail-hd">'+escapeHtmlLike(_rmDetail.shop+' '+tab+' '+(_rmDetail.kind==='missing'?'找不到成本':'莫筆克已取消')+'的單（'+items.length+' 單，只在畫面上、不存檔）')
+        +'<button type="button" class="recon-btn" onclick="reconMatchDetail(\''+_rmDetail.shop+'\',\''+tab+'\',\''+_rmDetail.kind+'\')">收起</button></div>'
+        +'<div class="recon-scroll"><table class="recon-tbl rm-detail-tbl"><thead><tr><th>訂單編號</th><th>訂單成立日期</th><th>商品原價</th><th>'+(_rmDetail.kind==='missing'?'原因':'莫筆克狀態')+'</th></tr></thead><tbody>'
+        +items.slice(0,lim).map(x=>'<tr><td>'+escapeHtmlLike(x.oid)+'</td><td>'+escapeHtmlLike(x.created)+'</td><td>'+_rmAmt(x.orig)+'</td><td>'
+          +escapeHtmlLike(_rmDetail.kind==='missing'?(x.noFile?'沒上傳 '+String(x.created).slice(0,7)+' 的莫筆克':'莫筆克找不到這張單'):x.status)+'</td></tr>').join('')
+        +'</tbody></table></div>'+(items.length>lim?'<div class="recon-note">只列前 '+lim+' 單，還有 '+(items.length-lim)+' 單</div>':'')+'</div>';
+    }
+    res=tabs+'<div class="recon-scroll"><table class="recon-tbl rm-tbl"><thead><tr><th class="recon-rowhead">撥款 '+escapeHtmlLike(tab)+'</th>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'+detail;
+  }
+  // (g) 存檔列（每店一顆；多月時存所有勾選的月份）
+  let save='';
+  if(anyInc){
+    save='<div class="recon-scroll"><table class="recon-tbl rm-tbl"><tbody><tr class="recon-saverow"><th class="recon-rowhead">雲端存檔</th>'+RECON_SHOPS.map(s=>{
+      const d=_rmInc[s];
+      if(!d||!d.ok)return '<td class="recon-save-cell"><span class="recon-empty">—</span></td>';
+      const ms=Object.keys(d.res.months).sort();
+      const sel=ms.filter(m=>(matches[s]||{})[m]&&_rmChecked(s,m));
+      const lbl=_rmSaving[s]?'存檔中…':(ms.length>1?'存檔（勾選的 '+sel.length+' 個月）':'存檔');
+      const why=(!sel.length&&!_rmSaving[s])?'<span class="recon-save-why">'+(ms.length>1?'沒有勾選可以存的月份':escapeHtmlLike(_rmCheck(s,ms[0]).reasons.join('；')))+'</span>':'';
+      const mm=_rmMsg[s];
+      const msg=(mm&&mm.file===d.name)?'<span class="recon-save-msg '+(mm.kind==='ok'?'recon-ok':mm.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(mm.text)+'</span>':'';
+      return '<td class="recon-save-cell"><button type="button" class="recon-btn recon-save-btn"'+(sel.length&&!_rmSaving[s]?'':' disabled')+' onclick="reconMatchSave(\''+s+'\')">'+lbl+'</button>'+why+msg+'</td>';
+    }).join('')+'</tr></tbody></table></div>';
+  }
+  return '<div class="recon-wrap recon-match">'
+    +'<div class="recon-hd"><span class="recon-title">成本配對（進帳 Excel × 莫筆克）</span>'
+    +((anyInc||mobMs.length)?'<button type="button" class="recon-btn" onclick="clearReconMatch()">清除這一區</button>':'')
+    +'<span class="recon-note">KPI 的訂單數、商品成本、包裝費筆數改成只算這個月有撥款的單。四家各傳一份進帳 Excel（「已撥款」匯出，可以一個月或好幾個月），再傳這些單下單月份的莫筆克。'
+    +'<b>按各店的「存檔」才會存到雲端</b>，只存彙總數字，訂單編號不上雲。KPI 目前還沒讀這裡的數字。</span></div>'
+    +'<div class="recon-scroll"><table class="recon-tbl rm-tbl"><thead><tr><th class="recon-rowhead">欄位</th>'+th+'</tr></thead><tbody>'+upRow+infoRow+'</tbody></table></div>'
+    +mobRow+need+res+save
+    +'</div>';
+}
+Object.assign(window,{reconMatchPick,reconMatchMobicPick,reconMatchMobicRemove,reconMatchTab,reconMatchAck,reconMatchSel,reconMatchDetail,clearReconMatch,reconMatchSave});
 // 莫筆克的狀態（只在記憶體）：{name, modified(ms), sheet, range, ok, err, res}
 let _reconMobic=null;
 let _reconMobicBusy=false;
@@ -29346,7 +29743,7 @@ function renderReconTab(){
   // 廣告區輸入框有焦點時，重畫後把焦點與游標放回同一格（值本來就存在 _reconAdsForm，不會掉）。
   const fa=_reconAdsTyping()?document.activeElement:null;
   const fid=fa?fa.id:'',fs=fa?fa.selectionStart:null,fe=fa?fa.selectionEnd:null;
-  el.innerHTML=reconShopeeHtml()+reconMobicHtml()+reconNopackHtml()+reconAdsHtml();
+  el.innerHTML=reconShopeeHtml()+reconMatchHtml()+reconMobicHtml()+reconNopackHtml()+reconAdsHtml();
   if(fid){try{const n=document.getElementById(fid);if(n&&!n.disabled){n.focus();if(fs!=null)n.setSelectionRange(fs,fe);}}catch{}}
   // 雲端（app/kpi 第一個快照）還沒到 ⇒ 已存狀態與存檔鈕都還不能判斷，每秒再看一次（有上限，見 _reconReadyTick）。
   //   ⚠ 只輪詢記憶體裡的 _kpiV2，不另開 Firestore 訂閱；分頁不在畫面上（未 active）就停。

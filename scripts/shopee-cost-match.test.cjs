@@ -39,7 +39,8 @@ function load(code, names) {
 const lf = s => s.replace(/\r\n/g, '\n');   // profit.js 是 CRLF
 const cur = lf(fs.readFileSync(path.join(ROOT, 'js/profit.js'), 'utf8'));
 const NEW = load(mobicRegion(cur, '目前版本') + '\n' + between(cur, '// SHOPEE_COST_MATCH_PURE_BEGIN', '// SHOPEE_COST_MATCH_PURE_END', '目前版本'),
-  ['_reconMobicCalc', '_reconIncomeParse', '_reconIncomeDate', '_reconIncomeNum', '_reconCostMatch']);
+  ['_reconMobicCalc', '_reconIncomeParse', '_reconIncomeDate', '_reconIncomeNum', '_reconCostMatch',
+   '_reconMatchCheck', '_reconMatchPayload', '_reconMatchDiff', '_reconMatchVerify', '_reconMatchAckSig', '_reconMatchNoFile', '_reconMatchCanon', 'RECON_MATCH_NOFILE_MAX']);
 ok(cur.includes('// RECON_MOBIC_PURE_BEGIN') && cur.includes('// RECON_MOBIC_PURE_END'), 'profit.js 有 RECON_MOBIC_PURE 標記');
 let OLD = null;
 const baseRef = process.env.BASE_REF || 'main';
@@ -139,6 +140,47 @@ const S2 = { name: 'Income - 2', aoa: head('2026-09-01', '2026-10-31').concat([I
   ok(!NEW._reconCostMatch(r.orders, '2026-10', [{ month: '2026-09', map: map9 }, { month: '2026-09', map: map10 }]).ok, '配對：同月兩份莫筆克 ⇒ 錯誤');
   ok(!NEW._reconCostMatch(r.orders, '2026/10', []).ok, '配對：月份格式錯 ⇒ 錯誤');
   eq(NEW._reconCostMatch(r.orders, '2026-09', []).missing.byMonth, { '2026-08': 1 }, '配對：9 月撥款只看 9 月入帳的單');
+  // ── 塊 2：存檔用純函式 ──
+  const ctx = o => Object.assign({ readOnly: false, ready: true, inc: { ok: true }, dupSeller: false, match: Object.assign({}, m, { orders: 1000 }), single: false, pickedMonth: '', month: '2026-10', acked: true, busy: false }, o);
+  eq(NEW._reconMatchCheck(ctx({})).reasons, [], '存檔檢查：都符合（1000 單裡 1 單缺檔、已勾確認）');
+  ok(/還沒勾確認/.test(NEW._reconMatchCheck(ctx({ acked: false })).reasons.join()), '存檔檢查：找不到的單沒勾 ⇒ 擋');
+  ok(/唯讀/.test(NEW._reconMatchCheck(ctx({ readOnly: true })).reasons.join()) && /雲端尚未就緒/.test(NEW._reconMatchCheck(ctx({ ready: false })).reasons.join()), '存檔檢查：唯讀、雲端沒好 ⇒ 擋');
+  ok(/與上方選的 2026-09 不符/.test(NEW._reconMatchCheck(ctx({ single: true, pickedMonth: '2026-09' })).reasons.join()), '存檔檢查：單月檔跟下拉不同 ⇒ 擋');
+  eq(NEW._reconMatchCheck(ctx({ single: false, pickedMonth: '2026-09' })).reasons, [], '存檔檢查：多月檔不看下拉');
+  ok(/同一個賣家帳號/.test(NEW._reconMatchCheck(ctx({ dupSeller: true })).reasons.join()), '存檔檢查：兩欄同一份檔 ⇒ 擋');
+  ok(/尚未上傳/.test(NEW._reconMatchCheck(ctx({ inc: null })).reasons.join()) && /解析失敗/.test(NEW._reconMatchCheck(ctx({ inc: { ok: false } })).reasons.join()), '存檔檢查：沒檔、壞檔 ⇒ 擋');
+  {
+    // 缺檔門檻：> 20 單 或 > 撥款單 1% ⇒ 擋（勾了確認也一樣）
+    const big = n => ({ ok: true, orders: 3000, missing: { n, amt: n, byMonth: { '2026-08': n }, items: Array.from({ length: n }, (_, i) => ({ oid: 'X' + i, created: '2026-08-01', orig: 1, noFile: true })) }, loadedMonths: [] });
+    eq(NEW._reconMatchCheck(ctx({ match: big(20) })).reasons, [], '缺檔門檻：20 單（3000 單的 0.67%）可以存');
+    ok(/21 單的下單月份沒上傳莫筆克（2026-08）/.test(NEW._reconMatchCheck(ctx({ match: big(21) })).reasons.join()), '缺檔門檻：21 單 ⇒ 擋');
+    const small = Object.assign(big(2), { orders: 100 });
+    ok(/2 單的下單月份沒上傳/.test(NEW._reconMatchCheck(ctx({ match: small })).reasons.join()), '缺檔門檻：100 單裡缺 2 單（2%）⇒ 擋');
+    eq(NEW._reconMatchCheck(ctx({ match: Object.assign(big(1), { orders: 100 }) })).reasons, [], '缺檔門檻：100 單裡缺 1 單（1%）可以存');
+    eq(NEW.RECON_MATCH_NOFILE_MAX, 20, '缺檔門檻常數');
+  }
+  ok(NEW._reconMatchAckSig(m) !== NEW._reconMatchAckSig(m2), '確認簽章：莫筆克月份不同就不同');
+  const pay = NEW._reconMatchPayload(m, { file: 'inc.xlsx', fileModified: 123, res: r }, { '2026-09': { file: 'm9.xlsx', fileModified: 9 }, '2026-10': { file: 'm10.xlsx' }, '2026-01': { file: 'x' } }, true, { username: 'u1', name: '測試' });
+  eq(pay, { schema: 1, orders: 4, matched: 2, cost: 180, ordersPlain: 1, ordersNoPack: 1, refund: { orders: 1, cost: 80, amt: -50 }, cancelled: { n: 1, amt: 100 },
+    missing: { n: 1, amt: 99, noFile: 1, byMonth: { '2026-07': 1 } }, needMonths: { '2026-09': 2, '2026-10': 1, '2026-07': 1 },
+    mobicFiles: { '2026-09': { file: 'm9.xlsx', fileModified: 9 }, '2026-10': { file: 'm10.xlsx', fileModified: null } },
+    income: { file: 'inc.xlsx', fileModified: 123, sheets: 2, range: { from: '2026-09-01', to: '2026-10-31' }, dupRows: 0, dupCross: 0 },
+    ack: { n: 1, amt: 99 }, by: { username: 'u1', name: '測試' } }, '存檔內容：只有彙總');
+  {
+    const js = JSON.stringify(pay);
+    ok(!/T00d|T009|seller-a|buyer/.test(js), '存檔內容：沒有訂單編號、賣家帳號、買家帳號');
+    ok(!js.includes('undefined') && !Object.values(pay).some(v => v === undefined), '存檔內容：沒有 undefined');
+    eq(NEW._reconMatchPayload(m, { file: 'a', res: r }, {}, false, {}).ack, null, '存檔內容：沒勾確認 ⇒ ack null');
+  }
+  eq(NEW._reconMatchDiff(null, pay), [], '差異：沒有舊存檔');
+  eq(NEW._reconMatchDiff(pay, pay), [], '差異：一樣');
+  eq(NEW._reconMatchDiff(Object.assign({}, pay, { cost: 170, mobicFiles: {} }), pay).map(x => x.l), ['商品成本', '莫筆克檔'], '差異：成本、莫筆克檔');
+  const ts = { toDate() { return new Date(); } };
+  const back = JSON.parse(JSON.stringify(pay)); back.at = ts; back.refund = { amt: -50, cost: 80, orders: 1 };   // key 順序不同也算一樣
+  eq(NEW._reconMatchVerify(back, pay), [], '讀回：一致（key 順序不同）');
+  eq(NEW._reconMatchVerify(Object.assign({}, back, { at: null }), pay), [], '讀回：at 還是 null 也算');
+  eq(NEW._reconMatchVerify(Object.assign({}, back, { matched: 3, at: 'x' }), pay), ['matched', '時間'], '讀回：不一致');
+  eq(NEW._reconMatchVerify(null, pay), ['（雲端沒有這筆）'], '讀回：沒有');
 }
 
 // ════ 2. 真樣本（SHOPEE_SAMPLE_DIR，找不到就略過）════
@@ -238,6 +280,8 @@ else {
     for (const pm of months) {
       const ms = Object.keys(mobicMaps).sort().map(m => ({ month: m, map: mobicMaps[m][shop] }));
       const m = NEW._reconCostMatch(r.orders, pm, ms);
+      { const js = JSON.stringify(NEW._reconMatchPayload(m, { file: path.basename(f), res: r }, {}, true, {}));
+        ok(js.length < 3000 && !r.orders.some(o => js.includes(o.oid)) && !(r.seller && js.includes(r.seller)), '存檔內容 ' + shop + ' ' + pm + '：沒有訂單編號、賣家帳號（' + js.length + ' 字元）'); }
       ok(m.ok && m.matched + m.cancelled.n + m.missing.n === m.orders, '配對 ' + shop + ' ' + pm + '：配到＋已取消＋找不到＝撥款單數');
       console.log('    撥款 ' + pm + '：' + m.orders + ' 單，配到 ' + m.matched + '（成本 ' + m.cost + '，一般 ' + m.ordersPlain + '／無包裝 ' + m.ordersNoPack
         + '，其中退款單 ' + m.refund.orders + ' 單成本 ' + m.refund.cost + '），已取消 ' + m.cancelled.n + ' 單 $' + m.cancelled.amt
