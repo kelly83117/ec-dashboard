@@ -28160,6 +28160,7 @@ function reconShopeeHtml(){
 // 🔴 只存彙總數字：訂單編號、買家姓名、會員帳號、逐筆資料【一個都不上雲】（訂單編號只在記憶體裡去重用）。
 // ⚠ 月份下拉、雲端就緒判斷與輪詢上限、存檔→讀回驗證，全部沿用上面進帳報表那一套（_reconMonth / _kpiReady / _reconReadyGaveUp）。
 // ⚠ 莫筆克數字會隨退貨回溯 ⇒ 用檔案的 lastModified 當「下載時間」一起存、一起顯示，看得出是哪天的資料。
+// RECON_MOBIC_PURE_BEGIN（node 測試 scripts/shopee-cost-match.test.cjs 會擷取這一段，只能放純函式與常數；RECON_SHOPS 由測試注入）
 const RECON_MOBIC_SHOP_MAP={'生活好麻吉':'好麻吉','玩樂盒子':'玩樂','維克生活':'維克','森之旅小舖':'森之旅'};
 // 必要欄位：依【表頭名稱】找位置，不寫死欄位順序。缺任何一個 ⇒ 報錯、不准存。
 const RECON_MOBIC_REQ_COLS=['店鋪名稱','平台訂單編號','出貨方式','商品成本','折扣','是否出貨'];
@@ -28192,7 +28193,14 @@ function _reconMobicNum(v){
 //   ⚠ 一列＝一個商品、同一訂單多列：cost / discount 逐列加總，orders 用平台訂單編號去重。
 //   ⚠ ordersNoPack＝該訂單任一列出貨方式含「無包裝」；ordersPlain＝該訂單任一列不含。
 //     同一訂單兩種都有時兩邊都算 ⇒ orders < 兩者相加，差額記在 overlap（只回報、不改規則）。
-function _reconMobicCalc(aoa){
+// opts.orderMap===true（2026-11-13 成本跟著撥款走，塊 1）：另回 orderMap＝{店: Map(平台訂單編號 →
+//   {cost, shipped, cancelled, other, plain, noPack})}，給 _reconCostMatch 配對用。🔴 只活在記憶體，不上雲、不進 localStorage。
+//   cost／plain／noPack 只算「已出貨」列（同上面的彙總）；非已出貨的列只記筆數（cancelled＝已取消、other＝其他狀態），不檢查成本格。
+//   沒帶 opts 時回傳內容跟改版前逐字相同（node 測試拿 main 版本比對）。
+function _reconMobicCalc(aoa,opts){
+  const om=(opts&&opts.orderMap===true)?{}:null;
+  if(om)RECON_SHOPS.forEach(s=>{om[s]=new Map();});
+  const omEnt=(shop,oid)=>{let e=om[shop].get(oid);if(!e){e={cost:0,shipped:0,cancelled:0,other:0,plain:false,noPack:false};om[shop].set(oid,e);}return e;};
   if(!Array.isArray(aoa)||!aoa.length)return{ok:false,err:'分頁是空的'};
   const H=(aoa[0]||[]).map(h=>String(h==null?'':h).trim());
   const ix={};
@@ -28208,7 +28216,15 @@ function _reconMobicCalc(aoa){
     const r=aoa[i];
     if(!r||!r.some(v=>v!=null&&String(v).trim()!==''))continue;   // 整列空白
     totalRows++;
-    if(String(r[ix['是否出貨']]==null?'':r[ix['是否出貨']]).trim()!=='已出貨')continue;
+    const shipSt=String(r[ix['是否出貨']]==null?'':r[ix['是否出貨']]).trim();
+    if(shipSt!=='已出貨'){
+      if(om){
+        const sh=RECON_MOBIC_SHOP_MAP[String(r[ix['店鋪名稱']]==null?'':r[ix['店鋪名稱']]).trim()];
+        const id=String(r[ix['平台訂單編號']]==null?'':r[ix['平台訂單編號']]).trim();
+        if(sh&&id){const e=omEnt(sh,id);if(shipSt==='已取消')e.cancelled++;else e.other++;}
+      }
+      continue;
+    }
     shippedRows++;
     const raw=String(r[ix['店鋪名稱']]==null?'':r[ix['店鋪名稱']]).trim();
     const shop=RECON_MOBIC_SHOP_MAP[raw];
@@ -28224,6 +28240,7 @@ function _reconMobicCalc(aoa){
     a.all.add(oid);
     if(String(r[ix['出貨方式']]==null?'':r[ix['出貨方式']]).indexOf('無包裝')>=0)a.noPack.add(oid);else a.plain.add(oid);
     a.cost+=cost;a.discount+=disc;a.rows++;
+    if(om){const e=omEnt(shop,oid);e.cost+=cost;e.shipped++;if(String(r[ix['出貨方式']]==null?'':r[ix['出貨方式']]).indexOf('無包裝')>=0)e.noPack=true;else e.plain=true;}
   }
   if(bad.length)return{ok:false,err:'有 '+bad.length+' 列資料不完整：'+bad.filter(Boolean).join('、')+(bad.length>5?'…':'')};
   const shops={},overlap={};
@@ -28235,8 +28252,177 @@ function _reconMobicCalc(aoa){
     const ov=a.plain.size+a.noPack.size-a.all.size;
     if(ov)overlap[s]=ov;
   });
-  return{ok:true,shops,unmapped,overlap,totalRows,shippedRows};
+  const out={ok:true,shops,unmapped,overlap,totalRows,shippedRows};
+  if(om)out.orderMap=om;
+  return out;
 }
+// RECON_MOBIC_PURE_END
+
+// ═══ 蝦皮成本跟著撥款走（2026-11-13，塊 1：純函式，還沒接畫面、不碰雲端）═══
+//   老闆決定：KPI 蝦皮的訂單數、商品成本、包裝費筆數改成「只算當月有撥款的訂單」（跟營收同一批）。
+//   來源：進帳報表 Excel 的「Income」分頁（好麻吉會拆成「Income - 1」「Income - 2」…，全部讀）逐筆撥款訂單
+//         × 莫筆克銷售金額明細「建立」分頁（_reconMobicCalc(aoa,{orderMap:true})，一份一個下單月）。
+//   🔴 進帳 Excel 有買家帳號、兩邊都有訂單編號：這裡的結果只活在記憶體，之後存雲端只能放彙總數字（塊 2 處理）。
+//   一份進帳 Excel 可以是一個月（每月例行）或好幾個月（後台「已撥款」選區間匯出）⇒ 一律照每筆「錢包入帳日期」分月。
+// SHOPEE_COST_MATCH_PURE_BEGIN（node 測試 scripts/shopee-cost-match.test.cjs 會擷取這一段，只能放純函式與常數）
+const RECON_INCOME_REQ_COLS=['訂單編號','訂單成立日期','錢包入帳日期','商品原價','退款金額'];
+const RECON_INCOME_SHEET_RE=/^Income(\s*-\s*\d+)?$/;
+// 一格日期 → 'YYYY-MM-DD'；讀不出來回 null。
+//   number＝Excel 序號（直接用 UTC 算，不受瀏覽器時區影響）；Date 用本地日期；字串接受 YYYY-MM-DD／YYYY/M/D（後面可帶時間）。
+function _reconIncomeDate(v){
+  const p=n=>String(n).padStart(2,'0');
+  if(typeof v==='number'&&isFinite(v)&&v>20000&&v<80000){
+    const d=new Date(Math.round((v-25569)*86400000));
+    return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate());
+  }
+  if(v instanceof Date&&!isNaN(v))return v.getFullYear()+'-'+p(v.getMonth()+1)+'-'+p(v.getDate());
+  const m=/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:$|[ T])/.exec(String(v==null?'':v).trim());
+  if(!m)return null;
+  const mo=+m[2],d=+m[3];
+  return (mo>=1&&mo<=12&&d>=1&&d<=31)?m[1]+'-'+p(mo)+'-'+p(d):null;
+}
+// 一格金額：number 原樣；字串去千分位、接受 ASCII／全形／U+2212 負號；空白回 0（Income 的金額欄空白＝沒有這項）；轉不出來回 null。
+function _reconIncomeNum(v){
+  if(typeof v==='number')return isFinite(v)?v:null;
+  let s=String(v==null?'':v).replace(/[,\s]/g,'');
+  if(!s)return 0;
+  let neg=false;
+  if(/^[-−－]/.test(s)){neg=true;s=s.slice(1);}
+  if(!/^\d+(\.\d+)?$/.test(s))return null;
+  const n=Number(s);
+  return neg?-n:n;
+}
+// 純函式：進帳報表 Excel 的分頁 → 逐筆撥款訂單。
+//   sheets＝[{name, aoa}]（aoa＝sheet_to_json(ws,{header:1})）；只用名稱是 Income／Income - N 的分頁，其他分頁忽略。
+//   回 {ok:true, orders:[{oid, created, paid, orig, refund}], months:{撥款月:{orders, created:{下單月:筆}}},
+//       sheets:[用到的分頁], seller, range:{from,to}（檔頭寫的期間，可能沒有）, paidRange:{from,to}, rows, dupRows, dupCross:[{oid, paid:[…]}]}
+//     或 {ok:false, err}。
+//   ⚠ 表頭不寫死在第 6 列：每張分頁各自找「同時有 訂單編號、錢包入帳日期」的那一列，欄位依表頭名稱找。
+//   ⚠ 同一個訂單編號出現兩次（樣本裡沒有）：同一撥款月 ⇒ 商品原價、退款金額相加、dupRows+1；
+//     不同撥款月 ⇒ 算在最早那個月、列進 dupCross（成本只算一次，交給畫面提示）。
+function _reconIncomeParse(sheets){
+  const list=(Array.isArray(sheets)?sheets:[]).filter(s=>s&&RECON_INCOME_SHEET_RE.test(String(s.name||'').trim()));
+  if(!list.length)return{ok:false,err:'找不到「Income」分頁（這份檔的分頁：'+(Array.isArray(sheets)?sheets.map(s=>s&&s.name).join('、'):'')+'）'};
+  const byOid=new Map(),bad=[],dupCross=[];
+  let seller=null,range=null,rows=0,dupRows=0;
+  const used=[];
+  for(const sh of list){
+    const aoa=Array.isArray(sh.aoa)?sh.aoa:[];
+    const cell=(r,i)=>String(r&&r[i]!=null?r[i]:'').trim();
+    // 檔頭：「賣家帳號 / 從 / 至」那一列的下一列
+    const hr=aoa.findIndex(r=>cell(r,0)==='賣家帳號');
+    if(hr>=0&&hr<5){
+      const v=aoa[hr+1]||[];
+      const s=cell(v,0)||null;
+      if(s){if(seller&&seller!==s)return{ok:false,err:'分頁「'+sh.name+'」的賣家帳號跟其他分頁不同，可能混了兩家的檔'};seller=s;}
+      const iF=(aoa[hr]||[]).findIndex(x=>String(x==null?'':x).trim()==='從'),iT=(aoa[hr]||[]).findIndex(x=>String(x==null?'':x).trim()==='至');
+      const f=iF>=0?_reconIncomeDate(v[iF]):null,t=iT>=0?_reconIncomeDate(v[iT]):null;
+      if(f&&t){if(range&&(range.from!==f||range.to!==t))return{ok:false,err:'分頁「'+sh.name+'」寫的期間跟其他分頁不同'};range={from:f,to:t};}
+    }
+    const hi=aoa.findIndex(r=>Array.isArray(r)&&r.some(x=>String(x==null?'':x).trim()==='訂單編號')&&r.some(x=>String(x==null?'':x).trim()==='錢包入帳日期'));
+    if(hi<0)return{ok:false,err:'分頁「'+sh.name+'」找不到表頭（同時有「訂單編號」「錢包入帳日期」的那一列）'};
+    const H=aoa[hi].map(h=>String(h==null?'':h).trim());
+    const ix={};RECON_INCOME_REQ_COLS.forEach(k=>{ix[k]=H.indexOf(k);});
+    const miss=RECON_INCOME_REQ_COLS.filter(k=>ix[k]<0);
+    if(miss.length)return{ok:false,err:'分頁「'+sh.name+'」缺少必要欄位：'+miss.join('、')};
+    used.push(sh.name);
+    for(let i=hi+1;i<aoa.length;i++){
+      const r=aoa[i];
+      if(!r||!r.some(v=>v!=null&&String(v).trim()!==''))continue;
+      const oid=cell(r,ix['訂單編號']);
+      const where='分頁「'+sh.name+'」第 '+(i+1)+' 列';
+      if(!oid){
+        // 沒有訂單編號的列（例如表尾說明）：商品原價也是空白／0 才放過，否則當錯誤（不能默默少算一單）
+        const o=_reconIncomeNum(r[ix['商品原價']]);
+        if(o===0)continue;
+        if(bad.length<5)bad.push(where+'（訂單編號空白）');else bad.push(null);
+        continue;
+      }
+      rows++;
+      const created=_reconIncomeDate(r[ix['訂單成立日期']]),paid=_reconIncomeDate(r[ix['錢包入帳日期']]);
+      const orig=_reconIncomeNum(r[ix['商品原價']]),refund=_reconIncomeNum(r[ix['退款金額']]);
+      if(!created||!paid||orig===null||refund===null){
+        if(bad.length<5)bad.push(where+(!created?'（訂單成立日期讀不出來）':!paid?'（錢包入帳日期讀不出來）':orig===null?'（商品原價不是數字）':'（退款金額不是數字）'));
+        else bad.push(null);
+        continue;
+      }
+      const prev=byOid.get(oid);
+      if(!prev){byOid.set(oid,{oid,created,paid,orig,refund});continue;}
+      if(prev.paid.slice(0,7)===paid.slice(0,7)){prev.orig+=orig;prev.refund+=refund;dupRows++;continue;}
+      const d=dupCross.find(x=>x.oid===oid);
+      if(d)d.paid.push(paid);else dupCross.push({oid,paid:[prev.paid,paid]});
+      if(paid<prev.paid)Object.assign(prev,{created,paid,orig,refund});
+    }
+  }
+  if(bad.length)return{ok:false,err:'有 '+bad.length+' 列資料不完整：'+bad.filter(Boolean).join('、')+(bad.length>5?'…':'')};
+  if(!byOid.size)return{ok:false,err:'Income 分頁表頭下面沒有任何訂單'};
+  const orders=[...byOid.values()];
+  const months={};let pf=null,pt=null;
+  orders.forEach(o=>{
+    const pm=o.paid.slice(0,7),cm=o.created.slice(0,7);
+    const m=months[pm]||(months[pm]={orders:0,created:{}});
+    m.orders++;m.created[cm]=(m.created[cm]||0)+1;
+    if(!pf||o.paid<pf)pf=o.paid;
+    if(!pt||o.paid>pt)pt=o.paid;
+  });
+  return{ok:true,orders,months,sheets:used,seller,range,paidRange:{from:pf,to:pt},rows,dupRows,dupCross};
+}
+// 純函式：某店某撥款月的撥款訂單 × 莫筆克 orderMap → 成本配對結果。
+//   orders＝_reconIncomeParse(…).orders（同一店）；paidMonth＝'YYYY-MM'；
+//   mobics＝[{month:'YYYY-MM'（莫筆克的下單月）, map: _reconMobicCalc(aoa,{orderMap:true}).orderMap[店]}]，同一個月只能一份。
+//   回 {ok:true, month, orders, matched, cost, ordersPlain, ordersNoPack,
+//       refund:{orders, cost, amt}（配到的單裡退款金額≠0 的；成本照算，只是另外列給人看）,
+//       cancelled:{n, amt, items:[{oid, created, orig, status}]}（莫筆克有、但沒有已出貨列 ⇒ 不算成本、列出來）,
+//       missing:{n, amt, byMonth:{下單月:筆}, items:[{oid, created, orig, noFile}]}（莫筆克找不到 ⇒ 不算成本、列出來；
+//         noFile＝那個下單月沒有上傳莫筆克）,
+//       needMonths:{下單月:筆}, loadedMonths:[…], noFileMonths:{下單月:筆}, multiHit}
+//     或 {ok:false, err}。amt 都是 Income 的「商品原價」合計。
+//   ⚠ 先找下單月那一份，找不到再找其他份（時區、跨日的單可能落在隔壁月份）；找到兩份以上記 multiHit、用第一份有出貨的。
+//   ⚠ 一般／無包裝跟 _reconMobicCalc 同規則：該單任一已出貨列含「無包裝」算無包裝、任一列不含算一般，兩種都有兩邊都算。
+function _reconCostMatch(orders,paidMonth,mobics){
+  if(!/^\d{4}-\d{2}$/.test(String(paidMonth||'')))return{ok:false,err:'撥款月格式不對：'+paidMonth};
+  const ms=(Array.isArray(mobics)?mobics:[]).filter(x=>x&&x.map);
+  const seen=new Set();
+  for(const x of ms){
+    if(!/^\d{4}-\d{2}$/.test(String(x.month||'')))return{ok:false,err:'莫筆克的月份格式不對：'+x.month};
+    if(seen.has(x.month))return{ok:false,err:'莫筆克 '+x.month+' 有兩份，請只留一份'};
+    seen.add(x.month);
+  }
+  const loaded=new Set(ms.map(x=>x.month));
+  const L=(Array.isArray(orders)?orders:[]).filter(o=>o&&String(o.paid||'').slice(0,7)===paidMonth);
+  const r2=n=>Math.round(n*100)/100;
+  const out={ok:true,month:paidMonth,orders:L.length,matched:0,cost:0,ordersPlain:0,ordersNoPack:0,
+    refund:{orders:0,cost:0,amt:0},cancelled:{n:0,amt:0,items:[]},missing:{n:0,amt:0,byMonth:{},items:[]},
+    needMonths:{},loadedMonths:[...loaded].sort(),noFileMonths:{},multiHit:0};
+  L.forEach(o=>{
+    const cm=String(o.created||'').slice(0,7);
+    out.needMonths[cm]=(out.needMonths[cm]||0)+1;
+    if(!loaded.has(cm))out.noFileMonths[cm]=(out.noFileMonths[cm]||0)+1;
+    const order=ms.filter(x=>x.month===cm).concat(ms.filter(x=>x.month!==cm));
+    const hits=order.map(x=>x.map.get(o.oid)).filter(Boolean);
+    if(hits.length>1)out.multiHit++;
+    const e=hits.find(h=>h.shipped>0)||hits[0];
+    const orig=Number(o.orig)||0;
+    if(!e){
+      out.missing.n++;out.missing.amt+=orig;out.missing.byMonth[cm]=(out.missing.byMonth[cm]||0)+1;
+      out.missing.items.push({oid:o.oid,created:o.created,orig,noFile:!loaded.has(cm)});
+      return;
+    }
+    if(!(e.shipped>0)){
+      out.cancelled.n++;out.cancelled.amt+=orig;
+      out.cancelled.items.push({oid:o.oid,created:o.created,orig,status:e.cancelled>0?'已取消':'未出貨'});
+      return;
+    }
+    out.matched++;out.cost+=e.cost;
+    if(e.plain)out.ordersPlain++;
+    if(e.noPack)out.ordersNoPack++;
+    if(Number(o.refund)){out.refund.orders++;out.refund.cost+=e.cost;out.refund.amt+=Number(o.refund);}
+  });
+  out.cost=r2(out.cost);out.refund.cost=r2(out.refund.cost);out.refund.amt=r2(out.refund.amt);
+  out.cancelled.amt=r2(out.cancelled.amt);out.missing.amt=r2(out.missing.amt);
+  return out;
+}
+// SHOPEE_COST_MATCH_PURE_END
 // 莫筆克的狀態（只在記憶體）：{name, modified(ms), sheet, range, ok, err, res}
 let _reconMobic=null;
 let _reconMobicBusy=false;
