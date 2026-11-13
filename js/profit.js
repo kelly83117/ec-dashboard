@@ -11123,12 +11123,12 @@ const KPI_GROUPS=[
     // manual 的 desc＝填寫模式表頭 ⓘ：來源、算法（「從對帳單帶入」見 _kpiShopeeCalc；改算法要同步改這裡）。
     //   2026-11 起 KPI 月結表金額一律含稅：營收、手續費、廣告費、各項費用都照對帳單原值（不除 1.05），營業稅另由「稅金」欄扣。
     manual:[
-      {k:'qty',l:'訂單數',desc:'訂單數：從對帳單帶入＝這個月有撥款的訂單數（對帳分頁「成本配對」：進帳報表 Excel 的撥款訂單，含已取消／退貨、找不到成本的單）。還沒做成本配對的月份是舊口徑：莫筆克銷售金額明細「建立」分頁、已出貨的平台訂單編號去重數'},
-      {k:'rev',l:'實際營收',desc:'實際營收：從對帳單帶入＝進帳報表「買家支付商品金額」（含稅，不除 1.05；營業稅由「稅金」欄扣）'},
-      {k:'cost',l:'商品成本',desc:'商品成本：從對帳單帶入＝這個月有撥款的訂單，配對莫筆克「建立」分頁已出貨列的商品成本加總（已取消／退貨、找不到的單不算成本；退款單照算）。還沒做成本配對的月份是舊口徑：莫筆克「建立」分頁、已出貨的商品成本逐列加總'},
-      {k:'ads',l:'廣告費',desc:'廣告費：從對帳單帶入＝廣告報表「總體」數據的花費加總（含賣場廣告與沒有商品 ID 的列）− 廣告回饋金（含稅）'},
+      {k:'qty',l:'訂單數',desc:'這個月有撥款的訂單數（含已取消／退貨、找不到成本的單）。'},
+      {k:'rev',l:'實際營收',desc:'進帳報表「買家支付商品金額」，含稅。'},
+      {k:'cost',l:'商品成本',desc:'這個月有撥款的訂單，配對莫筆克算出的商品成本。已取消／退貨、找不到的單不算；退款單照算。'},
+      {k:'ads',l:'廣告費',desc:'廣告報表花費 − 廣告回饋金，含稅。'},
       {k:'fee',l:'手續費'},
-      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費（筆數＝這個月有撥款、配到莫筆克的訂單；還沒做成本配對的月份用莫筆克下單月）＋ 賣家負擔優惠券（進帳報表）＋ 聯盟行銷 AMS（進帳報表）＋ 其他 − 退貨運費補助（含稅）'},
+      {k:'misc',l:'各項費用',desc:'包裝費（一般 $'+KPI_SHOPEE_PACK_PLAIN+'、無包裝 $'+KPI_SHOPEE_PACK_NOPACK+'，照撥款訂單筆數）＋ 賣家負擔優惠券 ＋ 聯盟行銷 AMS ＋ 其他 − 退貨運費補助，含稅。'},
     ],
     formula:[
       // desc：純顯示用的白話公式（ⓘ 說明從這裡產生），必須跟 calc 一字不差；改 calc 要同步改 desc。
@@ -11137,7 +11137,7 @@ const KPI_GROUPS=[
       {k:'adsPct',l:'廣告佔比',fmt:'pct',calc:d=>d.rev>0?d.ads/d.rev:0,desc:'廣告佔比 = 廣告費 ÷ 實際營收'},
       // 稅金（2026-11）：照 PChome／FriDay 的公式欄（填寫模式灰底、placeholder＝公式值、可手動覆蓋、不算填寫格數）。⚠ 要排在 pure 前面（_kpiCalcAll 依序算）
       {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 實際營收 × 5/105（含稅營收內含的營業稅，可手動覆蓋）'},
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc-(Number(d.tax)||0),desc:'純利 = 實際營收 − 商品成本 − 廣告費 − 手續費 − 各項費用 − 稅金（物流運費是整組共同費用，只從蝦皮小計扣，不進各店純利）'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc-(Number(d.tax)||0),desc:'純利 = 實際營收 − 商品成本 − 廣告費 − 手續費 − 各項費用 − 稅金（物流運費只扣在蝦皮小計）'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.ads-d.fee-d.misc-(Number(d.tax)||0))/d.rev:0,desc:'純利率 = 純利 ÷ 實際營收'},
     ],
     fillFormula:['tax'],
@@ -11153,7 +11153,7 @@ const KPI_GROUPS=[
     //   2026-11 起估算費率＝淨利表平台費率（依月份生效，SHOP_RATE_SCHEDULE：好麻吉／玩樂／森之旅 20.5%；維克 2026/10 以前 17.5%、2026/11 起 20.5%）− 5（_kpiShopeeFeeEstRate）：
     //   對帳單手續費約佔含稅營收 15%，舊的 20.5% 含 5% 營業稅；營業稅現在由「稅金」欄另外扣，不能再算一次。
     autoFill:{
-      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop,month)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop,month),desc:'手續費：從對帳單帶入＝−（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費總支付）（含稅，照進帳報表正負號；不含 AMS、不含優惠券，這兩項在各項費用）；未帶入的月份＝實際營收×估算費率（淨利表平台費率 − 5：好麻吉／玩樂／森之旅 15.5%；維克 2026/10 以前 12.5%，2026/11 起與其他三家相同 15.5%；可手動覆蓋）。對帳單手續費約佔含稅營收 15%；淨利表的 20.5% 含 5% 營業稅，營業稅已由「稅金」欄另外扣，所以估算要減 5'},
+      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop,month)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop,month),desc:'進帳報表的成交手續費 ＋ 其他服務費 ＋ 金流與系統處理費 ＋ 賣家運費，含稅（無包裝 $1 已含在其他服務費）。還沒帶入的月份先用營收 × 約 15% 估算。'},
     },
     order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','tax','_common','pure','pureRate']},
   // 2026-11-05：商城兩店「從淨利表帶入」（資料在淨利表 → 酷澎 → 訂單明細上傳；KPI 只讀同店同月合計，單向、不讀 KPI 任何格子）。
@@ -13082,14 +13082,8 @@ async function kpiMomoAutoFill(){
 //   快照存 snapshots.{月}.preAutofillShopeeV2（塊 3 起；V1＝preAutofillShopee 是 2026-10-16 回補時存的、只存一次，
 //     不換 key 的話塊 4 重算不會留快照）。V2 只在還沒有 V2 時寫一次；還原用 __kpiShopeeRestore（預設 V2，{ver:1} 用 V1）。
 // 包裝費單價 KPI_SHOPEE_PACK_PLAIN／KPI_SHOPEE_PACK_NOPACK 宣告在 KPI_GROUPS 前面（廠商調價時改那裡）。
-// 按鈕 hover：六格來源（與 _kpiShopeeCalc 一致；改算法要同步改）
-const KPI_SHOPEE_AUTO_TITLE='六格從淨利表「對帳」分頁存的對帳單資料帶入：'
-  +'訂單數、商品成本＝這個月有撥款的訂單（進帳報表 Excel）配對莫筆克銷售金額明細的成本（已取消／退貨、找不到的單不算成本），還沒做成本配對的月份退回莫筆克下單月（舊口徑，預設不勾）；'
-  +'實際營收＝進帳報表 買家支付商品金額；'
-  +'手續費＝進帳報表（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費）；'
-  +'廣告費＝廣告報表花費−廣告回饋金；'
-  +'各項費用＝包裝費（撥款單的一般／無包裝筆數）＋賣家負擔優惠券＋聯盟行銷 AMS＋手填項。'
-  +'金額都是含稅（不除 1.05），營業稅由「稅金」欄另外扣。物流運費維持手填。按下去會先預覽，確認後才寫入。';
+// 按鈕 hover（2026-11-13 縮短）：只講按下去會怎樣；每格的算法看各欄頭 ⓘ（KPI_GROUPS 蝦皮 desc），不在這裡另寫一份。
+const KPI_SHOPEE_AUTO_TITLE='從淨利表「對帳」分頁存的資料帶入六格，按下去會先預覽、確認後才寫入。每格怎麼算，看欄位旁的 ⓘ。';
 // 對帳單資料到了沒＝app/kpi 的快照到了（sources 跟 KPI 同一份文件）。
 function _kpiShopeeDataLoaded(){
   try{return _kpiReady();}catch{return false;}
@@ -13247,7 +13241,7 @@ function _kpiShopeeAutoPlan(month,row){
   const has=o=>group.shops.filter(s=>_kpiIsMap(o[s])).length;
   const dl=src.mobic?_kpiShopeeTime(src.mobic.fileModified):'';
   const topHtml='<div class="km-au-snap">對帳單來源（'+_kpiEscAttr(month)+'）：進帳報表 '+has(src.payout)+'／4 店　成本配對 '+has(src.matched)+'／4 店'
-    +(has(src.matched)<group.shops.length?'（沒做的店訂單數、商品成本、各項費用用舊口徑：莫筆克下單月）':'')+'　莫筆克 '
+    +(has(src.matched)<group.shops.length?'（沒做的店會標黃字「舊口徑」）':'')+'　莫筆克 '
     +(src.mobic?'✓（'+_kpiEscAttr(dl||'下載時間不明')+' 下載）':'未存')+'　廣告報表 '+has(src.ads)+'／4 店　手填項 '+has(src.manual)+'／4 店</div>';
   return{items,checks:{},groupName:'蝦皮',restoreFn:'__kpiShopeeRestore',subLabel:'蝦皮 好麻吉／玩樂／維克／森之旅',topHtml};
 }
