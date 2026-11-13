@@ -30343,6 +30343,7 @@ function closeCoupangDist(){
 // ── 商品分析彈窗（照 MO+ momoOpenAnalysis：點列開、.ana-modal 外觀、分析／定價與成本兩分頁）──
 //   酷澎只有本月一份報表在記憶體（無多期歷史、無 Chart.js 趨勢），所以內容是本期單月的明細＋逐件拆解，不畫跨月圖。
 let _cupAnaTab='analysis';
+let _cupAnalysisCharts=[];   // 開啟中的 Chart 實例，關閉／重畫時 destroy（照 momo _momoAnalysisCharts）
 function cupOpenAnalysis(shop, code){
   const r=(_cupMergedRows[shop]||[]).find(x=>x.code===code);
   if(!r){ if(typeof showToast==='function') showToast('找不到商品 '+code,'error'); return; }
@@ -30352,10 +30353,33 @@ function cupOpenAnalysis(shop, code){
   ov.onclick=e=>{ if(e.target===ov) cupCloseAnalysis(); };
   cupRenderAnalysis(shop, r);
 }
-function cupCloseAnalysis(){ const ov=document.getElementById('cup-analysis-overlay'); if(ov) ov.remove(); }
+function cupCloseAnalysis(){
+  _cupAnalysisCharts.forEach(c=>{ try{ c.destroy(); }catch{} }); _cupAnalysisCharts=[];
+  const ov=document.getElementById('cup-analysis-overlay'); if(ov) ov.remove();
+}
 function cupAnaTab(tab){ _cupAnaTab=tab;
-  ['analysis','pricing'].forEach(t=>{ const p=document.getElementById('cup-ana-pane-'+t); if(p)p.style.display=(t===tab?'':'none');
+  ['analysis','pricing','optlog'].forEach(t=>{ const p=document.getElementById('cup-ana-pane-'+t); if(p)p.style.display=(t===tab?'':'none');
     const b=document.getElementById('cup-ana-tab-'+t); if(b){ b.style.color=(t===tab?'#0ea5e9':'#6b7280'); b.style.borderBottom=(t===tab?'2px solid #0ea5e9':'2px solid transparent'); } });
+  if(tab==='analysis'){ _cupAnalysisCharts.forEach(c=>{ try{ c.resize(); }catch{} }); }   // 圖表只建一次；隱藏時尺寸 0，切回來 resize（照 momo）
+}
+// 跨月逐商品序列（照 momoSkuMonthly）：掃該賣場所有已上傳月份的報表，取該原廠編號的本期數字。
+//   酷澎無瀏覽量(S1103)、無跨月成本歷史 → 淨利率/成交均價一律用目前成本 live 回算；沒生意的月份補 0（leading 0 不留）。
+function cupSkuMonthly(shop, code){
+  const months=cupAvailableMonths(shop);                 // 'YYYY-MM' 由小到大
+  const costMap=momoLoadCostByOrigin()||{};
+  const unit=costMap[code]; const hasCost=(unit!=null&&!isNaN(+unit));
+  const all=months.map(m=>{
+    const d=cupLoadReport(shop,m); const rows=(d&&d.rows)||[]; const row=rows.find(x=>x.code===code);
+    const qty=row?Number(row.qty)||0:0, rev=row?Number(row.rev)||0:0, fee=row?Number(row.fee)||0:0;
+    const active=qty>0||Math.abs(rev)>0.5;
+    const cost=hasCost?Math.round((+unit)*qty):null;
+    const net=(hasCost)?(rev-cost-fee):null;
+    return { mo:m, label:m.slice(2,4)+'/'+m.slice(5,7), qty, active,
+      margin:(active&&net!=null&&rev>0)?(net/rev*100):null,     // 淨利率 %
+      avgPrice:(active&&qty>0)?(rev/qty):null };                 // 成交均價＝淨額/件
+  });
+  const firstActive=all.findIndex(s=>s.active);
+  return firstActive<=0 ? all : all.slice(firstActive);          // 去掉上架前的 leading 0；中間/結尾的 0（賣不動）保留
 }
 function cupRenderAnalysis(shop, r){
   const ov=document.getElementById('cup-analysis-overlay'); if(!ov) return;
@@ -30367,9 +30391,19 @@ function cupRenderAnalysis(shop, r){
   const netTxt = r.costStatus==='ok' ? money(r.net) : (barcode?'—':'缺成本');
   const did=esc(String(r.dispId||''));
   const mrow=(label,val,note)=>`<tr><td style="padding:6px 8px;color:#6b7280">${label}</td><td style="padding:6px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${val}</td>${note?`<td style="padding:6px 8px;color:#9ca3af;font-size:11px">${note}</td>`:'<td></td>'}</tr>`;
+  const optN=((momoLoadOptlog(shop)||{})[r.code]||[]).length;
   const tabBtn=(t,label)=>`<button id="cup-ana-tab-${t}" onclick="cupAnaTab('${t}')" style="padding:8px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2px solid ${_cupAnaTab===t?'#0ea5e9':'transparent'};color:${_cupAnaTab===t?'#0ea5e9':'#6b7280'};cursor:pointer">${label}</button>`;
-  // 分析：本期合計明細
-  const analysisPane=`<table style="width:100%;border-collapse:collapse;font-size:13px">
+  // 跨月圖表（照 momo 分析分頁）：月銷量長條、成交均價折線、淨利率折線。酷澎無瀏覽量資料 → 無瀏覽量圖。
+  const series=cupSkuMonthly(shop, r.code);
+  const hasPrice=series.some(s=>s.avgPrice!=null), hasMargin=series.some(s=>s.margin!=null);
+  const chartSec=(h,inner)=>`<div class="mm-ana-sec"><div class="mm-ana-h">${h}</div>${inner}</div>`;
+  const chartsHtml =
+    chartSec('月銷量（件）', `<div style="position:relative;height:170px"><canvas id="cup-ana-qty"></canvas></div><div style="font-size:11px;color:#9ca3af;margin-top:4px">酷澎無瀏覽量資料，故無「瀏覽量‖銷量」圖。</div>`)
+    + chartSec('成交均價（淨額 ÷ 件）', hasPrice?`<div style="position:relative;height:150px"><canvas id="cup-ana-price"></canvas></div>`:`<div style="font-size:12px;color:#94a3b8;padding:8px 2px">尚無成交均價資料。</div>`)
+    + chartSec('淨利率（%）', hasMargin?`<div style="position:relative;height:150px"><canvas id="cup-ana-margin"></canvas></div><div style="font-size:11px;color:#d97706;margin-top:4px">各月淨利率用該原廠編號成本表<b>目前值</b> live 回算（成本無歷史版本）→ 看趨勢別看絕對值。</div>`:`<div style="font-size:12px;color:#94a3b8;padding:8px 2px">缺成本或無營收，淨利率無法計算。</div>`);
+  // 分析：跨月圖表 ＋ 本期合計明細
+  const analysisPane=chartsHtml+`<div class="mm-ana-sec"><div class="mm-ana-h">本期明細（${esc(_cupSelMonth[shop]||'')}）</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
     ${mrow('本期數量',q.toLocaleString(),'件')}
     ${mrow('定價合計',money(r.grossRev),'選項價格×數量')}
     ${mrow('賣家優惠券',(Number(r.sellerCoupon)||0)>0?'−'+money(r.sellerCoupon):money(0),'賣家自行吸收')}
@@ -30381,7 +30415,7 @@ function cupRenderAnalysis(shop, r){
     ${mrow('淨利',netTxt,'毛利 − 平台費用')}
     ${mrow('淨利率',r.costStatus==='ok'?pct(r.netRate):'—','')}
     ${mrow('庫存',r.stock==null?'—':Number(r.stock).toLocaleString(),r.stock==null?'未上傳 price_inventory':'price_inventory')}
-  </table>`;
+  </table></div>`;
   // 定價與成本：逐件拆解 ＋ 缺成本可補
   const oid=String(r.code).replace(/[^A-Za-z0-9]/g,'_');
   const costEdit = missing ? `<div style="margin-top:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px">
@@ -30400,17 +30434,37 @@ function cupRenderAnalysis(shop, r){
     ${mrow('毛利／件',(r.costStatus==='ok'&&per(r.gross)!=null)?money(per(r.gross)):(barcode?'—':'缺成本'),'')}
     ${mrow('淨利／件',(r.costStatus==='ok'&&per(r.net)!=null)?money(per(r.net)):(barcode?'—':'缺成本'),'')}
   </table>${costEdit}`;
-  ov.innerHTML=`<div class="ana-modal" style="width:min(640px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+  ov.innerHTML=`<div class="ana-modal" style="width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3;gap:12px">
       <div style="min-width:0"><div style="font-size:16px;font-weight:800;line-height:1.35">${esc(r.name||r.code)}</div>
         <div style="font-size:12px;color:#94a3b8;margin-top:2px">原廠編號 ${esc(r.code)}${did?' · 酷澎編號 '+did:''} · ${esc(cupShopDisplay(shop))} · ${esc(_cupSelMonth[shop]||'')}</div></div>
       <button onclick="cupCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
     </div>
-    <div role="tablist" style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid #e2e8f0">${tabBtn('analysis','分析')}${tabBtn('pricing','定價與成本')}</div>
+    <div role="tablist" style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid #e2e8f0">${tabBtn('analysis','分析')}${tabBtn('pricing','定價與成本')}${tabBtn('optlog','優化紀錄'+(optN?' ('+optN+')':''))}</div>
     <div style="padding:16px 20px;overflow:auto">
       <div id="cup-ana-pane-analysis" style="${_cupAnaTab==='analysis'?'':'display:none'}">${analysisPane}</div>
       <div id="cup-ana-pane-pricing" style="${_cupAnaTab==='pricing'?'':'display:none'}">${pricingPane}</div>
+      <div id="cup-ana-pane-optlog" style="${_cupAnaTab==='optlog'?'':'display:none'}"><div class="mm-ana-sec" id="momo-optlog-sec"></div></div>
     </div></div>`;
+  // 優化紀錄：直接複用 MO+ 的區塊（讀寫 ec_momo_optlog|<賣場>，新增/編輯/刪除與 MO+ 完全相同）
+  momoRenderOptlogSection(shop, r.code);
+  // 圖表（innerHTML 後同步建；存實例供關閉/重畫時 destroy）
+  _cupAnalysisCharts.forEach(c=>{ try{ c.destroy(); }catch{} }); _cupAnalysisCharts=[];
+  if(typeof Chart==='undefined') return;
+  const labels=series.map(s=>s.label);
+  const barLabels={ id:'cupBarLabels', afterDatasetsDraw(chart){ const ctx=chart.ctx; chart.data.datasets.forEach((ds,di)=>{ const meta=chart.getDatasetMeta(di); if(!meta||meta.hidden) return; meta.data.forEach((bar,i)=>{ const v=ds.data[i]; if(v==null) return; ctx.save(); ctx.fillStyle=v===0?'#94a3b8':'#475569'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(String(v), bar.x, bar.y-3); ctx.restore(); }); }); } };
+  const qtyCv=document.getElementById('cup-ana-qty');
+  if(qtyCv) _cupAnalysisCharts.push(new Chart(qtyCv.getContext('2d'),{ type:'bar', plugins:[barLabels],
+    data:{labels,datasets:[{label:'月銷量',data:series.map(s=>s.qty),backgroundColor:'#0ea5e9',borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:16}},plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} }));
+  const priceCv=document.getElementById('cup-ana-price');
+  if(priceCv) _cupAnalysisCharts.push(new Chart(priceCv.getContext('2d'),{ type:'line',
+    data:{labels,datasets:[{label:'成交均價',data:series.map(s=>s.avgPrice),borderColor:'#10b981',backgroundColor:'#10b981',tension:.3,spanGaps:true,pointRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'$'+Math.round(v)}}}} }));
+  const mgCv=document.getElementById('cup-ana-margin');
+  if(mgCv) _cupAnalysisCharts.push(new Chart(mgCv.getContext('2d'),{ type:'line',
+    data:{labels,datasets:[{label:'淨利率',data:series.map(s=>s.margin),borderColor:'#6366f1',backgroundColor:'#6366f1',tension:.3,spanGaps:true,pointRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'%'}}}} }));
 }
 function cupAnaCostSave(shop, code){
   const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('cup-ana-mc-'+oid);
