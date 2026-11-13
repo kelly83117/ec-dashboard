@@ -11128,7 +11128,7 @@ const KPI_GROUPS=[
       {k:'cost',l:'商品成本',desc:'商品成本：從對帳單帶入＝這個月有撥款的訂單，配對莫筆克「建立」分頁已出貨列的商品成本加總（已取消／退貨、找不到的單不算成本；退款單照算）。還沒做成本配對的月份是舊口徑：莫筆克「建立」分頁、已出貨的商品成本逐列加總'},
       {k:'ads',l:'廣告費',desc:'廣告費：從對帳單帶入＝廣告報表「總體」數據的花費加總（含賣場廣告與沒有商品 ID 的列）− 廣告回饋金（含稅）'},
       {k:'fee',l:'手續費'},
-      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費（筆數＝這個月有撥款、配到莫筆克的訂單；還沒做成本配對的月份用莫筆克下單月）＋ 賣家負擔優惠券（進帳報表）＋ 聯盟行銷 AMS（進帳報表）＋ 無包裝 $1／筆（媒合費用報表的環保無包裝筆數×$1，沒上傳的月份用手填）＋ 其他 − 退貨運費補助（含稅）'},
+      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費（筆數＝這個月有撥款、配到莫筆克的訂單；還沒做成本配對的月份用莫筆克下單月）＋ 賣家負擔優惠券（進帳報表）＋ 聯盟行銷 AMS（進帳報表）＋ 其他 − 退貨運費補助（含稅）'},
     ],
     formula:[
       // desc：純顯示用的白話公式（ⓘ 說明從這裡產生），必須跟 calc 一字不差；改 calc 要同步改 desc。
@@ -13067,9 +13067,10 @@ async function kpiMomoAutoFill(){
 //     商品成本 cost＝ matched[S].cost（撥款單配到莫筆克的成本）；沒有 matched ⇒ 舊口徑 mobic.shops[S].cost（莫筆克成本，不除 1.05）
 //     手續費 fee   ＝ −(feeDeal ＋ feeOther ＋ feeFlow ＋ shipTotal)（照 PDF 正負號；不含 feeAms、不含 coupon；shipTotal 正數自然抵減；退貨運費在 shipTotal 底下）
 //     廣告費 ads   ＝ ads[S].spend − (ads[S].rebate ?? 0)
-//     各項費用 misc＝ 一般筆數×2.5 ＋ 無包裝筆數×2 ＋ (−coupon) ＋ (−feeAms ?? 0) ＋ 無包裝$1 ＋ 其他 − 退貨運費補助
+//     各項費用 misc＝ 一般筆數×2.5 ＋ 無包裝筆數×2 ＋ (−coupon) ＋ (−feeAms ?? 0) ＋ 其他 − 退貨運費補助
 //       coupon＝payout[S].coupon（進帳報表「賣家負擔優惠券」，永遠 ≤0；沒用券是 0）；必要，沒有 ⇒ 等上傳。莫筆克 discount 不再用。
-//       無包裝$1＝nopack.shops[S].amount（媒合費用報表，2026-11-04）；沒有 nopack 才用 manual.noPackPerOrder。
+//       無包裝 $1 媒合費（nopack／manual.noPackPerOrder）2026-11-13 起【不再加】：已包含在進帳報表的「其他服務費」（feeOther，算在手續費），
+//         財務確認過，所有月份都不算。$2 的無包裝包裝費（KPI_SHOPEE_PACK_NOPACK）是另一筆，照算。雲端存的 nopack／noPackPerOrder 不刪不改。
 //   缺來源 → status:'wait'、note「等上傳：對帳分頁的○○」，不寫 0。手填項（manual）沒存過 → 以 0 計、warnNote 預設不勾。
 //   payout.feeAms 為 null（PDF 沒有 AMS 那行）→ 以 0 計，不算缺。物流運費（共同費用）不帶入、維持手填。
 //   ── 成本跟著撥款走（2026-11-13，塊 3）：訂單數、商品成本、包裝費筆數改成「這個月有撥款的單」，跟營收同一批 ──
@@ -13087,7 +13088,7 @@ const KPI_SHOPEE_AUTO_TITLE='六格從淨利表「對帳」分頁存的對帳單
   +'實際營收＝進帳報表 買家支付商品金額；'
   +'手續費＝進帳報表（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費）；'
   +'廣告費＝廣告報表花費−廣告回饋金；'
-  +'各項費用＝包裝費（撥款單的一般／無包裝筆數）＋賣家負擔優惠券＋聯盟行銷 AMS＋無包裝$1（媒合費用報表）＋手填項。'
+  +'各項費用＝包裝費（撥款單的一般／無包裝筆數）＋賣家負擔優惠券＋聯盟行銷 AMS＋手填項。'
   +'金額都是含稅（不除 1.05），營業稅由「稅金」欄另外扣。物流運費維持手填。按下去會先預覽，確認後才寫入。';
 // 對帳單資料到了沒＝app/kpi 的快照到了（sources 跟 KPI 同一份文件）。
 function _kpiShopeeDataLoaded(){
@@ -13166,15 +13167,14 @@ function _kpiShopeeCalc(src,shop){
     else{
       const ams=_kpiShopeeFin(P.feeAms)?-P.feeAms:0;
       const mv=k=>(Man&&_kpiShopeeFin(Man[k]))?Man[k]:0;
-      // 無包裝$1：對帳分頁存過媒合費用報表（nopack）就用它；沒有才退回手填格。
-      const NP=src.nopack&&_kpiIsMap(src.nopack.shops)&&_kpiIsMap(src.nopack.shops[shop])&&_kpiShopeeFin(src.nopack.shops[shop].amount)?src.nopack.shops[shop]:null;
-      const np=NP?NP.amount:mv('noPackPerOrder'),ot=mv('other'),rs=mv('returnSubsidy');
+      // 無包裝 $1 媒合費（nopack／manual.noPackPerOrder）不再加：已含在其他服務費（2026-11-13，見上方註解）。
+      const ot=mv('other'),rs=mv('returnSubsidy');
       const cp=-P.coupon;   // 賣家負擔優惠券（PDF ≤0）→ 費用為正
       const PK=useT?Mt:Ms;   // 包裝費筆數：有成本配對用撥款單，沒有用莫筆克（舊口徑）
-      const sum=PK.ordersPlain*KPI_SHOPEE_PACK_PLAIN+PK.ordersNoPack*KPI_SHOPEE_PACK_NOPACK+cp+ams+np+ot-rs;
+      const sum=PK.ordersPlain*KPI_SHOPEE_PACK_PLAIN+PK.ordersNoPack*KPI_SHOPEE_PACK_NOPACK+cp+ams+ot-rs;
       const comp='一般 '+_kpiShopeeN(PK.ordersPlain)+' 筆×'+KPI_SHOPEE_PACK_PLAIN+'＋無包裝 '+_kpiShopeeN(PK.ordersNoPack)+' 筆×'+KPI_SHOPEE_PACK_NOPACK+(useT?'（撥款單）':'')
         +_kpiShopeeTerm('賣家負擔優惠券',cp)+_kpiShopeeTerm('聯盟行銷 AMS',ams)+(_kpiShopeeFin(P.feeAms)?'':'（PDF 沒有這行）')
-        +_kpiShopeeTerm('無包裝$1',np)+(NP?'（媒合費用報表 '+_kpiShopeeN(NP.orders)+' 筆）':'（手填）')+_kpiShopeeTerm('其他',ot)+_kpiShopeeTerm('退貨運費補助',-rs)+'（含稅）';
+        +_kpiShopeeTerm('其他',ot)+_kpiShopeeTerm('退貨運費補助',-rs)+'（含稅）';
       out.misc={val:Math.round(sum),comp,
         warnNote:Man?null:'各項費用的手填項尚未存檔，以 0 計'};
       if(!useT)out.misc.legacy=true;
@@ -29197,10 +29197,13 @@ function reconMobicHtml(){
 //                                                range:{from,to}, rows, file, fileModified, by, at}
 //   orders＝物流選項含「無包裝」的訂單編號去重數；amount＝orders × RECON_NOPACK_UNIT（含稅原值，跟原本手填格同口徑，KPI 端才 ÷1.05）。
 // 🔴 只存彙總數字：訂單編號、包裹查詢號碼【一個都不上雲】。
-// 🔴 KPI「從對帳單帶入」：這筆存在 ⇒ 無包裝$1 用 amount；不存在 ⇒ 退回手填格 manual.noPackPerOrder（舊月份照舊）。
-//   手填格本身不動也不清（存在 manual.{店}，廣告區存檔照舊寫它），只是有這筆時廣告區改成唯讀顯示。
+// 🔴 2026-11-13 起【已停用】：這筆 $1 已包含在進帳報表的「其他服務費」，KPI 不再另外加（_kpiShopeeCalc 不讀 nopack／noPackPerOrder）。
+//   區塊保留、只讀：已存的月份照樣顯示當時的數字；上傳、存檔鈕停用（RECON_NOPACK_DISABLED）。雲端已存的 nopack 不刪不改。
+//   廣告區的手填格 manual.{店}.noPackPerOrder 也改成唯讀；廣告區存檔整塊覆蓋 manual.{店}，所以存檔時送回雲端原值（reconAdsSave）。
 // ⚠ 月份＝分頁名稱前 6 碼；每列「理貨中心驗收時間」都要落在那個月，否則不准存。
-const RECON_NOPACK_AUTO_FROM='2026-09';   // 這個月（含）以後，廣告區無包裝 $1 不給手填、只顯示媒合費用報表帶入的金額
+const RECON_NOPACK_DISABLED=true;   // 停用：上傳、存檔一律不准（區塊仍顯示已存數字）
+const RECON_NOPACK_OFF_NOTE='已包含在蝦皮其他服務費，不再另外計算';
+const RECON_NOPACK_AUTO_FROM='2026-09';   // 已停用（2026-11-13 起廣告區那格所有月份都唯讀，不再用這個分界）。原意：這個月（含）以後廣告區無包裝 $1 不給手填
 const RECON_NOPACK_UNIT=1;   // 每筆 $1（含稅）。蝦皮調價時改這裡
 // Shop ID → 店（2026-11-04 Vanessa 提供）。新開賣場要加在這裡，否則那家的列會被列為「對不到」、不准存。
 const RECON_NOPACK_SHOPID_MAP={'40177218':'好麻吉','67734871':'玩樂','594705932':'森之旅','371940479':'維克'};
@@ -29271,6 +29274,7 @@ function _reconNopackCtx(){
 function _reconNopackCheck(c){
   const reasons=[];
   const m=c&&c.m;
+  if(RECON_NOPACK_DISABLED)reasons.push('已停用：'+RECON_NOPACK_OFF_NOTE);   // 停用後一律不准存（reconNopackSave 也靠這裡擋）
   if(c&&c.readOnly)reasons.push('檢視帳號為唯讀');
   if(!(c&&c.ready))reasons.push('雲端尚未就緒');
   if(!m)reasons.push('尚未上傳檔案');
@@ -29326,7 +29330,7 @@ function _reconNopackVerify(got,want){
 async function reconNopackPick(e){
   const f=(e&&e.target&&e.target.files||[])[0];
   try{e.target.value='';}catch{}
-  if(!f||_reconNopackBusy)return;
+  if(!f||_reconNopackBusy||RECON_NOPACK_DISABLED)return;
   _reconNopackBusy=true;renderReconTab();
   const base={name:f.name,modified:(typeof f.lastModified==='number'&&f.lastModified>0)?f.lastModified:null};
   try{
@@ -29391,7 +29395,7 @@ function reconNopackHtml(){
   if(_reconReadyGaveUp&&!_kpiReady())st='<span class="recon-bad">雲端尚未就緒，請重新整理頁面</span>';
   else if(!_reconMonth)st='選月份後顯示已存狀態';
   else if(cloud===undefined)st='讀取雲端中…';
-  else if(!saved)st=_reconMonth+' 尚未存檔（KPI 會用廣告區的手填格）';
+  else if(!saved)st=RECON_NOPACK_DISABLED?_reconMonth+' 沒有存檔':_reconMonth+' 尚未存檔（KPI 會用廣告區的手填格）';
   else{
     const who=(saved.by&&(saved.by.name||saved.by.username))||'?';
     st='<span class="recon-save-has">'+escapeHtmlLike(_reconMonth)+' 已存：'+escapeHtmlLike(who)+'・'+escapeHtmlLike(_reconFmtAt(saved.at)||'時間確認中')+'</span>';
@@ -29425,15 +29429,18 @@ function reconNopackHtml(){
   }
   const chk=_reconNopackCheck(_reconNopackCtx());
   const btn='<button type="button" class="recon-btn recon-save-btn"'+(chk.ok?'':' disabled')+' onclick="reconNopackSave()">'+(_reconNopackSaving?'存檔中…':'存檔（四店一起）')+'</button>';
-  const why=(!chk.ok&&!_reconNopackSaving)?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
+  // 停用時不列「不能存的原因」（標題旁已有已停用標籤與說明）
+  const why=(!chk.ok&&!_reconNopackSaving&&!RECON_NOPACK_DISABLED)?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
   const mm=_reconNopackMsg;
   const msg=(mm&&m&&mm.month===_reconMonth&&mm.file===m.name&&mm.modified===m.modified)
     ?'<span class="recon-save-msg '+(mm.kind==='ok'?'recon-ok':mm.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(mm.text)+'</span>':'';
   return '<div class="recon-wrap recon-mobic recon-nopack">'
-    +'<div class="recon-hd"><span class="recon-title">無包裝 （蝦皮派車物流媒合費用，全賣場）</span>'
-    +'<input type="file" accept=".xlsx" class="recon-file recon-mobic-file" onchange="reconNopackPick(event)"'+(_reconNopackBusy?' disabled':'')+'>'
+    +'<div class="recon-hd"><span class="recon-title">無包裝 （蝦皮派車物流媒合費用，全通路）</span>'
+    +(RECON_NOPACK_DISABLED?'<span class="recon-off-tag">已停用</span>':'')
+    +'<input type="file" accept=".xlsx" class="recon-file recon-mobic-file" onchange="reconNopackPick(event)"'+(_reconNopackBusy||RECON_NOPACK_DISABLED?' disabled':'')+'>'
     +(m&&!_reconNopackBusy?'<button type="button" class="recon-btn" onclick="clearReconNopack()">清除</button>':'')
-    +'<span class="recon-note">只算物流選項為「環保無包裝」的訂單，每筆 $'+RECON_NOPACK_UNIT+'（含稅）。<b>按「存檔」才會存到雲端</b>，只存四店筆數與金額，不存任何訂單資料。</span></div>'
+    +(RECON_NOPACK_DISABLED?'':'<span class="recon-note">只算物流選項為「環保無包裝」的訂單，每筆 $'+RECON_NOPACK_UNIT+'（含稅）。<b>按「存檔」才會存到雲端</b>，只存四店筆數與金額，不存任何訂單資料。</span>')+'</div>'
+    +(RECON_NOPACK_DISABLED?'<div class="recon-off-note">'+RECON_NOPACK_OFF_NOTE+'</div>':'')
     +info+tbl
     +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
     +'</div>';
@@ -29452,7 +29459,8 @@ Object.assign(window,{reconNopackPick,clearReconNopack,reconNopackSave});
 // ⚠ 不碰淨利表既有的廣告上傳（onFile / parseAdsCsv / rawAds）：這裡另寫一支只算總額的純函式，只借用 splitCSV。
 // ⚠ 月份下拉、雲端就緒判斷與輪詢上限、存檔→讀回驗證，全部沿用進帳報表那一套。
 const RECON_ADS_MANUAL_KEYS=[
-  {k:'noPackPerOrder',l:'無包裝 $1／筆 金額'},
+  // off：已停用（2026-11-13，已含在其他服務費）。格子唯讀、不檢查；存檔時送回雲端原值（manual.{店} 是整塊覆蓋，見 reconAdsSave）。
+  {k:'noPackPerOrder',l:'無包裝 $1／筆 金額',off:true},
   {k:'returnSubsidy', l:'退貨運費補助（減項，填正數）'},
   {k:'other',         l:'其他金額'},
 ];
@@ -29574,7 +29582,8 @@ function _reconAdsCheck(c){
     else if(rb.v!==old)rebateOnly={rebate:rb.v,standalone:true};
   }
   const manual={};
-  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{
+  RECON_ADS_MANUAL_KEYS.forEach(({k,l,off})=>{
+    if(off)return;   // 停用欄不檢查、不從輸入框取值；reconAdsSave 用雲端原值補回
     const m=_reconAdsMoney(v[k]);
     if(!m.ok)reasons.push(l.replace(/（.*$/,'')+' 要填 0 以上的數字');
     manual[k]=m.v;
@@ -29609,7 +29618,7 @@ function _reconAdsDiff(oldAds,oldManual,ads,manual,rebateOnly){
     if(op.from!==np.from||op.to!==np.to)out.push({l:'廣告報表期間',a:(op.from||'?')+' ~ '+(op.to||'?'),b:(np.from||'?')+' ~ '+(np.to||'?')});
   }
   if(oldManual&&typeof oldManual==='object'){
-    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{const a=oldManual[k]==null?null:oldManual[k];if(a!==manual[k])out.push({l:l.replace(/（.*$/,''),a:_reconAdsFmt(a),b:_reconAdsFmt(manual[k])});});
+    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{const a=oldManual[k]==null?null:oldManual[k];if(a!==(manual[k]==null?null:manual[k]))out.push({l:l.replace(/（.*$/,''),a:_reconAdsFmt(a),b:_reconAdsFmt(manual[k])});});
     const a=oldManual.otherNote==null?null:oldManual.otherNote;
     if(a!==manual.otherNote)out.push({l:'其他備註',a:a==null?'（未填）':a,b:manual.otherNote==null?'（未填）':manual.otherNote});
   }
@@ -29644,7 +29653,7 @@ function _reconAdsVerify(gotAds,gotManual,ads,manual,by,rebateOnly,keep){
   }
   if(!gotManual||typeof gotManual!=='object')bad.push('手填（雲端沒有這筆）');
   else{
-    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{if((gotManual[k]==null?null:gotManual[k])!==manual[k])bad.push(l.replace(/（.*$/,''));});
+    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{if((gotManual[k]==null?null:gotManual[k])!==(manual[k]==null?null:manual[k]))bad.push(l.replace(/（.*$/,''));});
     if((gotManual.otherNote==null?null:gotManual.otherNote)!==manual.otherNote)bad.push('其他備註');
     if(!byOk(gotManual))bad.push('手填的存檔人');
     if(!_reconAtOk(gotManual.at))bad.push('手填的時間');
@@ -29752,6 +29761,13 @@ async function reconAdsSave(shop){
   let old;
   try{old=await readSaved();}
   catch(err){console.error('[對帳·廣告] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  // 🔴 停用欄（noPackPerOrder）：manual.{店} 是整塊覆蓋，所以把剛讀到的雲端原值原封送回；雲端沒有這個欄位就不加。
+  //   chk.manual 是 _reconAdsCheck 新建的物件，這裡改它不影響別處。讀回驗證會比對它＝證明舊值沒被洗掉。
+  RECON_ADS_MANUAL_KEYS.forEach(({k,off})=>{
+    if(!off)return;
+    if(old.manual&&typeof old.manual==='object'&&Object.prototype.hasOwnProperty.call(old.manual,k))chk.manual[k]=old.manual[k];
+    else delete chk.manual[k];
+  });
   // rebateOnly：寫前用剛讀到的雲端現值再把關一次（別人可能剛重傳 CSV 改了花費、或這筆被清掉）。
   const ro=chk.rebateOnly;
   if(ro){
@@ -29861,13 +29877,14 @@ function reconAdsHtml(){
     return dis?'<span class="recon-ads-lock" title="'+escapeHtmlLike(disTip)+'">'+el+'</span>':el;
   };
   h+=row('廣告回饋金（含稅）',(s,i)=>inp(s,i,'rebate'));
-  // 無包裝 $1：這個月已存「媒合費用報表」⇒ KPI 用那邊的金額，這格改成唯讀顯示（手填值仍留在 manual，不清）。
-  const np=(_reconMonth&&cloud)?_reconNopackSavedOf(cloud,_reconMonth):null;
-  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{h+=row(l+'（含稅）',(s,i)=>{
-    if(k==='noPackPerOrder'&&np&&np.shops&&np.shops[s]&&_kpiShopeeFin(np.shops[s].amount))
-      return '<span class="recon-ads-auto" title="由上方「無包裝 $1／筆」媒合費用報表帶入，不用手填">'+_reconAdsFmt(np.shops[s].amount)+'</span>';
-    // 新月份（RECON_NOPACK_AUTO_FROM 起）只走媒合費用報表、不給手填；更早的舊月份沒有這份報表，維持手填格。
-    if(k==='noPackPerOrder'&&_reconMonth&&_reconMonth>=RECON_NOPACK_AUTO_FROM)return '<span class="recon-empty" title="無包裝 $1 由上方媒合費用報表自動帶入；這個月還沒存報表">—</span>';
+  // 停用欄（無包裝 $1，2026-11-13）：所有月份唯讀。雲端手填有舊值 ⇒ 灰字顯示；沒有 ⇒「—」。KPI 不再用它。
+  RECON_ADS_MANUAL_KEYS.forEach(({k,l,off})=>{h+=row(l+'（含稅）'+(off?'<span class="recon-off-tag">已停用</span>':''),(s,i)=>{
+    if(off){
+      const ov=sv[s].manual?sv[s].manual[k]:null;
+      return ov!=null&&_kpiShopeeFin(ov)
+        ?'<span class="recon-ads-off" title="'+RECON_NOPACK_OFF_NOTE+'">'+_reconAdsFmt(ov)+'</span>'
+        :'<span class="recon-empty" title="'+RECON_NOPACK_OFF_NOTE+'">—</span>';
+    }
     return inp(s,i,k);
   });});
   h+=row('其他備註',(s,i)=>inp(s,i,'otherNote','text'));
@@ -29936,19 +29953,17 @@ Object.assign(window,{reconAdsPick,clearReconAds,reconAdsInput,reconAdsSave});
 //   🔴 「已存過的月份要改回饋金…」那句依附在回饋金可事後修改（_reconAdsCheck 的 rebateOnly）；那個功能拿掉時這句要一起拿掉。
 const RECON_GUIDE=[
   {p:'每月 5 號以後再做（莫筆克會因為退貨、取消回頭改數字，太早下載會不準）。'},
-  {h:'一、先準備 15 個檔（都是整月）',ol:[
+  {h:'一、先準備 14 個檔（都是整月）',ol:[
     '蝦皮進帳報表 PDF × 4（好麻吉、玩樂、維克、森之旅）',
     '蝦皮進帳報表 Excel × 4（蝦皮後台「已撥款」匯出同一個月，檔名像「維Income.進帳.tw.20261001_20261031.xlsx」）',
     '莫筆克「銷售金額明細」xlsx × 2：這個月＋上個月（全通路，系統只讀「建立」分頁；上個月那份用上個月做對帳時下載的就可以）',
-    '蝦皮「店到店個案派車物流媒合費用」xlsx × 1（全通路，分頁名稱像「202610_蝦皮店到店個案派車物流媒合費用」）',
     '蝦皮廣告「所有CPC成效報告」總體 CSV × 4（不要用關鍵字層級的報表）；該月沒投廣告的通路不用傳。',
   ]},
   {h:'二、淨利表 → 蝦皮 → 「對帳」',ol:[
     '上方月份選要做的月份。',
     '上傳四家進帳 PDF，確認「小計 − 子項加總」是 ✓0，四家各按「存檔」，看到「✓ 已存進雲端」。',
     '「成本配對」區：四家各傳進帳 Excel，再一次選兩份莫筆克（這個月＋上個月）。看「還沒上傳莫筆克」有沒有紅字；有「找不到」的單，點單數看是哪幾單，確認後勾選，四家各按「存檔」。\n已取消／退貨、找不到的單不算成本；退款單的成本照算。',
-    '「無包裝」區：上傳媒合費用報表，按「存檔（四店一起）」。',
-    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」）：廣告回饋金、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。\n無包裝 $1／筆不用填，系統用上一步的媒合費用報表自動帶入。\n廣告回饋金要先上傳該店的廣告 CSV 才能填；格子是灰色＝這個月這家還沒有廣告報表，沒投廣告就不用填回饋金。\n沒投廣告的通路不用傳 CSV，只填退貨運費補助、其他這幾項也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
+    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」）：廣告回饋金、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。\n廣告回饋金要先上傳該店的廣告 CSV 才能填；格子是灰色＝這個月這家還沒有廣告報表，沒投廣告就不用填回饋金。\n沒投廣告的通路不用傳 CSV，只填退貨運費補助、其他這幾項也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
   ]},
   {h:'三、KPI → 選月份 → 填寫模式 → 蝦皮',ol:[
     '按右上「從對帳單帶入 YYYY/MM」。',

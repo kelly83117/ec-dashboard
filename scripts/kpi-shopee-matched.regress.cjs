@@ -29,8 +29,20 @@ function extract(src, label) {
   return new Function(code + '\nreturn{_kpiShopeeSources,_kpiShopeeCalc};')();
 }
 const baseRef = process.env.BASE_REF || 'f019f5d';
-const OLD = extract(lf(cp.execFileSync('git', ['show', baseRef + ':js/profit.js'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 })), baseRef);
+const OLD_RAW = extract(lf(cp.execFileSync('git', ['show', baseRef + ':js/profit.js'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 })), baseRef);
 const NEW = extract(lf(fs.readFileSync(path.join(ROOT, 'js/profit.js'), 'utf8')), '工作區');
+// 塊 B（2026-11-13）：工作區的 _kpiShopeeCalc 不再加「無包裝$1」媒合費（已含在其他服務費）。
+//   工作區已經拿掉（_kpiShopeeCalc 裡沒有 _kpiShopeeTerm('無包裝$1'…)）⇒ 改前版的結果先扣掉那一項再比：misc.val − 那一項、算式拿掉「＋無包裝$1 N（…）」那一段。
+//   ①（node 改前版＝瀏覽器快照）仍用沒扣的 OLD_RAW。
+const NOPACK1_GONE = !/_kpiShopeeTerm\('無包裝\$1'/.test(NEW._kpiShopeeCalc.toString());
+const NOPACK1_RE = /＋無包裝\$1 (-?[\d,.]+)（[^）]*）/;
+const dropNoPack1 = c => {
+  const o = JSON.parse(JSON.stringify(c));
+  const mm = NOPACK1_GONE && o.misc && typeof o.misc.comp === 'string' ? NOPACK1_RE.exec(o.misc.comp) : null;
+  if (mm) { o.misc.val = o.misc.val - Number(mm[1].replace(/,/g, '')); o.misc.comp = o.misc.comp.replace(NOPACK1_RE, ''); }
+  return o;
+};
+const OLD = { _kpiShopeeSources: OLD_RAW._kpiShopeeSources, _kpiShopeeCalc: (src, s) => dropNoPack1(OLD_RAW._kpiShopeeCalc(src, s)) };
 const SHOPS = ['好麻吉', '玩樂', '維克', '森之旅'], FIELDS = ['qty', 'rev', 'cost', 'ads', 'fee', 'misc'];
 const plainCalc = c => JSON.parse(J(c));
 const noLegacy = c => { const o = plainCalc(c); FIELDS.forEach(f => { if (o[f]) delete o[f].legacy; }); return o; };
@@ -57,7 +69,7 @@ for (const m of months) {
   const so = OLD._kpiShopeeSources(m, cloudOf(m)), sn = NEW._kpiShopeeSources(m, cloudOf(m));
   for (const s of SHOPS) {
     const o = OLD._kpiShopeeCalc(so, s), n = NEW._kpiShopeeCalc(sn, s);
-    eq(plainCalc(o), mo.calc[s], m + ' ' + s + '：node 改前版＝瀏覽器快照');
+    eq(plainCalc(OLD_RAW._kpiShopeeCalc(so, s)), mo.calc[s], m + ' ' + s + '：node 改前版＝瀏覽器快照');
     eq(noLegacy(n), plainCalc(o), m + ' ' + s + '：沒有 matched ⇒ 改後＝改前（去掉 legacy）');
     ['qty', 'cost', 'misc'].forEach(f => ok(!!(n[f] && n[f].legacy) === !!(n[f] && n[f].val != null), m + ' ' + s + ' ' + f + '：有值才標 legacy'));
     ['rev', 'fee', 'ads'].forEach(f => ok(!(n[f] && 'legacy' in n[f]), m + ' ' + s + ' ' + f + '：不標 legacy'));
