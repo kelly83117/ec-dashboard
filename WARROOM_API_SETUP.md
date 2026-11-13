@@ -59,7 +59,7 @@ https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue
 複製下面這段訊息給戰情室負責人：
 
 ```
-元創 AI 戰情室唯讀營收 API 第一版上線 ✓
+元創 AI 戰情室唯讀 API 第一版上線 ✓（含營收 + 廣告費）
 
 端點：
   GET https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue
@@ -69,25 +69,39 @@ https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue
 
 成功回傳範例 (HTTP 200)：
 {
-  "asOf": "2026-11-10T23:59:59+08:00",
+  "asOf": "2026-11-12T23:59:59+08:00",
   "metrics": {
-    "revenue": 1795734
+    "revenue": 1795734,
+    "adSpend": 52630
   }
 }
 
 說明：
 - asOf 是資料對應的台灣時間營業日（23:59:59 代表「該日全日」）。
 - metrics.revenue 是新台幣元整數（NT$），不含退貨扣抵。
-  資料來源與辦公室儀表板「昨日全通路總營收」同口徑，退貨由月對帳 / 淨利表另算。
-- 若昨日營收尚未回填（例如早上行銷還沒輸入），自動往回掃最多 7 天取第一個有資料的日期，
-  asOf 會對應那一天，不是昨天。
+  資料來源與辦公室儀表板「昨日全通路總營收」同口徑（7 個通路：
+  生活好麻吉 / 玩樂盒子 / 森之旅 / 維克生活 / MOMO / MO+ / 酷澎），
+  退貨由月對帳 / 淨利表另算。
+- metrics.adSpend 是新台幣元整數（NT$），只含 4 個蝦皮賣場的廣告費
+  （生活好麻吉 / 玩樂盒子 / 森之旅 / 維克生活）；
+  MOMO / 酷澎 的廣告費不在此系統追蹤，不計入。
+  當日尚未填廣告費 → adSpend = 0（不會因此改變營業日判斷）。
+- 若昨日營收尚未回填（例如早上行銷還沒輸入），自動往回掃最多 7 天取第一個
+  有營收的日期，asOf 會對應那一天，不是昨天。
+
+資料範圍 (API 刻意收窄)：
+- 只包含「行銷類」指標（營收、廣告費、資料日期）。
+- 不包含 淨利 / 成本 / 退貨淨額 / 帳號密碼 / 員工資料 / 薪資 / 內部備註。
+- Worker 只讀 Firestore app/main 的 ec.platforms 欄位；完全不碰 app/profit、
+  ec.users、ec.employees 等財務或員工相關 key。
 
 錯誤回傳：
   401 { "error": "Unauthorized" }           ← X-API-Key 錯 / 沒帶
-  404 { "error": "No revenue data..." }      ← 7 天內都沒有資料
+  404 { "error": "No revenue data..." }      ← 7 天內都沒有營收資料
   500 { "error": "Internal error", ... }     ← Worker 或 Firestore 異常
 
-請自行 fetch 呼叫；若需要加其他指標（通路明細、ROAS、廣告費等）請回覆我排進下一版。
+請自行 fetch 呼叫；若需要加其他指標（通路明細、ROAS、退貨率等）請回覆
+我排進下一版。X-API-Key 與金鑰請用 1 對 1 私訊取得，不要貼在群組。
 ```
 
 ---
@@ -101,14 +115,17 @@ curl -H "X-API-Key: <你的 WARROOM_API_KEY>" \
   https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue
 ```
 
-預期看到：
+預期看到（兩個數字）：
 ```json
-{"asOf":"2026-11-10T23:59:59+08:00","metrics":{"revenue":1795734}}
+{"asOf":"2026-11-12T23:59:59+08:00","metrics":{"revenue":1795734,"adSpend":52630}}
 ```
 
-**驗收點（跟 Kelly 原始需求對齊）**：
-開辦公室儀表板首頁 → 昨日全通路總營收卡片的數字，應該**等於** API 回的 `metrics.revenue`。
-對不上就回來找我，大機率是某個通路沒被納入加總、或行銷還沒回填完整。
+**兩個驗收點**：
+1. `metrics.revenue` 應該**等於**辦公室儀表板首頁「昨日全通路總營收」卡片的數字。
+2. `metrics.adSpend` 應該**等於**蝦皮 4 賣場（生活好麻吉 / 玩樂盒子 / 森之旅 / 維克生活）
+   當日廣告費加總。MOMO / 酷澎 的數字**不應該**出現在裡面。
+
+對不上就回來找我，大機率是某個通路沒被納入、或行銷還沒回填完整。
 
 ---
 

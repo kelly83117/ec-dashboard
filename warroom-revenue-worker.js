@@ -1,17 +1,30 @@
 /**
- * 元創數位 AI 戰情室 — 唯讀營收 API（v1）
+ * 元創數位 AI 戰情室 — 唯讀營收 / 廣告費 API（v1.1）
  *
  * 部署到 Cloudflare Workers，提供戰情室一支端點：
  *   GET /revenue
- *     查詢台灣時間「最近一個完整營業日」的全通路總營收（NT$）。
- *     回傳 { asOf, metrics: { revenue } } — 金額為數字、NT$ 元。
+ *     查詢台灣時間「最近一個完整營業日」的 行銷營收 + 廣告費（NT$）。
+ *     回傳 { asOf, metrics: { revenue, adSpend } } — 金額為數字、NT$ 元。
+ *
+ * ---- 資料範圍（有意的收窄） ----
+ *   此 API 只回傳「行銷類」指標：
+ *     metrics.revenue  = 每日全通路營收（毛額）
+ *     metrics.adSpend  = 每日蝦皮 4 賣場廣告費總和
+ *   ⚠ 不包含 淨利 / 成本 / 退貨淨額 / 帳號密碼 / 員工資料 / 薪資 / 內部備註。
+ *   Worker 只讀 app/main 的 ec.platforms 欄位；完全不碰 app/profit、
+ *   ec.users、ec.employees 等財務或員工相關 key。
  *
  * ---- 資料來源與算法 ----
  *   Firestore 專案 yc-dashboard-9aa6c、文件 app/main、欄位 ec.platforms
  *   （與辦公室儀表板同一份、同一條讀取路徑）。
- *   7 個通路 daily[YYYY-MM-DD] 直接加總：
+ *
+ *   revenue：7 個通路 daily[YYYY-MM-DD] 直接加總：
  *     生活好麻吉 / 玩樂盒子 / 森之旅 / 維克生活 / MOMO / MO+ / 酷澎
- *   這與辦公室儀表板 js/pages/dashboard.js 的「全通路總營收」卡片一致。
+ *     口徑同 js/pages/dashboard.js 的「全通路總營收」卡片。
+ *
+ *   adSpend：只含 4 個蝦皮賣場 dailyAdSpend[YYYY-MM-DD] 加總：
+ *     生活好麻吉 / 玩樂盒子 / 森之旅 / 維克生活
+ *     MOMO / MO+ / 酷澎 本系統未追蹤廣告費，不計入。
  *
  * ---- 退貨處理 ----
  *   ⚠ 不扣退貨。ec.platforms.daily 由行銷團隊每日手動輸入當日毛額，
@@ -22,6 +35,7 @@
  *   行銷團隊在次日早上回填前一日營收 → 以「昨日 (TW)」為最近完整營業日。
  *   若呼叫時昨日尚未回填（任何一個通路皆為 0）→ 往回掃最多 7 天，
  *   取第一個有任何通路非 0 的日期。全空 → 回 404。
+ *   adSpend 以同一個日期回傳；若該日尚未填廣告費 → adSpend = 0。
  *
  * ---- 必要 env / secret ----
  *   WARROOM_API_KEY       Secret：戰情室呼叫時要附 X-API-Key 這個密碼
@@ -39,7 +53,9 @@
  */
 
 const FIRESTORE_DOC_PATH = 'app/main';
-const PLATFORMS = ['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', 'MO+', '酷澎'];
+const PLATFORMS_FOR_REVENUE = ['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', 'MO+', '酷澎'];
+// 只有蝦皮 4 個賣場追蹤廣告費（MOMO/酷澎 不在本系統追蹤）
+const PLATFORMS_WITH_AD_SPEND = ['生活好麻吉', '玩樂盒子', '森之旅', '維克生活'];
 const TW_TZ_OFFSET_MIN = 8 * 60; // Asia/Taipei 恆定 +08:00（台灣無日光節約）
 const MAX_LOOKBACK_DAYS = 7;
 
@@ -84,7 +100,7 @@ export default {
   },
 };
 
-// 回傳 { asOf, metrics: { revenue } } 或 null（過去 7 天都沒資料）
+// 回傳 { asOf, metrics: { revenue, adSpend } } 或 null（過去 7 天都沒營收資料）
 async function getLatestCompleteRevenue(env) {
   const docFields = await firestoreGetFields(FIRESTORE_DOC_PATH, env);
   const platforms = fromFirestoreValue(docFields['ec.platforms']) || [];
@@ -92,22 +108,34 @@ async function getLatestCompleteRevenue(env) {
 
   const todayTw = twTodayStr();
 
-  // 從「昨日 (TW)」往回掃最多 7 天，第一個有資料的日期就回傳
+  // 從「昨日 (TW)」往回掃最多 7 天，第一個有「營收」資料的日期就回傳
+  // 判「完整營業日」的依據是 revenue（主要指標）；adSpend 同日期取、若當日未填 = 0
   for (let i = 1; i <= MAX_LOOKBACK_DAYS; i++) {
     const dateStr = addDaysStr(todayTw, -i);
-    let total = 0;
-    let hasAnyData = false;
+    let revenueTotal = 0;
+    let adSpendTotal = 0;
+    let hasRevenue = false;
     for (const p of platforms) {
-      if (!p || !PLATFORMS.includes(p.name)) continue;
-      const v = +((p.daily || {})[dateStr]);
-      if (!Number.isFinite(v) || v <= 0) continue;
-      hasAnyData = true;
-      total += v;
+      if (!p) continue;
+      if (PLATFORMS_FOR_REVENUE.includes(p.name)) {
+        const v = +((p.daily || {})[dateStr]);
+        if (Number.isFinite(v) && v > 0) {
+          hasRevenue = true;
+          revenueTotal += v;
+        }
+      }
+      if (PLATFORMS_WITH_AD_SPEND.includes(p.name)) {
+        const a = +((p.dailyAdSpend || {})[dateStr]);
+        if (Number.isFinite(a) && a > 0) adSpendTotal += a;
+      }
     }
-    if (hasAnyData) {
+    if (hasRevenue) {
       return {
         asOf: `${dateStr}T23:59:59+08:00`,
-        metrics: { revenue: Math.round(total) },
+        metrics: {
+          revenue: Math.round(revenueTotal),
+          adSpend: Math.round(adSpendTotal),
+        },
       };
     }
   }
