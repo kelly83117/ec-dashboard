@@ -1891,6 +1891,19 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable td.km-anom-cell .km-in{border-color:var(--warn);}
 .km-ftable td.km-anom-cell-red .km-in{border-color:var(--danger);}
 .km-ftable td.km-anom-cell .km-in:focus,.km-ftable td.km-anom-cell-red .km-in:focus{background:var(--surface,#fff);}
+/* 已確認的警示看得到（2026-11-13）：填寫模式清單最下面的「已確認 N 條」收合區、標題列入口、月結表純利率旁的小 ✓。
+   淡淡的綠、不上底色（只用 :root 變數）。 */
+.km-ack-btn{padding:2px 9px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--success);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.km-ack-btn:hover,.km-ack-btn.open{border-color:var(--success);}
+.km-ack-list{margin-top:8px;padding:6px 12px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:var(--surface);}
+.km-ack-toggle{padding:2px 0;border:none;background:none;color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;}
+.km-ack-toggle:hover{color:var(--success);}
+.km-ack-list ol{margin:4px 0 2px;padding-left:20px;display:flex;flex-direction:column;gap:6px;}
+.km-ack-li{font-size:12px;line-height:1.5;color:var(--text-muted);}
+.km-ack-what{color:var(--text-muted);}
+.km-ack-who{color:var(--success);font-weight:600;}
+.km-ack-mark{margin-left:4px;font-size:11px;font-weight:700;color:var(--success);opacity:.7;cursor:help;}
+.km-ack-mark:hover{opacity:1;}
 /* 月結表各通路表「較上月」純利率格：本月純利為負整格紅底、變化≥門檻整格黃底（只用 :root 變數）。 */
 .kc-c.km-rate-neg{background:var(--danger-soft);}
 .kc-c.km-rate-chg{background:var(--warn-soft);}
