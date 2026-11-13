@@ -75,10 +75,24 @@ const MOBIC = [MH,
   eq(a.shops['維克'], { orders: 3, ordersPlain: 2, ordersNoPack: 2, cost: 260.5, discount: -3, rows: 4 }, '莫筆克：維克彙總');
   eq(a.unmapped, { '不認識的店': 1 }, '莫筆克：對不到的店');
   const m = b.orderMap['維克'];
-  eq(plain(m.get('T001')), { cost: 150.5, shipped: 2, cancelled: 0, other: 0, plain: true, noPack: true }, 'orderMap：T001 兩列加總、兩種出貨方式');
-  eq(plain(m.get('T003')), { cost: 0, shipped: 0, cancelled: 1, other: 0, plain: false, noPack: false }, 'orderMap：T003 只有已取消');
-  eq(plain(m.get('T004')), { cost: 30, shipped: 1, cancelled: 1, other: 0, plain: true, noPack: false }, 'orderMap：T004 已出貨＋已取消');
-  eq(plain(b.orderMap['玩樂'].get('T201')), { cost: 0, shipped: 0, cancelled: 0, other: 1, plain: false, noPack: false }, 'orderMap：其他狀態記 other');
+  eq(plain(m.get('T001')), { cost: 150.5, shipped: 2, cancelled: 0, other: 0, plain: true, noPack: true, reasons: [] }, 'orderMap：T001 兩列加總、兩種出貨方式');
+  eq(plain(m.get('T003')), { cost: 0, shipped: 0, cancelled: 1, other: 0, plain: false, noPack: false, reasons: [] }, 'orderMap：T003 只有已取消');
+  eq(plain(m.get('T004')), { cost: 30, shipped: 1, cancelled: 1, other: 0, plain: true, noPack: false, reasons: [] }, 'orderMap：T004 已出貨＋已取消');
+  eq(plain(b.orderMap['玩樂'].get('T201')), { cost: 0, shipped: 0, cancelled: 0, other: 1, plain: false, noPack: false, reasons: [] }, 'orderMap：其他狀態記 other');
+  {
+    // 取消原因（選填欄）：有這欄才記；只記非已出貨列；同一單去重；不影響彙總
+    const MHR = MH.concat(['取消原因']);
+    const rr = (oid, st, why) => mrow('維克生活', oid, '7-11', 10, 0, st).concat([why]);
+    const R = [MHR, rr('T1', '已取消', '客辦退貨'), rr('T1', '已取消', '客辦退貨'), rr('T1', '已取消', '未取退貨'), rr('T2', '已出貨', '不該記'), rr('T3', '已取消', '')];
+    const a2 = NEW._reconMobicCalc(R), b2 = NEW._reconMobicCalc(R, { orderMap: true });
+    eq(noMap(b2), a2, '取消原因：帶 orderMap 時彙總不變');
+    if (OLD) eq(OLD._reconMobicCalc(R), a2, '取消原因：多一欄時改版前後輸出相同');
+    eq([b2.orderMap['維克'].get('T1').reasons, b2.orderMap['維克'].get('T2').reasons, b2.orderMap['維克'].get('T3').reasons], [['客辦退貨', '未取退貨'], [], []], '取消原因：去重、已出貨不記、空白不記');
+    const inc = [{ oid: 'T1', created: '2026-09-01', paid: '2026-10-01', orig: 50, refund: -50 }];
+    eq(NEW._reconCostMatch(inc, '2026-10', [{ month: '2026-09', map: b2.orderMap['維克'] }]).cancelled.items[0].reason, '客辦退貨、未取退貨', '取消原因：帶進已取消明細');
+    const pay = NEW._reconMatchPayload(NEW._reconCostMatch(inc, '2026-10', [{ month: '2026-09', map: b2.orderMap['維克'] }]), { file: 'x', res: {} }, {}, false, {});
+    ok(!JSON.stringify(pay).includes('退貨'), '取消原因：不進存檔內容');
+  }
   ok(!b.orderMap['維克'].has('T900') && Object.keys(b.orderMap).join() === RECON_SHOPS.join(), 'orderMap：只有四店、不收對不到的店');
   if (OLD) {
     eq(OLD._reconMobicCalc(MOBIC), a, '莫筆克（假資料）：改版前後輸出逐字相同');
@@ -128,7 +142,7 @@ const S2 = { name: 'Income - 2', aoa: head('2026-09-01', '2026-10-31').concat([I
   const m = NEW._reconCostMatch(r.orders, '2026-10', [{ month: '2026-09', map: map9 }, { month: '2026-10', map: map10 }]);
   eq([m.orders, m.matched, m.cost, m.ordersPlain, m.ordersNoPack], [4, 2, 180, 1, 1], '配對：單數、成本、一般／無包裝');
   eq(m.refund, { orders: 1, cost: 80, amt: -50 }, '配對：退款單照算成本、另外列');
-  eq(m.cancelled, { n: 1, amt: 100, items: [{ oid: 'T003', created: '2026-09-25', orig: 100, status: '已取消' }] }, '配對：已取消列出來、不算成本');
+  eq(m.cancelled, { n: 1, amt: 100, items: [{ oid: 'T003', created: '2026-09-25', orig: 100, status: '已取消', reason: '' }] }, '配對：已取消列出來、不算成本');
   eq([m.missing.n, m.missing.amt, m.missing.byMonth, m.missing.items[0].noFile], [1, 99, { '2026-07': 1 }, true], '配對：找不到（沒上傳那個月）');
   eq([m.needMonths, m.loadedMonths, m.noFileMonths], [{ '2026-09': 2, '2026-10': 1, '2026-07': 1 }, ['2026-09', '2026-10'], { '2026-07': 1 }], '配對：需要哪些月份');
   const m2 = NEW._reconCostMatch(r.orders, '2026-10', [{ month: '2026-10', map: map10 }]);

@@ -28292,17 +28292,19 @@ function _reconMobicNum(v){
 //   ⚠ ordersNoPack＝該訂單任一列出貨方式含「無包裝」；ordersPlain＝該訂單任一列不含。
 //     同一訂單兩種都有時兩邊都算 ⇒ orders < 兩者相加，差額記在 overlap（只回報、不改規則）。
 // opts.orderMap===true（2026-11-13 成本跟著撥款走，塊 1）：另回 orderMap＝{店: Map(平台訂單編號 →
-//   {cost, shipped, cancelled, other, plain, noPack})}，給 _reconCostMatch 配對用。🔴 只活在記憶體，不上雲、不進 localStorage。
+//   {cost, shipped, cancelled, other, plain, noPack, reasons})}，給 _reconCostMatch 配對用。
+//   reasons＝非已出貨列的「取消原因」（選填欄，去重；2026-11-13 塊 2 修正，只給已取消／退貨明細顯示）。🔴 只活在記憶體，不上雲、不進 localStorage。
 //   cost／plain／noPack 只算「已出貨」列（同上面的彙總）；非已出貨的列只記筆數（cancelled＝已取消、other＝其他狀態），不檢查成本格。
 //   沒帶 opts 時回傳內容跟改版前逐字相同（node 測試拿 main 版本比對）。
 function _reconMobicCalc(aoa,opts){
   const om=(opts&&opts.orderMap===true)?{}:null;
   if(om)RECON_SHOPS.forEach(s=>{om[s]=new Map();});
-  const omEnt=(shop,oid)=>{let e=om[shop].get(oid);if(!e){e={cost:0,shipped:0,cancelled:0,other:0,plain:false,noPack:false};om[shop].set(oid,e);}return e;};
+  const omEnt=(shop,oid)=>{let e=om[shop].get(oid);if(!e){e={cost:0,shipped:0,cancelled:0,other:0,plain:false,noPack:false,reasons:[]};om[shop].set(oid,e);}return e;};
   if(!Array.isArray(aoa)||!aoa.length)return{ok:false,err:'分頁是空的'};
   const H=(aoa[0]||[]).map(h=>String(h==null?'':h).trim());
   const ix={};
   RECON_MOBIC_REQ_COLS.forEach(k=>{ix[k]=H.indexOf(k);});
+  const ixReason=om?H.indexOf('取消原因'):-1;   // 選填欄（只給 orderMap 的已取消明細顯示）：沒有這欄就不記，不報錯
   const miss=RECON_MOBIC_REQ_COLS.filter(k=>ix[k]<0);
   if(miss.length)return{ok:false,err:'缺少必要欄位：'+miss.join('、')};
   const acc={};
@@ -28319,7 +28321,11 @@ function _reconMobicCalc(aoa,opts){
       if(om){
         const sh=RECON_MOBIC_SHOP_MAP[String(r[ix['店鋪名稱']]==null?'':r[ix['店鋪名稱']]).trim()];
         const id=String(r[ix['平台訂單編號']]==null?'':r[ix['平台訂單編號']]).trim();
-        if(sh&&id){const e=omEnt(sh,id);if(shipSt==='已取消')e.cancelled++;else e.other++;}
+        if(sh&&id){
+          const e=omEnt(sh,id);if(shipSt==='已取消')e.cancelled++;else e.other++;
+          const rs=ixReason>=0?String(r[ixReason]==null?'':r[ixReason]).trim():'';
+          if(rs&&e.reasons.indexOf(rs)<0)e.reasons.push(rs);
+        }
       }
       continue;
     }
@@ -28470,7 +28476,8 @@ function _reconIncomeParse(sheets){
 //   mobics＝[{month:'YYYY-MM'（莫筆克的下單月）, map: _reconMobicCalc(aoa,{orderMap:true}).orderMap[店]}]，同一個月只能一份。
 //   回 {ok:true, month, orders, matched, cost, ordersPlain, ordersNoPack,
 //       refund:{orders, cost, amt}（配到的單裡退款金額≠0 的；成本照算，只是另外列給人看）,
-//       cancelled:{n, amt, items:[{oid, created, orig, status}]}（莫筆克有、但沒有已出貨列 ⇒ 不算成本、列出來）,
+//       cancelled:{n, amt, items:[{oid, created, orig, status, reason}]}（莫筆克有、但沒有已出貨列 ⇒ 不算成本、列出來；
+//         實際上幾乎都是退貨：客辦退貨、未取退貨、退換貨取消，退回的貨會補回莫筆克庫存，2026-11-13 確認不算成本）,
 //       missing:{n, amt, byMonth:{下單月:筆}, items:[{oid, created, orig, noFile}]}（莫筆克找不到 ⇒ 不算成本、列出來；
 //         noFile＝那個下單月沒有上傳莫筆克）,
 //       needMonths:{下單月:筆}, loadedMonths:[…], noFileMonths:{下單月:筆}, multiHit}
@@ -28508,7 +28515,7 @@ function _reconCostMatch(orders,paidMonth,mobics){
     }
     if(!(e.shipped>0)){
       out.cancelled.n++;out.cancelled.amt+=orig;
-      out.cancelled.items.push({oid:o.oid,created:o.created,orig,status:e.cancelled>0?'已取消':'未出貨'});
+      out.cancelled.items.push({oid:o.oid,created:o.created,orig,status:e.cancelled>0?'已取消':'未出貨',reason:(e.reasons||[]).join('、')});
       return;
     }
     out.matched++;out.cost+=e.cost;
@@ -28849,7 +28856,7 @@ function reconMatchHtml(){
       +row('配到（商品成本）',m=>_rmN(m.matched)+' 單・'+_rmAmt(m.cost),'recon-sumrow')
       +row('└ 一般／無包裝',m=>_rmN(m.ordersPlain)+'／'+_rmN(m.ordersNoPack))
       +row('└ 其中退款單（成本照算）',m=>m.refund.orders?_rmN(m.refund.orders)+' 單・成本 '+_rmAmt(m.refund.cost)+'<div class="recon-note">退款 '+_rmAmt(m.refund.amt)+'</div>':'0')
-      +row('已取消（不算成本）',(m,s)=>det(s,'cancelled',m.cancelled.n,m.cancelled.amt))
+      +row('已取消／退貨（不算成本）',(m,s)=>det(s,'cancelled',m.cancelled.n,m.cancelled.amt))
       +row('找不到（不算成本）',(m,s)=>{
         if(!m.missing.n)return '<span class="recon-ok">0</span>';
         const nf=_reconMatchNoFile(m);
@@ -28884,11 +28891,11 @@ function reconMatchHtml(){
       const m=M(_rmDetail.shop);
       const items=m&&m.ok?(_rmDetail.kind==='missing'?m.missing.items:m.cancelled.items):[];
       const lim=200;
-      detail='<div class="rm-detail"><div class="rm-detail-hd">'+escapeHtmlLike(_rmDetail.shop+' '+tab+' '+(_rmDetail.kind==='missing'?'找不到成本':'莫筆克已取消')+'的單（'+items.length+' 單，只在畫面上、不存檔）')
+      detail='<div class="rm-detail"><div class="rm-detail-hd">'+escapeHtmlLike(_rmDetail.shop+' '+tab+' '+(_rmDetail.kind==='missing'?'找不到成本':'已取消／退貨')+'的單（'+items.length+' 單，只在畫面上、不存檔）')
         +'<button type="button" class="recon-btn" onclick="reconMatchDetail(\''+_rmDetail.shop+'\',\''+tab+'\',\''+_rmDetail.kind+'\')">收起</button></div>'
-        +'<div class="recon-scroll"><table class="recon-tbl rm-detail-tbl"><thead><tr><th>訂單編號</th><th>訂單成立日期</th><th>商品原價</th><th>'+(_rmDetail.kind==='missing'?'原因':'莫筆克狀態')+'</th></tr></thead><tbody>'
+        +'<div class="recon-scroll"><table class="recon-tbl rm-detail-tbl"><thead><tr><th>訂單編號</th><th>訂單成立日期</th><th>商品原價</th><th>'+(_rmDetail.kind==='missing'?'原因':'莫筆克狀態</th><th>取消原因')+'</th></tr></thead><tbody>'
         +items.slice(0,lim).map(x=>'<tr><td>'+escapeHtmlLike(x.oid)+'</td><td>'+escapeHtmlLike(x.created)+'</td><td>'+_rmAmt(x.orig)+'</td><td>'
-          +escapeHtmlLike(_rmDetail.kind==='missing'?(x.noFile?'沒上傳 '+String(x.created).slice(0,7)+' 的莫筆克':'莫筆克找不到這張單'):x.status)+'</td></tr>').join('')
+          +escapeHtmlLike(_rmDetail.kind==='missing'?(x.noFile?'沒上傳 '+String(x.created).slice(0,7)+' 的莫筆克':'莫筆克找不到這張單'):x.status)+'</td>'+(_rmDetail.kind==='missing'?'':'<td>'+escapeHtmlLike(x.reason||'—')+'</td>')+'</tr>').join('')
         +'</tbody></table></div>'+(items.length>lim?'<div class="recon-note">只列前 '+lim+' 單，還有 '+(items.length-lim)+' 單</div>':'')+'</div>';
     }
     res=tabs+'<div class="recon-scroll"><table class="recon-tbl rm-tbl"><thead><tr><th class="recon-rowhead">撥款 '+escapeHtmlLike(tab)+'</th>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'+detail;
