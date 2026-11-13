@@ -11856,6 +11856,11 @@ function _kpiChannelTableHtml(row,prevRow){
     return{rev:ok?_kcCmp(cur.rev,prev.rev):'',pure:ok?_kcCmp(cur.pure,prev.pure):'',pp:ok&&cur.rev>0?_kcPp(cur.rate,prev.rate):''};
   };
   const neg=v=>v<0?' km-down':'';
+  // 已確認的警示（2026-11-13，只顯示）：任何規則確認過 ⇒ 那家店／那個通路的純利率旁留一個 ✓，滑鼠提示寫警示＋誰／哪天／原因。
+  //   這個月沒有任何確認紀錄就不算警示（省時間）；算失敗只是不顯示 ✓。
+  let ackItems=[];
+  try{if(Object.keys(_kpiAcks(month)).length)ackItems=_kpiAckItems(_kpiAnomalies(month),k=>_kpiAckRec(month,k));}catch(e){console.warn('[KPI 已確認] 計算失敗',e);}
+  const ackMark=its=>its.length?'<span class="km-ack-mark" title="'+_kpiEscAttr(_kpiAckTipText(its,_kpiShopLabel))+'">✓</span>':'';
   // 一列 8 格：通路｜營收本月｜營收較上月｜純利本月｜純利較上月｜純利率本月｜純利率較上月｜填寫進度
   const line=(cls,attrs,c,rc)=>'<div class="kc-row '+cls+'"'+(attrs||'')+'>'
     +'<div class="kc-c kc-name">'+c[0]+'</div>'
@@ -11888,7 +11893,7 @@ function _kpiChannelTableHtml(row,prevRow){
       '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+(g.key==='shopee'?_kpiShopeeBasisHtml(month,''):''),
       '<span class="'+neg(cur.rev).trim()+'">'+_kpiMoney(cur.rev)+'</span>',cc.rev,
       '<span class="'+neg(cur.pure).trim()+'">'+_kpiMoney(cur.pure)+'</span>',cc.pure,
-      cur.rev>0?_kpiRatePct(cur.rate):'—',cc.pp,
+      (cur.rev>0?_kpiRatePct(cur.rate):'—')+ackMark(ackItems.filter(it=>it.group===g.key)),cc.pp,
       closed?`<span class="km-badge km-badge-off" title="${_kpiClosedLabel(g)}">已關站</span>`:_kpiFillBadge(_kpiFillCount(row,g)),
     ],gRc);
     if(open){
@@ -11901,7 +11906,7 @@ function _kpiChannelTableHtml(row,prevRow){
         const sAlert=_kpiAnomAcked(month,'ro:'+g.key+':'+s+':pureRate')?null:_kpiPureRateAlert(sRate,pSRate);
         const sDf=(sAlert&&pSRate!=null)?_kpiPureDiff(row,[prevRow],g,s):null;   // 主要差異（只顯示）
         const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)+(sDf?'\n'+sDf.text+(sDf.hint?'\n'+sDf.hint:''):'')}:null;
-        html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','',''],sRc);
+        html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',(rev>0?_kpiRatePct(pure/rev):'—')+ackMark(ackItems.filter(it=>it.group===g.key&&it.shop===s)),'',''],sRc);
       });
     }
     return html;
@@ -12461,11 +12466,12 @@ function _kpiAnomalies(month,rows){
 //   每條：主要差異一行，原因提示（塊 B）緊接在後面另一行。
 function _kpiAnomDiffs(as){const o=[];(as||[]).forEach(a=>{[a.diff,a.hint].forEach(t=>{if(t&&!o.includes(t))o.push(t);});});return o;}
 // 依 key 分組（一格可能有多條）＋各群組「幾格」。
-function _kpiAnomIndex(list){
-  const byKey=new Map(),byGroup={};
+//   ackByGroup＝各群組「已確認幾格」（整格都確認了才算；只給畫面用）。month 選填（給已確認的滑鼠提示查日期）。
+function _kpiAnomIndex(list,month){
+  const byKey=new Map(),byGroup={},ackByGroup={};
   list.forEach(a=>{if(!byKey.has(a.key))byKey.set(a.key,[]);byKey.get(a.key).push(a);});
-  byKey.forEach(as=>{if(as.some(a=>!a.acked))byGroup[as[0].group]=(byGroup[as[0].group]||0)+1;});
-  return{list,byKey,byGroup};
+  byKey.forEach(as=>{if(as.some(a=>!a.acked))byGroup[as[0].group]=(byGroup[as[0].group]||0)+1;else ackByGroup[as[0].group]=(ackByGroup[as[0].group]||0)+1;});
+  return{list,byKey,byGroup,ackByGroup,month:month||''};
 }
 // ── 警示確認（2026-11-06）：使用者核對過某格 → 按「確認無誤」把該格警示收起來，存雲端 app/kpi 的 acks.{月}.{ackId}。
 //   ackId＝格子 key 的雜湊；sig＝該格【目前數值】的簽章（_kpiAnomSig）。數值之後再被改動 ⇒ sig 不符 ⇒ 警示重新出現。
@@ -12493,7 +12499,57 @@ function _kpiKeyCurVal(month,key,row){
 function _kpiAnomSig(month,key,row){const v=_kpiKeyCurVal(month,key,row);return v==null?'∅':String(v);}
 function _kpiAckMatch(month,key,row){const a=_kpiAcks(month)[_kpiAckId(key)];return (a&&a.key===key&&a.sig===_kpiAnomSig(month,key,row))?a:null;}
 function _kpiAnomAcked(month,key,row){return !!_kpiAckMatch(month,key,row);}
-function _kpiAckTitle(a){return '✓ 已確認'+(a&&a.by?'（'+a.by+'）':'')+(a&&a.reason?'：'+a.reason:'')+'\n數字之後再被改動會重新提醒。';}
+// KPI_ACK_PURE_BEGIN（node 測試 scripts/kpi-ack-view.test.cjs 會擷取這一段，只能放純函式）
+// 已確認的警示「看得到」（2026-11-13）：只是顯示，不寫任何東西、不改 key／sig／ackId 的算法、不改 acks 的資料結構。
+//   at 可能是：本機剛按的 Date.now() 數字、Firestore Timestamp（toMillis／seconds）、備份檔的 {__ts}。讀不懂 ⇒ null（不寫日期）。
+function _kpiAckAtMs(at){
+  if(at==null)return null;
+  if(typeof at==='number')return isFinite(at)?at:null;
+  if(typeof at==='object'){
+    if(typeof at.toMillis==='function'){try{const v=at.toMillis();return isFinite(v)?v:null;}catch(e){return null;}}
+    if(typeof at.__ts==='number')return at.__ts;
+    if(typeof at.seconds==='number')return at.seconds*1000+Math.round((at.nanoseconds||0)/1e6);
+  }
+  return null;
+}
+// 「11/10」：台灣時間（+8，不看電腦時區）。
+function _kpiAckDate(at){const ms=_kpiAckAtMs(at);if(ms==null)return '';const d=new Date(ms+8*3600e3);return (d.getUTCMonth()+1)+'/'+d.getUTCDate();}
+// 「— 楊心雨 11/10 確認：10月有開多筆廣告」（沒填原因就只寫誰、哪天確認）
+function _kpiAckLine(ack){
+  ack=ack||{};const by=String(ack.by||'').trim(),dt=_kpiAckDate(ack.at),rs=String(ack.reason||'').trim();
+  return '— '+[by,dt].filter(Boolean).join(' ')+(by||dt?' ':'')+'確認'+(rs?'：'+rs:'');
+}
+// 警示清單（_kpiAnomalies 的輸出）→ 已確認的項目，一格一項（同一格好幾條合在一起）。ackOf(key)＝那一格的確認紀錄。
+//   回 [{group, shop, label, key, msgs:[說明句], fulls:[完整原因], diffs:[主要差異／提示，去重], ack}]，順序照警示清單。
+function _kpiAckItems(list,ackOf){
+  const m=new Map();
+  (list||[]).forEach(a=>{
+    if(!a||!a.acked)return;
+    let it=m.get(a.key);
+    if(!it){it={group:a.group,shop:a.shop||'',label:a.label,key:a.key,msgs:[],fulls:[],diffs:[],ack:(ackOf&&ackOf(a.key))||{by:a.ackBy,reason:a.ackReason}};m.set(a.key,it);}
+    const t=a.msg||a.full;if(t&&!it.msgs.includes(t))it.msgs.push(t);
+    if(a.full&&!it.fulls.includes(a.full))it.fulls.push(a.full);
+    [a.diff,a.hint].forEach(t=>{if(t&&!it.diffs.includes(t))it.diffs.push(t);});
+  });
+  return [...m.values()];
+}
+// 滑鼠提示用的純文字：每項＝「店 · 欄位：警示」＋主要差異／提示＋確認那一行，項與項空一行。shopLabel(shop)→顯示名。
+function _kpiAckTipText(items,shopLabel){
+  if(!items||!items.length)return '';
+  const lab=s=>s?((shopLabel?shopLabel(s):s)+' · '):'';
+  return '✓ 已確認 '+items.length+' 條\n\n'+items.map(it=>[lab(it.shop)+it.label+'：'+it.msgs.join('；')].concat(it.diffs,[_kpiAckLine(it.ack)]).join('\n')).join('\n\n');
+}
+// KPI_ACK_PURE_END
+// 某月某格的確認紀錄（只讀 _kpiV2.cloud.acks；呼叫端已知道這格 acked）。
+function _kpiAckRec(month,key){return _kpiAcks(month)[_kpiAckId(key)]||null;}
+// 填寫模式格子 title（整格都已確認）：「已確認：誰 日期：原因」＋原本警示文字＋主要差異。
+function _kpiAckTitle(a,as){
+  a=a||{};const by=String(a.by||'').trim(),dt=_kpiAckDate(a.at),rs=String(a.reason||'').trim();
+  const head='✓ 已確認：'+([by,dt].filter(Boolean).join(' ')||'（沒有記錄是誰）')+(rs?'：'+rs:'');
+  const body=(as||[]).map(x=>x.full).filter(Boolean);
+  const dfs=_kpiAnomDiffs(as||[]);
+  return [head].concat(body.length?['原本的提醒：'].concat(body):[],dfs).join('\n')+'\n數字之後再被改動會重新提醒。';
+}
 function kpiAnomAck(btn){
   const key=btn&&btn.dataset&&btn.dataset.k, month=btn&&btn.dataset&&btn.dataset.m;
   if(!key||!month)return;
@@ -12514,21 +12570,36 @@ function _kpiAnomCell(ix,key){
   const as=key&&ix.byKey.get(key);
   if(!as||!as.length)return {cls:'',title:''};
   const active=as.filter(a=>!a.acked);
-  if(!active.length){const a0=as[0];return {cls:'km-anom-ok-cell', title:_kpiAckTitle({by:a0.ackBy,reason:a0.ackReason})};}
+  if(!active.length){const a0=as[0];return {cls:'km-anom-ok-cell', title:_kpiAckTitle((ix.month&&_kpiAckRec(ix.month,key))||{by:a0.ackBy,reason:a0.ackReason},as)};}
   const red=active.some(a=>a.sym==='🔴');
   const dfs=_kpiAnomDiffs(active);   // 主要差異（同一格好幾條相同的只寫一次）
   return {cls:red?'km-anom-cell-red':'km-anom-cell', title:active.map(a=>a.full).join('\n')+(dfs.length?'\n'+dfs.join('\n'):'')+'\n（只是提醒，不影響存檔）'};
 }
 // 標題列：「⚠ 有 N 格請再確認」（點開清單）＋「ⓘ 警示規則」（沒有警示也在）。
 let _kpiAnomListOpen=false;
+let _kpiAckListOpen=false;   // 清單最下面「已確認 N 條」收合區（預設收起）
 function _kpiAnomTitleHtml(ix,group){
-  const n=ix.byGroup[group.key]||0;
-  return `<span class="km-anom-bar">${n?`<button type="button" class="km-anom-btn${_kpiAnomListOpen?' open':''}" onclick="kpiAnomToggle()" aria-expanded="${_kpiAnomListOpen}" title="${_kpiAnomListOpen?'收起清單':'展開清單，看每一格的原因'}">⚠ 有 ${n} 格請再確認</button>`:''}<button type="button" class="km-anom-help" onclick="kpiAnomGuide()" title="哪些情況會跳「請確認」">ⓘ 警示規則</button></span>`;
+  const n=ix.byGroup[group.key]||0, na=(ix.ackByGroup&&ix.ackByGroup[group.key])||0;
+  // 沒有未確認、只有已確認 ⇒ 標題列放「✓ 已確認 N 條」當入口（點了直接打開已確認區）
+  const ackBtn=(!n&&na)?`<button type="button" class="km-ack-btn${_kpiAnomListOpen&&_kpiAckListOpen?' open':''}" onclick="kpiAckOnlyToggle()" aria-expanded="${_kpiAnomListOpen&&_kpiAckListOpen}" title="看已經確認過的提醒：誰確認、原因">✓ 已確認 ${na} 條</button>`:'';
+  return `<span class="km-anom-bar">${n?`<button type="button" class="km-anom-btn${_kpiAnomListOpen?' open':''}" onclick="kpiAnomToggle()" aria-expanded="${_kpiAnomListOpen}" title="${_kpiAnomListOpen?'收起清單':'展開清單，看每一格的原因'}">⚠ 有 ${n} 格請再確認</button>`:''}${ackBtn}<button type="button" class="km-anom-help" onclick="kpiAnomGuide()" title="哪些情況會跳「請確認」">ⓘ 警示規則</button></span>`;
+}
+// 已確認區（清單最下面；只顯示，不能取消確認）
+function _kpiAckListHtml(ix,group,month){
+  const items=_kpiAckItems(ix.list.filter(a=>a.group===group.key),k=>_kpiAckRec(month,k));
+  if(!items.length)return '';
+  const rows=_kpiAckListOpen?'<ol>'+items.map(function(it){
+    const label=(it.shop?_kpiShopLabel(it.shop)+' · ':'')+it.label;
+    const dfs=it.diffs.map(function(t){return '<div class="km-anom-diff">'+_kpiEscAttr(t)+'</div>';}).join('');
+    return `<li class="km-ack-li"><div class="km-ack-what"><span class="km-anom-item-w">${_kpiEscAttr(label)}：</span>${_kpiEscAttr(it.msgs.join('；'))}</div>${dfs}<div class="km-ack-who">${_kpiEscAttr(_kpiAckLine(it.ack))}</div></li>`;
+  }).join('')+'</ol>':'';
+  return `<div class="km-ack-list"><button type="button" class="km-ack-toggle${_kpiAckListOpen?' open':''}" onclick="kpiAckToggle()" aria-expanded="${_kpiAckListOpen}">${_kpiAckListOpen?'▾':'▸'} 已確認 ${items.length} 條</button>${rows}</div>`;
 }
 function _kpiAnomListHtml(ix,group,month){
   if(!_kpiAnomListOpen)return '';
   const items=ix.list.filter(a=>a.group===group.key&&!a.acked);
-  if(!items.length)return '';
+  const ackHtml=_kpiAckListHtml(ix,group,month);
+  if(!items.length)return ackHtml;
   const byKey=new Map(); items.forEach(a=>{if(!byKey.has(a.key))byKey.set(a.key,[]);byKey.get(a.key).push(a);});
   const rows=[...byKey.entries()].map(function(e){
     const k=e[0],as=e[1],a0=as[0];
@@ -12537,9 +12608,12 @@ function _kpiAnomListHtml(ix,group,month){
     const dfs=_kpiAnomDiffs(as).map(function(t){return '<div class="km-anom-diff">'+_kpiEscAttr(t)+'</div>';}).join('');
     return `<li class="km-anom-li"><button type="button" class="km-anom-item" data-k="${_kpiEscAttr(k)}" onclick="kpiAnomFocus(this)"><span class="km-anom-item-w">${_kpiEscAttr(label)}：</span>${_kpiEscAttr(reasons)}</button><input type="text" class="km-anom-reason" maxlength="200" placeholder="原因（選填）" onkeydown="if(event.key==='Enter'){event.preventDefault();var b=this.parentNode.querySelector('.km-anom-ok');if(b)b.click();}"><button type="button" class="km-anom-ok" data-k="${_kpiEscAttr(k)}" data-m="${_kpiEscAttr(month)}" onclick="kpiAnomAck(this)" title="我已經核對過，這格數字沒問題，把提醒收起來">✓ 確認無誤</button>${dfs}</li>`;
   }).join('');
-  return `<div class="km-anom-list"><div class="km-anom-list-t">以下數字跟前幾個月差很多，請再確認一次。核對沒問題可以順手填個原因（選填）再按「確認無誤」把提醒收起來（數字之後再被改動會重新提醒）。</div><ol>${rows}</ol></div>`;
+  return `<div class="km-anom-list"><div class="km-anom-list-t">以下數字跟前幾個月差很多，請再確認一次。核對沒問題可以順手填個原因（選填）再按「確認無誤」把提醒收起來（數字之後再被改動會重新提醒）。</div><ol>${rows}</ol></div>${ackHtml}`;
 }
 function kpiAnomToggle(){_kpiAnomListOpen=!_kpiAnomListOpen;renderKpiTab();}
+function kpiAckToggle(){_kpiAckListOpen=!_kpiAckListOpen;renderKpiTab();}
+// 標題列「✓ 已確認 N 條」（只有已確認時才出現）：清單跟已確認區一起開關
+function kpiAckOnlyToggle(){const o=!(_kpiAnomListOpen&&_kpiAckListOpen);_kpiAnomListOpen=o;_kpiAckListOpen=o;renderKpiTab();}
 // 點清單的一條：可填的格子 → 聚焦；唯讀欄（客單價、純利率）→ 捲到那一格。
 function kpiAnomFocus(btn){
   const k=btn&&btn.dataset&&btn.dataset.k;if(!k)return;
@@ -12579,6 +12653,7 @@ function _kpiAnomGuideBlocks(){
       `手動改的公式格差很多：灰底的公式格（例如稅金、實際營收）手動改過，跟公式算出來的差 ${pc(R.fxPct)} 以上。`,
     ]},
     {p:'上個月沒填的格子，會拿最近一個有填的月份來比；提示文字會寫是跟哪個月比。「從對帳單帶入」的格子也會檢查。'},
+    {p:'按「確認無誤」後，警示會收進清單最下面的「已確認」區（看得到誰確認、哪天、原因）；月結表那家店的純利率旁會留一個 ✓，滑鼠移上去看得到原因。數字之後再被改動，會自動重新提醒。'},
     {warn:'⚠ 只是提醒，不影響存檔。數字確認沒錯就不用理它。'},
     {warn:'⚠ 空白的格子不檢查；營收還沒填的通路，比率類的檢查會等填了才做。'},
     {warn:'⚠ 含稅、未稅填錯（只差 5%）、某一位數字打錯這類小錯抓不到，仍要自己核對。'},
@@ -12589,6 +12664,20 @@ function kpiAnomGuide(){
   App.openGuide({title:'ⓘ KPI 填寫模式 · 警示規則',blocks:_kpiAnomGuideBlocks()});
 }
 // Console 只讀觀測點：__kpiAnomalyReport('2026-03')。只讀 getKpiRows()，不寫任何東西。
+// 已確認的警示：__kpiAckReport('2026-10')；__kpiAckReport('*') 看所有月份。只讀，不寫任何東西。
+function __kpiAckReport(month){
+  const rows=getKpiRows();
+  const ms=month==='*'?rows.map(r=>r.month).sort():[month||_kpiYM()];
+  const out=[];
+  ms.forEach(m=>{
+    _kpiAckItems(_kpiAnomalies(m,rows),k=>_kpiAckRec(m,k)).forEach(it=>{
+      const g=KPI_GROUPS.find(x=>x.key===it.group);
+      out.push({月份:m,群組:g?g.title:it.group,通路:it.shop?_kpiShopLabel(it.shop):'(整組)',欄位:it.label,原因:it.fulls.join('；'),主要差異:it.diffs.join(' '),確認者:it.ack.by||'',確認日期:_kpiAckDate(it.ack.at),確認原因:it.ack.reason||''});
+    });
+  });
+  if(out.length)console.table(out);else console.log('[KPI 警示] '+(month==='*'?'所有月份':ms[0])+' 沒有已確認的警示');
+  return out;
+}
 function __kpiAnomalyReport(month){
   month=month||_kpiYM();
   const list=_kpiAnomalies(month).filter(a=>!a.acked);
@@ -12604,7 +12693,7 @@ function _kpiFillHtml(row){
   // 還有 manual 欄位空著的店（合併欄位沒填 → 整組每家都算）
   const tmpShops=new Set();
   _kpiFillSlots(row,group).forEach(s=>{if(!s.filled)s.shops.forEach(x=>tmpShops.add(x));});
-  const ax=_kpiAnomIndex(_kpiAnomalies(month));   // 異常警示（只讀計算，見 KPI_ANOMALY_RULES）
+  const ax=_kpiAnomIndex(_kpiAnomalies(month),month);   // 異常警示（只讀計算，見 KPI_ANOMALY_RULES）
   const side=KPI_GROUPS.map(g=>{
     const fc=_kpiFillCount(row,g);
     const an=ax.byGroup[g.key]||0;
@@ -33028,7 +33117,7 @@ Object.assign(window, {
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
-  kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
+  kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,kpiAckToggle,kpiAckOnlyToggle,__kpiAckReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
