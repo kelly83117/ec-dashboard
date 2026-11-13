@@ -11881,7 +11881,8 @@ function _kpiChannelTableHtml(row,prevRow){
     const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=closed?{rev:'',pure:'',pp:''}:cmpCells(cur,prev);
     const prevRate=(prev&&prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&prev.rev>0)?prev.rate:null;
     const gAlert=(closed||_kpiAnomAcked(month,'ro:'+g.key+':__sub__:pureRate'))?null:_kpiPureRateAlert(cur.rev>0?cur.rate:null,prevRate);
-    const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)}:null;
+    const gDf=(gAlert&&prevRate!=null)?_kpiPureDiff(row,[prevRow],g,'__sub__'):null;   // 主要差異（只顯示）
+    const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)+(gDf?'\n'+gDf:'')}:null;
     const open=_kpiExpandedGroups.has(month+':'+g.key);
     let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
       '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+(g.key==='shopee'?_kpiShopeeBasisHtml(month,''):''),
@@ -11898,7 +11899,8 @@ function _kpiChannelTableHtml(row,prevRow){
         let pSRate=null;
         if(prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&((prevRow[g.key]||{})[s])){const pd=_kpiShopCalc(prevRow,g,s),prv=_kpiRealRev(pd);if(prv>0)pSRate=_kpiShopPureAdj(prevRow,g,s,pd).pure/prv;}
         const sAlert=_kpiAnomAcked(month,'ro:'+g.key+':'+s+':pureRate')?null:_kpiPureRateAlert(sRate,pSRate);
-        const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)}:null;
+        const sDf=(sAlert&&pSRate!=null)?_kpiPureDiff(row,[prevRow],g,s):null;   // 主要差異（只顯示）
+        const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)+(sDf?'\n'+sDf:'')}:null;
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','',''],sRc);
       });
     }
@@ -12175,6 +12177,86 @@ function _kpiAnomShopRate(row,group,shop){
   if(pa.adj)return pa.rate;
   const rev=_kpiRealRev(d);return rev>0?Number(d.pureRate)||0:null;
 }
+// ══ 主要差異（2026-11-13，塊 A）══ 純利率類警示（R8、R2 純利率、R5 純利率超出範圍）多一句白話原因。
+//   🔴 只顯示：不寫雲端、不存、不改警示的判斷，也不改 key／full／msg（「✓ 確認無誤」的 key、sig 不變），只多一個 a.diff。
+//   拆法（剛好加總）：純利差額 ＝ 營收變動的影響（基期純利率 × 營收差）＋ Σ 每一項的影響（−(本月比率 − 基期比率) × 本月營收）。
+//     比率＝該項 ÷ 實際營收（_kpiRealRev）。基期有好幾個月（R2 跟前 3 個月平均比）時，比率、純利率、營收都取平均。
+//   數字一律走 _kpiShopCalc／_kpiRealRev／_kpiShopPureAdj／_kpiGroupTotals，不另寫公式。
+//   KPI_DIFF_ITEMS＝各通路純利公式扣掉的項目；共同費用（蝦皮小計、PChome 轉單的物流運費）另外算一項。
+//     🔴 項目表跟純利公式對不上時，差額歸到「其他」照樣加總；node 測試 scripts/kpi-pure-diff.test.cjs 驗真實資料「其他」一律是 0。
+const KPI_DIFF_ITEMS={
+  shopee:['cost','ads','fee','misc','tax'],
+  coupang:['cost','fee','ret','tax','material'],
+  momo:['cost','ship','misc','tax','material'],
+  pchome:['cost','fee','tax','ship','material'],
+  friday:['cost','fee','tax','ship','material'],
+  books:['cost','fee','tax','ship','freight','material'],
+  other:['cost','fee','ship'],
+  website:['cost','fee','ship'],
+};
+const KPI_DIFF_MIN=1000, KPI_DIFF_TOP=3;   // 影響小於 $1,000 的不列；最多列 3 項
+// 一個對象（一家店，或 shop==='__sub__' 的群組小計）一個月的拆解材料：{rev, pure, items:{k:{l,v}}}；營收 ≤0 ⇒ null。
+function _kpiDiffParts(row,group,shop){
+  if(!row||_kpiAnomSkipGroup(group,row.month))return null;
+  const keys=KPI_DIFF_ITEMS[group.key]||[];
+  const lab=k=>String(((group.manual.find(f=>f.k===k)||group.formula.find(f=>f.k===k))||{}).l||k).replace(/\(.*?\)/g,'');
+  const items={};keys.forEach(k=>{items[k]={l:lab(k),v:0};});
+  let rev,pure;
+  if(shop==='__sub__'){
+    const gt=_kpiGroupTotals(row,group);rev=gt.totalRev;pure=gt.totalPure;
+    group.shops.forEach(s=>{const d=_kpiShopCalc(row,group,s);keys.forEach(k=>{items[k].v+=Number(d[k])||0;});});
+    if(group.commonCostLabel)items._common={l:group.commonCostShortLabel||'共同費用',v:Number(row[group.key+'Common'])||0};
+  }else{
+    if(!((row[group.key]||{})[shop]))return null;
+    const d=_kpiShopCalc(row,group,shop),pa=_kpiShopPureAdj(row,group,shop,d);
+    rev=_kpiRealRev(d);pure=pa.pure;
+    keys.forEach(k=>{items[k].v=Number(d[k])||0;});
+    if(pa.adj)items._common={l:group.commonCostShortLabel||'共同費用',v:(Number(d[_kpiGroupTotals(row,group).pureKey])||0)-pa.pure};
+  }
+  if(!(rev>0))return null;
+  const used=Object.keys(items).reduce((a,k)=>a+items[k].v,0);
+  const other=rev-pure-used;
+  if(Math.abs(other)>0.5)items._other={l:'其他',v:other};
+  return{rev,pure,items};
+}
+// KPI_DIFF_PURE_BEGIN（node 測試 scripts/kpi-pure-diff.test.cjs 會擷取這一段，只能放純函式）
+// cur＝本月材料；bases＝基期材料陣列（1 個＝上月；多個＝取平均）。回 {items:[{k,l,q0,q1,imp}], revEff, rev0, rev1, rate0, rate1, total}。
+//   total＝revEff＋Σimp＝本月純利 − 基期營收 × 基期純利率（基期只有一個月時就是純利差額）。
+function _kpiDiffCalc(cur,bases){
+  const n=bases.length,avg=f=>bases.reduce((a,b)=>a+f(b),0)/n;
+  const rev1=cur.rev,rev0=avg(b=>b.rev),rate1=cur.pure/cur.rev,rate0=avg(b=>b.pure/b.rev);
+  const ks=[];[cur].concat(bases).forEach(p=>Object.keys(p.items).forEach(k=>{if(!ks.includes(k))ks.push(k);}));
+  const items=ks.map(k=>{
+    const l=(cur.items[k]||bases.map(b=>b.items[k]).find(Boolean)).l;
+    const q1=((cur.items[k]||{}).v||0)/rev1,q0=avg(b=>((b.items[k]||{}).v||0)/b.rev);
+    return{k,l,q0,q1,imp:-(q1-q0)*rev1};
+  });
+  const revEff=rate0*(rev1-rev0);
+  return{items,revEff,rev0,rev1,rate0,rate1,total:revEff+items.reduce((a,x)=>a+x.imp,0)};
+}
+function _kpiDiffMoney(v){const a=Math.abs(v),s=v<0?'−':'+';return a>=10000?s+(a/10000).toFixed(1)+' 萬':s+Math.round(a).toLocaleString('en-US');}
+function _kpiDiffPct(q){return (q<0?'−':'')+Math.abs(q*100).toFixed(1)+'%';}
+// baseLabel＝「跟 2026/07 比」或「跟前 3 個月平均比（…）」；avg＝基期是平均（營收那句改說「比平均」）。
+function _kpiDiffText(res,baseLabel,avg,min,top){
+  min=min==null?1000:min;top=top==null?3:top;
+  const big=res.items.filter(x=>Math.abs(x.imp)>=min).sort((a,b)=>Math.abs(b.imp)-Math.abs(a.imp)).slice(0,top);
+  const parts=big.map((x,i)=>x.l+'率 '+_kpiDiffPct(x.q0)+' → '+_kpiDiffPct(x.q1)+'（'+(i===0?'純利約 ':'約 ')+_kpiDiffMoney(x.imp)+'）');
+  let s='主要差異（'+baseLabel+'）：'+(parts.length?parts.join('、'):'各項比率變化都不大（單項影響都小於 $'+Math.round(min).toLocaleString('en-US')+'）')+'。';
+  if(Math.abs(res.revEff)>=min)s+=(avg?'營收比平均 ':'營收 ')+_kpiDiffMoney(res.rev1-res.rev0)+'（照'+(avg?'平均':'上月')+'純利率算，純利約 '+_kpiDiffMoney(res.revEff)+'）。';
+  return s;
+}
+// KPI_DIFF_PURE_END
+// 給警示／月結表用：本月 row 跟基期 rows（1 個＝上月、多個＝平均）比。任何一邊沒有材料 ⇒ null（不顯示）。
+function _kpiPureDiff(row,baseRows,group,shop){
+  try{
+    const cur=_kpiDiffParts(row,group,shop);if(!cur)return null;
+    const bases=(baseRows||[]).map(r=>_kpiDiffParts(r,group,shop));
+    if(!bases.length||bases.some(b=>!b))return null;
+    const ym=m=>m.replace('-','/'),avg=bases.length>1;
+    const label=avg?'跟 '+baseRows.map(r=>ym(r.month)).join('、')+' 平均比':'跟 '+ym(baseRows[0].month)+' 比';
+    return _kpiDiffText(_kpiDiffCalc(cur,bases),label,avg,KPI_DIFF_MIN,KPI_DIFF_TOP);
+  }catch(e){console.warn('[KPI 主要差異] 計算失敗',e);return null;}
+}
 // 一個月所有群組的警示。回傳 [{group, groupTitle, shop, field, label, key, rule, short, full}]。
 //   key＝輸入框的 data-k（JSON(segs)）；唯讀欄（客單價／純利率）是 'ro:群組:通路:aov|pureRate'。
 function _kpiAnomalies(month,rows){
@@ -12196,6 +12278,8 @@ function _kpiAnomalies(month,rows){
       const lb=(pre&&pre.trim()&&label.startsWith(pre.trim()))?label.slice(pre.trim().length).trim():label;   // 共用格的標籤「甲配+乙配共用 應收帳款」→ 欄位名「應收帳款」
       if(msg.startsWith(lb+' '))msg=msg.slice(lb.length+1);
       out.push({group:group.key,groupTitle:group.title,shop,label,key,rule,short,full,msg,sym});};
+    // 主要差異：掛在剛 push 的那一條（只多 diff 欄位，key／full／msg 不動）
+    const addDiff=(baseRows,shop)=>{const a=out[out.length-1];const t=_kpiPureDiff(row,baseRows,group,shop);if(a&&t)a.diff=t;};
     // ── 一格一格：R5 負數、R6 歸零、R4 同上月、R1 量級（共用格、共同費用只算一次）──
     const seen=new Set();
     group.shops.forEach(shop=>{
@@ -12254,13 +12338,15 @@ function _kpiAnomalies(month,rows){
           let pr8=null;const pRow8=rows.find(x=>x.month===prevKey);
           if(pRow8&&!_kpiAnomSkipGroup(group,prevKey)&&((pRow8[group.key]||{})[shop])&&_kpiRealRev(_kpiShopCalc(pRow8,group,shop))>0)pr8=_kpiAnomShopRate(pRow8,group,shop);
           const lv8=_kpiPureRateAlert(r8,pr8);
-          if(lv8){const sym8=lv8==='red'?'🔴':'🟡';push(shop,'純利率',roKey('pureRate'),'R8',sym8,L+' '+_kpiPureRateMsg(lv8,r8,pr8),L+' ',sym8);}
+          if(lv8){const sym8=lv8==='red'?'🔴':'🟡';push(shop,'純利率',roKey('pureRate'),'R8',sym8,L+' '+_kpiPureRateMsg(lv8,r8,pr8),L+' ',sym8);
+            if(pr8!=null)addDiff([pRow8],shop);}   // 主要差異：跟上月比（上月沒資料就不加）
         }
       }
       if(!revFilled||rev<R.minRev)return;
       const open=_kpiAnomShopOpen(row,group,shop);
       const rate=_kpiAnomShopRate(row,group,shop);
-      if(!open&&rate!=null&&(rate>R.pureHi||rate<R.pureLo))push(shop,'純利率',roKey('pureRate'),'R5','請確認',`${L} 純利率 ${_kpiAnomPct(rate)}，超出 ${_kpiAnomPct(R.pureLo)}～${_kpiAnomPct(R.pureHi)} 的合理範圍，請確認。`,L+' ');
+      if(!open&&rate!=null&&(rate>R.pureHi||rate<R.pureLo)){push(shop,'純利率',roKey('pureRate'),'R5','請確認',`${L} 純利率 ${_kpiAnomPct(rate)}，超出 ${_kpiAnomPct(R.pureLo)}～${_kpiAnomPct(R.pureHi)} 的合理範圍，請確認。`,L+' ');
+        const pRow5=rows.find(x=>x.month===prevKey);if(pRow5)addDiff([pRow5],shop);}   // 主要差異：R5 沒有比較對象，跟上月比
       // 參考月：往前找最近 histMonths 個「這家店實際營收 ≥ minRev」的月份
       const hist=[];
       for(const pr of prev){
@@ -12287,7 +12373,8 @@ function _kpiAnomalies(month,rows){
       const rh=hist.filter(h=>h.rate!=null);
       if(out.length===before&&!open&&rate!=null&&rh.length){
         const avg=rh.reduce((a,h)=>a+h.rate,0)/rh.length,diff=rate-avg;
-        if(Math.abs(diff)>=R.ppPure)push(shop,'純利率',roKey('pureRate'),'R2',_kpiAnomSigned(diff*100,'pp'),`${L} 純利率 ${_kpiAnomPct(rate)}，前 ${rh.length} 個月（${rh.map(h=>ym(h.m)).join('、')}）平均 ${_kpiAnomPct(avg)}，差 ${_kpiAnomSigned(diff*100,'pp')}，請確認。`,L+' ');
+        if(Math.abs(diff)>=R.ppPure){push(shop,'純利率',roKey('pureRate'),'R2',_kpiAnomSigned(diff*100,'pp'),`${L} 純利率 ${_kpiAnomPct(rate)}，前 ${rh.length} 個月（${rh.map(h=>ym(h.m)).join('、')}）平均 ${_kpiAnomPct(avg)}，差 ${_kpiAnomSigned(diff*100,'pp')}，請確認。`,L+' ');
+          addDiff(rh.map(h=>rows.find(x=>x.month===h.m)),shop);}   // 主要差異：跟同一批參考月的平均比
       }
       const aov=_kpiAovOf(d,group),ah=hist.filter(h=>h.aov!=null);
       if(aov!=null&&ah.length){
@@ -12303,13 +12390,16 @@ function _kpiAnomalies(month,rows){
         if(pRowG&&!_kpiAnomSkipGroup(group,prevKey)){const pgt8=_kpiGroupTotals(pRowG,group);if(pgt8.totalRev>0)pgr8=pgt8.pureRateAgg;}
         const lvg=_kpiPureRateAlert(gt8.pureRateAgg,pgr8);
         if(lvg){const symg=lvg==='red'?'🔴':'🟡';const keyg='ro:'+group.key+':__sub__:pureRate';const msgg=group.title+' 小計 '+_kpiPureRateMsg(lvg,gt8.pureRateAgg,pgr8);
-          out.push({group:group.key,groupTitle:group.title,shop:'',label:'小計純利率',key:keyg,rule:'R8',short:symg,full:msgg,msg:msgg,sym:symg});}
+          out.push({group:group.key,groupTitle:group.title,shop:'',label:'小計純利率',key:keyg,rule:'R8',short:symg,full:msgg,msg:msgg,sym:symg});
+          if(pgr8!=null)addDiff([pRowG],'__sub__');}
       }
     }
   });
   out.forEach(a=>{const m=_kpiAckMatch(month,a.key,row); if(m){a.acked=true;a.ackBy=m.by;a.ackReason=m.reason||'';}});
   return out;
 }
+// 一格的多條警示裡的主要差異（去重，順序照警示）。
+function _kpiAnomDiffs(as){const o=[];(as||[]).forEach(a=>{if(a.diff&&!o.includes(a.diff))o.push(a.diff);});return o;}
 // 依 key 分組（一格可能有多條）＋各群組「幾格」。
 function _kpiAnomIndex(list){
   const byKey=new Map(),byGroup={};
@@ -12366,7 +12456,8 @@ function _kpiAnomCell(ix,key){
   const active=as.filter(a=>!a.acked);
   if(!active.length){const a0=as[0];return {cls:'km-anom-ok-cell', title:_kpiAckTitle({by:a0.ackBy,reason:a0.ackReason})};}
   const red=active.some(a=>a.sym==='🔴');
-  return {cls:red?'km-anom-cell-red':'km-anom-cell', title:active.map(a=>a.full).join('\n')+'\n（只是提醒，不影響存檔）'};
+  const dfs=_kpiAnomDiffs(active);   // 主要差異（同一格好幾條相同的只寫一次）
+  return {cls:red?'km-anom-cell-red':'km-anom-cell', title:active.map(a=>a.full).join('\n')+(dfs.length?'\n'+dfs.join('\n'):'')+'\n（只是提醒，不影響存檔）'};
 }
 // 標題列：「⚠ 有 N 格請再確認」（點開清單）＋「ⓘ 警示規則」（沒有警示也在）。
 let _kpiAnomListOpen=false;
@@ -12383,7 +12474,8 @@ function _kpiAnomListHtml(ix,group,month){
     const k=e[0],as=e[1],a0=as[0];
     const label=(a0.shop?_kpiShopLabel(a0.shop)+' · ':'')+a0.label;
     const reasons=as.map(function(a){return a.msg||a.full;}).join('；');
-    return `<li class="km-anom-li"><button type="button" class="km-anom-item" data-k="${_kpiEscAttr(k)}" onclick="kpiAnomFocus(this)"><span class="km-anom-item-w">${_kpiEscAttr(label)}：</span>${_kpiEscAttr(reasons)}</button><input type="text" class="km-anom-reason" maxlength="200" placeholder="原因（選填）" onkeydown="if(event.key==='Enter'){event.preventDefault();var b=this.parentNode.querySelector('.km-anom-ok');if(b)b.click();}"><button type="button" class="km-anom-ok" data-k="${_kpiEscAttr(k)}" data-m="${_kpiEscAttr(month)}" onclick="kpiAnomAck(this)" title="我已經核對過，這格數字沒問題，把提醒收起來">✓ 確認無誤</button></li>`;
+    const dfs=_kpiAnomDiffs(as).map(function(t){return '<div class="km-anom-diff">'+_kpiEscAttr(t)+'</div>';}).join('');
+    return `<li class="km-anom-li"><button type="button" class="km-anom-item" data-k="${_kpiEscAttr(k)}" onclick="kpiAnomFocus(this)"><span class="km-anom-item-w">${_kpiEscAttr(label)}：</span>${_kpiEscAttr(reasons)}</button><input type="text" class="km-anom-reason" maxlength="200" placeholder="原因（選填）" onkeydown="if(event.key==='Enter'){event.preventDefault();var b=this.parentNode.querySelector('.km-anom-ok');if(b)b.click();}"><button type="button" class="km-anom-ok" data-k="${_kpiEscAttr(k)}" data-m="${_kpiEscAttr(month)}" onclick="kpiAnomAck(this)" title="我已經核對過，這格數字沒問題，把提醒收起來">✓ 確認無誤</button>${dfs}</li>`;
   }).join('');
   return `<div class="km-anom-list"><div class="km-anom-list-t">以下數字跟前幾個月差很多，請再確認一次。核對沒問題可以順手填個原因（選填）再按「確認無誤」把提醒收起來（數字之後再被改動會重新提醒）。</div><ol>${rows}</ol></div>`;
 }
@@ -12404,7 +12496,9 @@ function _kpiAnomGuideBlocks(){
   const R=KPI_ANOMALY_RULES;
   const $=v=>'$'+fmtN(v), pp=v=>Math.round(v*100)+' 個百分點', pc=v=>(v<0?'−':'')+Math.abs(Math.round(v*100))+'%';
   return [
-    {p:'填寫模式會把這個月的數字跟前幾個月比，差很多的格子下面會出現黃色「⚠」小標籤（純利率的格子改用 🔴 本月純利為負／🟡 跟上月差很多）。滑鼠移上去可以看原因；標題列「⚠ 有 N 格請再確認」點開可以看全部。'},
+    {p:'填寫模式會把這個月的數字跟前幾個月比，差很多的格子會整格上底色：本月純利為負＝紅底，其他＝黃底。滑鼠移上去可以看原因；標題列「⚠ 有 N 格請再確認」點開可以看全部。'},
+    {p:`純利率的警示會多一句「主要差異」：把純利的變化拆到各項費用，列出影響最大的 ${KPI_DIFF_TOP} 項。`},
+    {p:`例：「商品成本率 43.8% → 48.2%（純利約 −19.6 萬）」＝商品成本占營收的比率從 43.8% 變成 48.2%，光這一項就讓純利少了約 19.6 萬。營收本身變多變少的影響另外寫一句；影響不到 ${'$'+fmtN(KPI_DIFF_MIN)} 的項目不列。`},
     {h:'會跳的 8 種情況',ol:[
       `純利率特別看：純利率是負的（本月純利為負）會標 🔴；純利率跟上個月差 ${KPI_PURE_RATE_ALERT_PP} 個百分點以上會標 🟡（已經 🔴 就不再 🟡）。每一家店、每個通路的小計都會看。營收是 0 或空白的不看；上個月沒資料或上個月營收是 0 時，只看負不看變化。`,
       `差好幾倍：同一格是上個月的 ${R.magX} 倍以上、或 1/${R.magX} 以下，而且差 ${$(R.magMinMoney)} 以上（訂單數差 ${fmtN(R.magMinQty)} 筆以上）。\n例：上月 $46,000，這個月打成 $460,000。`,
@@ -12429,7 +12523,7 @@ function kpiAnomGuide(){
 function __kpiAnomalyReport(month){
   month=month||_kpiYM();
   const list=_kpiAnomalies(month).filter(a=>!a.acked);
-  const rows=list.map(a=>({月份:month,群組:a.groupTitle,通路:a.shop?_kpiShopLabel(a.shop):'(整組)',欄位:a.label,規則:a.rule,標籤:a.short,原因:a.full}));
+  const rows=list.map(a=>({月份:month,群組:a.groupTitle,通路:a.shop?_kpiShopLabel(a.shop):'(整組)',欄位:a.label,規則:a.rule,標籤:a.short,原因:a.full,主要差異:a.diff||''}));
   if(rows.length)console.table(rows);else console.log('[KPI 警示] '+month+' 沒有警示');
   return rows;
 }
