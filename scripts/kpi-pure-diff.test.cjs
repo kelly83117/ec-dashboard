@@ -19,7 +19,9 @@ const src = fs.readFileSync(path.join(ROOT, 'js/profit.js'), 'utf8').replace(/\r
 const cut = (a, b) => { const i = src.indexOf(a), j = src.indexOf(b, i); if (i < 0 || j < 0) throw new Error('profit.js 找不到 ' + a + ' … ' + b); return src.slice(i, j); };
 
 // ════ 1. 純函式 ════
-const P = new Function(cut('// KPI_DIFF_PURE_BEGIN', '// KPI_DIFF_PURE_END') + '\nreturn{_kpiDiffCalc,_kpiDiffText,_kpiDiffMoney,_kpiDiffPct};')();
+const P = new Function(cut('// KPI_DIFF_PURE_BEGIN', '// KPI_DIFF_PURE_END') + '\nreturn{_kpiDiffCalc,_kpiDiffText,_kpiDiffMoney,_kpiDiffPct,_kpiDiffTop,_kpiDiffHints};')();
+// KPI_HINT 從 profit.js 讀（門檻改了測試跟著用新值）
+const H = new Function(cut('const KPI_HINT={', '\n};') + '\n};\nreturn KPI_HINT;')();
 {
   const mk = (rev, it) => { const items = {}; let used = 0; Object.keys(it).forEach(k => { items[k] = { l: k, v: it[k] }; used += it[k]; }); return { rev, pure: rev - used, items }; };
   const base = mk(100000, { 成本: 50000, 廣告: 10000, 稅金: 4762 });
@@ -59,6 +61,59 @@ const P = new Function(cut('// KPI_DIFF_PURE_BEGIN', '// KPI_DIFF_PURE_END') + '
   ok(/a率/.test(tm) && /b率/.test(tm) && /c率/.test(tm) && !/d率/.test(tm), '只取影響最大的 3 項', tm);
 }
 
+// ════ 1b. 原因提示（塊 B）觸發條件 ════
+{
+  const top1 = (k, q0, q1) => [{ k, l: { tax: '稅金', ship: '寄倉運費', fee: '平台費', cost: '商品成本' }[k] || k, q0, q1, imp: -(q1 - q0) * 100000 }];
+  const C = o => Object.assign({ g: 'coupang', shop: '商城-好麻吉', top: top1('cost', 0.5, 0.55), avg: false, bl: '上月（2026/02）',
+    cur: { qty: 1000, gross: 100000, ret: 0, feeEst: [] }, base: { qty: 1000, gross: 100000, ret: 0 } }, o);
+  const h = o => P._kpiDiffHints(C(o), H);
+  ok(h({}).length === 0, '沒有條件成立 ⇒ 沒有提示', JSON.stringify(h({})));
+  // ① 上月是 0
+  const z = h({ top: top1('tax', 0, 0.05) });
+  ok(z.length === 1 && z[0] === '上月（2026/02）稅金是 0（或沒填），比率變化可能是上月漏填', '① 上月是 0', z[0]);
+  const z2 = h({ top: top1('tax', 0, 0.05).concat([{ k: 'material', l: '耗材', q0: 0, q1: 0.013, imp: -1300 }]) });
+  ok(z2.length === 1 && z2[0] === '上月（2026/02）稅金、耗材是 0（或沒填），比率變化可能是上月漏填', '① 兩項都是 0 ⇒ 併成一句', JSON.stringify(z2));
+  ok(h({ top: top1('tax', 0.01, 0.05) }).length === 0, '① 上月不是 0 ⇒ 不提示');
+  ok(h({ top: top1('tax', 0.05, 0) }).length === 0, '① 本月是 0 ⇒ 不提示（反方向不算漏填）');
+  ok(/參考月.*稅金都是 0.*那幾個月漏填/.test(h({ avg: true, bl: '參考月（2026/02、2026/01）', top: top1('tax', 0, 0.05) })[0] || ''), '① 平均基期的說法');
+  // ② 訂單數少：本月和上月都 < fewOrders 才提示
+  ok(/訂單數少（本月 33 筆、上月 1 筆）/.test(h({ cur: { qty: 33, gross: 1, ret: 0, feeEst: [] }, base: { qty: 1, gross: 1, ret: 0 } }).join()), '② 兩個月都 < ' + H.fewOrders + '（FriDay 主站 2026-09 那種）');
+  ok(/訂單數少/.test(h({ cur: { qty: 49, gross: 1, ret: 0, feeEst: [] }, base: { qty: 49, gross: 1, ret: 0 } }).join()), '② 兩個月都是 ' + (H.fewOrders - 1) + ' 筆 ⇒ 提示');
+  ok(!/訂單數少/.test(h({ cur: { qty: 117, gross: 1, ret: 0, feeEst: [] }, base: { qty: 45, gross: 1, ret: 0 } }).join()), '② 只有上月 < ' + H.fewOrders + '（博客來寄倉 2026-10 那種）⇒ 不提示');
+  ok(!/訂單數少/.test(h({ cur: { qty: 49, gross: 1, ret: 0, feeEst: [] } }).join()), '② 只有本月 < ' + H.fewOrders + ' ⇒ 不提示');
+  ok(!/訂單數少/.test(h({ cur: { qty: 50, gross: 1, ret: 0, feeEst: [] }, base: { qty: 49, gross: 1, ret: 0 } }).join()), '② 本月剛好 ' + H.fewOrders + ' 筆 ⇒ 不提示');
+  ok(!/訂單數少/.test(h({ cur: { qty: 0, gross: 1, ret: 0, feeEst: [] }, base: { qty: 1, gross: 1, ret: 0 } }).join()), '② 本月沒填訂單數（0）⇒ 不提示');
+  // ③ 蝦皮撥款時間差
+  const sp = o => h(Object.assign({ g: 'shopee', shop: '玩樂' }, o)).join('|');
+  ok(/訂單數比上月 \+54%（2,768 → 4,274 筆），可能是撥款時間差/.test(sp({ cur: { qty: 4274, gross: 1, ret: 0, feeEst: [] }, base: { qty: 2768, gross: 1, ret: 0 } })), '③ +54% 而且 +1,506 筆');
+  ok(/訂單數比上月 −30%/.test(sp({ cur: { qty: 700, gross: 1, ret: 0, feeEst: [] }, base: { qty: 1000, gross: 1, ret: 0 } })), '③ 剛好 −30%、−300 筆');
+  ok(!/撥款時間差/.test(sp({ cur: { qty: 1299, gross: 1, ret: 0, feeEst: [] }, base: { qty: 1000, gross: 1, ret: 0 } })), '③ +29.9% ⇒ 不提示');
+  ok(!/撥款時間差/.test(sp({ cur: { qty: 260, gross: 1, ret: 0, feeEst: [] }, base: { qty: 100, gross: 1, ret: 0 } })), '③ +160% 但只差 160 筆（< ' + H.qtyMin + '）⇒ 不提示');
+  ok(!/撥款時間差/.test(h({ cur: { qty: 4274, gross: 1, ret: 0, feeEst: [] }, base: { qty: 2768, gross: 1, ret: 0 } }).join()), '③ 不是蝦皮 ⇒ 不提示');
+  // ④ 蝦皮手續費估算
+  ok(/手續費是估算值（還沒從對帳單帶入）/.test(sp({ cur: { qty: 1000, gross: 1, ret: 0, feeEst: ['玩樂'] } })), '④ 單店');
+  ok(/手續費有 2 店是估算值（玩樂、維克，還沒從對帳單帶入）/.test(h({ g: 'shopee', shop: '__sub__', cur: { qty: 1000, gross: 1, ret: 0, feeEst: ['玩樂', '維克'] } }).join()), '④ 小計');
+  // ⑤ MOMO 退貨率
+  const mo = o => h(Object.assign({ g: 'momo', shop: 'MOMO-甲配' }, o)).join('|');
+  ok(/退貨金額 上月 \$2,000 → 本月 \$5,000（退貨率 2\.0% → 5\.0%）/.test(mo({ cur: { qty: 1000, gross: 100000, ret: 5000, feeEst: [] }, base: { qty: 1000, gross: 100000, ret: 2000 } })), '⑤ 退貨率 +3pp');
+  ok(!/退貨金額/.test(mo({ cur: { qty: 1000, gross: 100000, ret: 4900, feeEst: [] }, base: { qty: 1000, gross: 100000, ret: 2000 } })), '⑤ +2.9pp ⇒ 不提示');
+  // ⑥ 寄倉運費第一名
+  ok(/寄倉運費是整批寄倉時才有/.test(h({ g: 'books', shop: '博客來-寄倉', top: top1('ship', 0.05, 0.17) }).join()), '⑥ 博客來寄倉');
+  ok(/寄倉運費是整批寄倉時才有/.test(h({ g: 'momo', shop: 'MOMO-寄倉', top: top1('ship', 0.05, 0.09) }).join()), '⑥ 乙配');
+  ok(/寄倉運費是整批寄倉時才有/.test(h({ g: 'books', shop: '__sub__', top: top1('ship', 0.05, 0.17) }).join()), '⑥ 博客來小計');
+  ok(!/寄倉運費/.test(h({ g: 'pchome', shop: 'PChome-寄倉', top: top1('ship', 0.05, 0.17) }).join()), '⑥ PChome 寄倉不在名單 ⇒ 不提示');
+  ok(!/寄倉運費/.test(h({ g: 'books', shop: '博客來-寄倉', top: top1('cost', 0.3, 0.4).concat(top1('ship', 0.05, 0.06)) }).join()), '⑥ 寄倉運費不是第一名 ⇒ 不提示');
+  // ⑦ PChome 平台費第一名
+  ok(/平台費含退貨物流費、罰金，請看對帳單 \(D\)/.test(h({ g: 'pchome', shop: 'PChome', top: top1('fee', 0.35, 0.54) }).join()), '⑦ PChome 平台費第一名');
+  ok(!/對帳單 \(D\)/.test(h({ g: 'friday', shop: 'FriDay-主站', top: top1('fee', 0.35, 0.54) }).join()), '⑦ 不是 PChome ⇒ 不提示');
+  // 最多 H.max 句，照優先順序
+  const all = h({ g: 'shopee', shop: '玩樂', top: top1('tax', 0, 0.05), cur: { qty: 40, gross: 1, ret: 0, feeEst: ['玩樂'] }, base: { qty: 30, gross: 1, ret: 0 } });
+  ok(all.length === H.max && /是 0/.test(all[0]) && /訂單數少/.test(all[1]), '最多 ' + H.max + ' 句、照優先順序（上月是 0 → 訂單數少）', JSON.stringify(all));
+  // _kpiDiffTop 跟主要差異文字用同一批
+  const rr = { items: [{ k: 'a', l: 'a', q0: 0, q1: 0, imp: -5000 }, { k: 'b', l: 'b', q0: 0, q1: 0, imp: 999 }, { k: 'c', l: 'c', q0: 0, q1: 0, imp: 2000 }], revEff: 0, rev0: 1, rev1: 1 };
+  ok(P._kpiDiffTop(rr, 1000, 3).map(x => x.k).join() === 'a,c', '_kpiDiffTop：|影響| ≥ 1,000、由大到小');
+}
+
 // ════ 2. 真實資料 ════
 const bk = process.env.KPI_BACKUP;
 if (!bk || !fs.existsSync(bk)) { console.log('（沒有 KPI_BACKUP，略過真實資料）'); skip++; }
@@ -93,12 +148,15 @@ else {
       });
     });
     X._kpiAnomalies(row.month, rows).forEach(a => {
+      if (a.hint) ok(!!a.diff, row.month + ' ' + a.key + '：有提示一定有主要差異');
+      if (a.hint) ok(/^提示：/.test(a.hint) && a.hint.split('；').length <= 2, row.month + ' ' + a.key + '：提示最多 2 句', a.hint);
       if (!a.diff) return;
       ok(['R8', 'R2', 'R5'].includes(a.rule) && /純利率/.test(a.label), row.month + ' ' + a.key + '：diff 只掛在純利率警示', a.rule + ' ' + a.label);
     });
   });
-  const withDiff = rows.reduce((a, row) => a + X._kpiAnomalies(row.month, rows).filter(x => x.diff).length, 0);
-  console.log('真實資料：' + rows.length + ' 個月、' + n + ' 組跟上月比的拆解，最大誤差 ' + maxErr.toExponential(2) + '；有主要差異的警示 ' + withDiff + ' 條');
+  const all = rows.flatMap(row => X._kpiAnomalies(row.month, rows));
+  const withDiff = all.filter(x => x.diff).length, withHint = all.filter(x => x.hint).length;
+  console.log('真實資料：' + rows.length + ' 個月、' + n + ' 組跟上月比的拆解，最大誤差 ' + maxErr.toExponential(2) + '；有主要差異的警示 ' + withDiff + ' 條、其中有提示 ' + withHint + ' 條');
 }
 console.log('\n通過 ' + pass + '、失敗 ' + fail + (skip ? '、略過 ' + skip : ''));
 process.exit(fail ? 1 : 0);

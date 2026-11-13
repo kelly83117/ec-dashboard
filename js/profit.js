@@ -11882,7 +11882,7 @@ function _kpiChannelTableHtml(row,prevRow){
     const prevRate=(prev&&prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&prev.rev>0)?prev.rate:null;
     const gAlert=(closed||_kpiAnomAcked(month,'ro:'+g.key+':__sub__:pureRate'))?null:_kpiPureRateAlert(cur.rev>0?cur.rate:null,prevRate);
     const gDf=(gAlert&&prevRate!=null)?_kpiPureDiff(row,[prevRow],g,'__sub__'):null;   // 主要差異（只顯示）
-    const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)+(gDf?'\n'+gDf:'')}:null;
+    const gRc=gAlert?{cls:gAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(gAlert,cur.rate,prevRate)+(gDf?'\n'+gDf.text+(gDf.hint?'\n'+gDf.hint:''):'')}:null;
     const open=_kpiExpandedGroups.has(month+':'+g.key);
     let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
       '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+(g.key==='shopee'?_kpiShopeeBasisHtml(month,''):''),
@@ -11900,7 +11900,7 @@ function _kpiChannelTableHtml(row,prevRow){
         if(prevRow&&!_kpiAnomSkipGroup(g,prevRow.month)&&((prevRow[g.key]||{})[s])){const pd=_kpiShopCalc(prevRow,g,s),prv=_kpiRealRev(pd);if(prv>0)pSRate=_kpiShopPureAdj(prevRow,g,s,pd).pure/prv;}
         const sAlert=_kpiAnomAcked(month,'ro:'+g.key+':'+s+':pureRate')?null:_kpiPureRateAlert(sRate,pSRate);
         const sDf=(sAlert&&pSRate!=null)?_kpiPureDiff(row,[prevRow],g,s):null;   // 主要差異（只顯示）
-        const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)+(sDf?'\n'+sDf:'')}:null;
+        const sRc=sAlert?{cls:sAlert==='red'?'km-rate-neg':'km-rate-chg',title:_kpiPureRateMsg(sAlert,sRate,pSRate)+(sDf?'\n'+sDf.text+(sDf.hint?'\n'+sDf.hint:''):'')}:null;
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','',''],sRc);
       });
     }
@@ -12217,7 +12217,11 @@ function _kpiDiffParts(row,group,shop){
   const used=Object.keys(items).reduce((a,k)=>a+items[k].v,0);
   const other=rev-pure-used;
   if(Math.abs(other)>0.5)items._other={l:'其他',v:other};
-  return{rev,pure,items};
+  // 原因提示（塊 B）用的材料：訂單數、營收（MOMO＝營收(進價稅)，扣退貨前）、退貨金額、手續費還是估算值的店（蝦皮）。只讀，不影響上面的拆解。
+  const raws=(shop==='__sub__'?group.shops:[shop]).map(s=>({s,raw:(row[group.key]||{})[s]})).filter(x=>x.raw);
+  const num=k=>raws.reduce((a,x)=>a+(Number(_kpiShopCalc(row,group,x.s)[k])||0),0);
+  const feeEst=group.key==='shopee'?raws.filter(x=>_kpiIsAutoFill(group,x.s,'fee')&&(x.raw.fee==null||x.raw.fee==='')).map(x=>_kpiShopLabel(x.s)):[];
+  return{rev,pure,items,qty:num('qty'),gross:num('rev'),ret:num('ret'),feeEst};
 }
 // KPI_DIFF_PURE_BEGIN（node 測試 scripts/kpi-pure-diff.test.cjs 會擷取這一段，只能放純函式）
 // cur＝本月材料；bases＝基期材料陣列（1 個＝上月；多個＝取平均）。回 {items:[{k,l,q0,q1,imp}], revEff, rev0, rev1, rate0, rate1, total}。
@@ -12237,16 +12241,61 @@ function _kpiDiffCalc(cur,bases){
 function _kpiDiffMoney(v){const a=Math.abs(v),s=v<0?'−':'+';return a>=10000?s+(a/10000).toFixed(1)+' 萬':s+Math.round(a).toLocaleString('en-US');}
 function _kpiDiffPct(q){return (q<0?'−':'')+Math.abs(q*100).toFixed(1)+'%';}
 // baseLabel＝「跟 2026/07 比」或「跟前 3 個月平均比（…）」；avg＝基期是平均（營收那句改說「比平均」）。
+// 影響最大的幾項（|影響| ≥ min，由大到小取 top 項）。主要差異文字與原因提示共用。
+function _kpiDiffTop(res,min,top){
+  min=min==null?1000:min;top=top==null?3:top;
+  return res.items.filter(x=>Math.abs(x.imp)>=min).sort((a,b)=>Math.abs(b.imp)-Math.abs(a.imp)).slice(0,top);
+}
 function _kpiDiffText(res,baseLabel,avg,min,top){
   min=min==null?1000:min;top=top==null?3:top;
-  const big=res.items.filter(x=>Math.abs(x.imp)>=min).sort((a,b)=>Math.abs(b.imp)-Math.abs(a.imp)).slice(0,top);
+  const big=_kpiDiffTop(res,min,top);
   const parts=big.map((x,i)=>x.l+'率 '+_kpiDiffPct(x.q0)+' → '+_kpiDiffPct(x.q1)+'（'+(i===0?'純利約 ':'約 ')+_kpiDiffMoney(x.imp)+'）');
   let s='主要差異（'+baseLabel+'）：'+(parts.length?parts.join('、'):'各項比率變化都不大（單項影響都小於 $'+Math.round(min).toLocaleString('en-US')+'）')+'。';
   if(Math.abs(res.revEff)>=min)s+=(avg?'營收比平均 ':'營收 ')+_kpiDiffMoney(res.rev1-res.rev0)+'（照'+(avg?'平均':'上月')+'純利率算，純利約 '+_kpiDiffMoney(res.revEff)+'）。';
   return s;
 }
+// 原因提示（塊 B，2026-11-13）：只在條件成立時出現，接在主要差異後面，最多 H.max 句。順序＝優先順序（資料問題 → 樣本小 → 各通路特性）。
+//   c＝{g:群組 key, shop:店名或 '__sub__', top:_kpiDiffTop 的結果, cur:{qty,gross,ret,feeEst}, base:{qty,gross,ret}（基期多個月＝平均）, bl:'上月（2026/09）'或'參考月平均（…）', avg}
+//   H＝KPI_HINT（門檻）。回字串陣列（可能是空的）。
+function _kpiDiffHints(c,H){
+  const out=[],n=v=>Math.round(v).toLocaleString('en-US'),pc=v=>(v*100).toFixed(1)+'%';
+  const cur=c.cur,base=c.base,first=c.top[0];
+  // ① 前幾名有一項基期是 0、本月有值 ⇒ 多半是基期漏填（例：酷澎 2026-02 稅金、耗材存成 0）
+  //   好幾項都是 0 ⇒ 併成一句（「稅金、耗材」），免得兩句長得一樣佔掉兩個名額
+  const zs=c.top.filter(x=>x.q0===0&&x.q1>0).map(x=>x.l);
+  if(zs.length)out.push(c.bl+zs.join('、')+(c.avg?'都':'')+'是 0（或沒填），比率變化可能是'+(c.avg?'那幾個月':'上月')+'漏填');
+  // ② 訂單數少（本月和基期都少於 H.fewOrders 筆）⇒ 一兩筆就會讓比率大跳
+  if(cur.qty>0&&base.qty>0&&cur.qty<H.fewOrders&&base.qty<H.fewOrders)
+    out.push('訂單數少（本月 '+n(cur.qty)+' 筆、'+(c.avg?'參考月平均 ':'上月 ')+n(base.qty)+' 筆），一兩筆就會讓比率大跳');
+  // ③ 蝦皮：訂單數跟基期差很多 ⇒ 撥款時間差
+  if(c.g==='shopee'&&base.qty>0){const d=cur.qty-base.qty;
+    if(Math.abs(d)>=H.qtyMin&&Math.abs(d)/base.qty>=H.qtyPct)
+      out.push('訂單數比'+(c.avg?'參考月平均':'上月')+(d>0?' +':' −')+Math.round(Math.abs(d)/base.qty*100)+'%（'+n(base.qty)+' → '+n(cur.qty)+' 筆），可能是撥款時間差（例如過年撥款延後），營收和成本會一起變動');}
+  // ④ 蝦皮：手續費還是估算值
+  if(c.g==='shopee'&&cur.feeEst&&cur.feeEst.length)
+    out.push(c.shop==='__sub__'?'手續費有 '+cur.feeEst.length+' 店是估算值（'+cur.feeEst.join('、')+'，還沒從對帳單帶入）':'手續費是估算值（還沒從對帳單帶入）');
+  // ⑤ MOMO：退貨率變很多 ⇒ 列退貨金額前後
+  if(c.g==='momo'&&cur.gross>0&&base.gross>0){const r1=cur.ret/cur.gross,r0=base.ret/base.gross;
+    if(Math.abs(r1-r0)>=H.retPP)out.push('退貨金額 '+(c.avg?'參考月平均':'上月')+' $'+n(base.ret)+' → 本月 $'+n(cur.ret)+'（退貨率 '+pc(r0)+' → '+pc(r1)+'）');}
+  // ⑥ 寄倉運費第一名（MOMO 乙配、博客來寄倉，含這兩組的小計）⇒ 整批寄倉才有
+  if(first&&first.k==='ship'&&(H.stockShipShops.includes(c.shop)||(c.shop==='__sub__'&&H.stockShipGroups.includes(c.g))))
+    out.push('寄倉運費是整批寄倉時才有，月份之間本來就會跳');
+  // ⑦ PChome：平台費第一名 ⇒ 看對帳單 (D)
+  if(c.g==='pchome'&&first&&first.k==='fee')out.push('平台費含退貨物流費、罰金，請看對帳單 (D)');
+  return out.slice(0,H.max);
+}
 // KPI_DIFF_PURE_END
+// 原因提示的門檻（塊 B）。改這裡，「ⓘ 警示規則」說明跟著變。
+const KPI_HINT={
+  qtyPct:0.30, qtyMin:200,                    // 蝦皮撥款時間差：訂單數跟基期差 ≥30% 而且 ≥200 筆
+  fewOrders:50,                               // 訂單數少：本月和基期都 < 50 筆
+  retPP:0.03,                                 // MOMO 退貨率（退貨 ÷ 營收(進價稅)）變動 ≥3 個百分點
+  stockShipShops:['MOMO-寄倉','博客來-寄倉'],   // 寄倉運費第一名時提示（乙配、博客來寄倉）
+  stockShipGroups:['momo','books'],           //   這兩組的小計也算
+  max:2,                                      // 每條警示最多幾句
+};
 // 給警示／月結表用：本月 row 跟基期 rows（1 個＝上月、多個＝平均）比。任何一邊沒有材料 ⇒ null（不顯示）。
+//   回 {text:主要差異, hint:'提示：…；…。'或''}。
 function _kpiPureDiff(row,baseRows,group,shop){
   try{
     const cur=_kpiDiffParts(row,group,shop);if(!cur)return null;
@@ -12254,7 +12303,17 @@ function _kpiPureDiff(row,baseRows,group,shop){
     if(!bases.length||bases.some(b=>!b))return null;
     const ym=m=>m.replace('-','/'),avg=bases.length>1;
     const label=avg?'跟 '+baseRows.map(r=>ym(r.month)).join('、')+' 平均比':'跟 '+ym(baseRows[0].month)+' 比';
-    return _kpiDiffText(_kpiDiffCalc(cur,bases),label,avg,KPI_DIFF_MIN,KPI_DIFF_TOP);
+    const res=_kpiDiffCalc(cur,bases);
+    const text=_kpiDiffText(res,label,avg,KPI_DIFF_MIN,KPI_DIFF_TOP);
+    let hint='';
+    try{
+      const mean=k=>bases.reduce((a,b)=>a+(b[k]||0),0)/bases.length;
+      const hs=_kpiDiffHints({g:group.key,shop,top:_kpiDiffTop(res,KPI_DIFF_MIN,KPI_DIFF_TOP),avg,
+        bl:avg?'參考月（'+baseRows.map(r=>ym(r.month)).join('、')+'）':'上月（'+ym(baseRows[0].month)+'）',
+        cur:{qty:cur.qty,gross:cur.gross,ret:cur.ret,feeEst:cur.feeEst},base:{qty:mean('qty'),gross:mean('gross'),ret:mean('ret')}},KPI_HINT);
+      if(hs.length)hint='提示：'+hs.join('；')+'。';
+    }catch(e){console.warn('[KPI 原因提示] 計算失敗',e);}
+    return{text,hint};
   }catch(e){console.warn('[KPI 主要差異] 計算失敗',e);return null;}
 }
 // 一個月所有群組的警示。回傳 [{group, groupTitle, shop, field, label, key, rule, short, full}]。
@@ -12279,7 +12338,7 @@ function _kpiAnomalies(month,rows){
       if(msg.startsWith(lb+' '))msg=msg.slice(lb.length+1);
       out.push({group:group.key,groupTitle:group.title,shop,label,key,rule,short,full,msg,sym});};
     // 主要差異：掛在剛 push 的那一條（只多 diff 欄位，key／full／msg 不動）
-    const addDiff=(baseRows,shop)=>{const a=out[out.length-1];const t=_kpiPureDiff(row,baseRows,group,shop);if(a&&t)a.diff=t;};
+    const addDiff=(baseRows,shop)=>{const a=out[out.length-1];const t=_kpiPureDiff(row,baseRows,group,shop);if(a&&t){a.diff=t.text;if(t.hint)a.hint=t.hint;}};   // 原因提示（塊 B）另放 a.hint
     // ── 一格一格：R5 負數、R6 歸零、R4 同上月、R1 量級（共用格、共同費用只算一次）──
     const seen=new Set();
     group.shops.forEach(shop=>{
@@ -12399,7 +12458,8 @@ function _kpiAnomalies(month,rows){
   return out;
 }
 // 一格的多條警示裡的主要差異（去重，順序照警示）。
-function _kpiAnomDiffs(as){const o=[];(as||[]).forEach(a=>{if(a.diff&&!o.includes(a.diff))o.push(a.diff);});return o;}
+//   每條：主要差異一行，原因提示（塊 B）緊接在後面另一行。
+function _kpiAnomDiffs(as){const o=[];(as||[]).forEach(a=>{[a.diff,a.hint].forEach(t=>{if(t&&!o.includes(t))o.push(t);});});return o;}
 // 依 key 分組（一格可能有多條）＋各群組「幾格」。
 function _kpiAnomIndex(list){
   const byKey=new Map(),byGroup={};
@@ -12499,6 +12559,15 @@ function _kpiAnomGuideBlocks(){
     {p:'填寫模式會把這個月的數字跟前幾個月比，差很多的格子會整格上底色：本月純利為負＝紅底，其他＝黃底。滑鼠移上去可以看原因；標題列「⚠ 有 N 格請再確認」點開可以看全部。'},
     {p:`純利率的警示會多一句「主要差異」：把純利的變化拆到各項費用，列出影響最大的 ${KPI_DIFF_TOP} 項。`},
     {p:`例：「商品成本率 43.8% → 48.2%（純利約 −19.6 萬）」＝商品成本占營收的比率從 43.8% 變成 48.2%，光這一項就讓純利少了約 19.6 萬。營收本身變多變少的影響另外寫一句；影響不到 ${'$'+fmtN(KPI_DIFF_MIN)} 的項目不列。`},
+    {h:`主要差異後面可能多一句「提示」（條件成立才出現，最多 ${KPI_HINT.max} 句）`,ol:[
+      '前幾名有一項上月是 0、本月有值：可能是上月漏填。',
+      `本月和上月訂單都少於 ${fmtN(KPI_HINT.fewOrders)} 筆：一兩筆就會讓比率大跳。`,
+      `蝦皮訂單數跟上月差 ${Math.round(KPI_HINT.qtyPct*100)}% 以上、而且差 ${fmtN(KPI_HINT.qtyMin)} 筆以上：可能是撥款時間差，營收和成本會一起變動。`,
+      '蝦皮手續費還是估算值（還沒從對帳單帶入）。',
+      `MOMO 退貨率（退貨金額 ÷ 營收(進價稅)）跟上月差 ${Math.round(KPI_HINT.retPP*100)} 個百分點以上：列出退貨金額前後。`,
+      'MOMO 乙配、博客來寄倉的第一名是寄倉運費：寄倉運費是整批寄倉時才有，月份之間本來就會跳。',
+      'PChome 的第一名是平台費：平台費含退貨物流費、罰金，請看對帳單 (D)。',
+    ]},
     {h:'會跳的 8 種情況',ol:[
       `純利率特別看：純利率是負的（本月純利為負）會標 🔴；純利率跟上個月差 ${KPI_PURE_RATE_ALERT_PP} 個百分點以上會標 🟡（已經 🔴 就不再 🟡）。每一家店、每個通路的小計都會看。營收是 0 或空白的不看；上個月沒資料或上個月營收是 0 時，只看負不看變化。`,
       `差好幾倍：同一格是上個月的 ${R.magX} 倍以上、或 1/${R.magX} 以下，而且差 ${$(R.magMinMoney)} 以上（訂單數差 ${fmtN(R.magMinQty)} 筆以上）。\n例：上月 $46,000，這個月打成 $460,000。`,
@@ -12523,7 +12592,7 @@ function kpiAnomGuide(){
 function __kpiAnomalyReport(month){
   month=month||_kpiYM();
   const list=_kpiAnomalies(month).filter(a=>!a.acked);
-  const rows=list.map(a=>({月份:month,群組:a.groupTitle,通路:a.shop?_kpiShopLabel(a.shop):'(整組)',欄位:a.label,規則:a.rule,標籤:a.short,原因:a.full,主要差異:a.diff||''}));
+  const rows=list.map(a=>({月份:month,群組:a.groupTitle,通路:a.shop?_kpiShopLabel(a.shop):'(整組)',欄位:a.label,規則:a.rule,標籤:a.short,原因:a.full,主要差異:a.diff||'',提示:a.hint||''}));
   if(rows.length)console.table(rows);else console.log('[KPI 警示] '+month+' 沒有警示');
   return rows;
 }
