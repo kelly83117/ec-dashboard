@@ -2110,39 +2110,36 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-bk-errbox{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:600;}
 .km-bk-chk{margin:10px 0;padding:8px 10px;border:1px solid #eef0f4;border-radius:8px;font-size:12px;}
 .km-au-check.warn{color:#b45309;}
-/* 淨利表頂端「動銷率」格（蝦皮四家）。結構跟旁邊三格相同：標題／主數字＋小字／較上月。
-   三格全是 inline style、沒有 class 可沿用，所以這裡照抄同樣的數值：標題 11px/600/.05em、主數字 20px/700、小字 13px/500、第三行 12px/600（min-height 18、margin-top 2、vs 那段 margin-left 10 + weight 500）。
-   顏色用 :root 變數，透明度是為了接近三格的 #9ca3af（標題）與 #374151（主數字），:root 沒有這兩個值。
-   第三行空的時候也要佔位（min-height），四格才一樣高、標題才對齊。 */
-.kv-st{min-width:0;}
-.kv-st-hd{font-size:11px;font-weight:600;letter-spacing:.05em;margin-bottom:2px;}
-.kv-st-title{font-size:11px;font-weight:600;letter-spacing:.05em;color:var(--text-muted);opacity:.65;white-space:nowrap;}
-.kv-st-main{display:flex;align-items:baseline;gap:5px;}
-.kv-st-value{font-size:20px;font-weight:700;color:var(--text);opacity:.85;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap;}
-.kv-st-rate{min-width:0;font-size:13px;font-weight:500;color:var(--text-muted);}
-.kv-st-cmp{min-height:18px;margin-top:2px;font-size:12px;font-weight:600;color:var(--text-muted);}
-.kv-st-vs{font-weight:500;}
-.kv-st-d.kv-st-up{color:var(--success);}
-.kv-st-d.kv-st-down{color:var(--danger);}
-
-/* 淨利表頂端版面（2026-11，蝦皮照 MOMO：控制列在上、數字等寬一列）。
-   上方 2026-08 那段 #header-kpi-block 寬度量測是舊版面的紀錄，已不適用。
+/* 淨利表頂端數字區（2026-11 五格版：營收、毛利率、廣告費、純利、動銷率；蝦皮四家＋測試通路，測試通路沒有動銷率＝四格）。
    #header-kpi-row 的 display 由 JS 切 none / flex，所以這裡只給方向，不設 display。
-   格數不寫死：動銷率格 hidden 時（測試通路）grid-auto-columns 自動變成平均三欄。 */
+   每格固定三行：.kv-hd 標題＋ⓘ／.kv-value 只放大數字／.kv-foot 變化小標籤＋一行小字。
+   第三行不換行（超出 … 截斷），所以五格永遠一樣高；格子之間不加分隔線。
+   顏色只用 :root 變數；--success-soft／--danger-soft 是 main.css 既有的，--kv-flat-bg 是這裡新增的灰底。 */
+:root{--kv-flat-bg:#f3f4f6;--kv-gap:18px;--kv-hd-fs:11px;--kv-value-fs:20px;--kv-value-lh:28px;--kv-chip-fs:11.5px;--kv-chip-px:7px;--kv-sub-fs:12px;--kv-foot-gap:6px;}
 .kv-row{flex-direction:column;align-items:stretch;gap:10px;}
 .kv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;}
 .kv-ctl-r{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto;}
-.kv-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:18px;align-items:start;}
+/* 有幾格分幾欄（動銷率格 hidden 時自動變四欄） */
+.kv-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--kv-gap);align-items:start;}
 .kv-grid .mm-info{letter-spacing:0;}   /* 標題有 letter-spacing，不歸零「?」會偏離圓心 */
-/* 大數字一定完整；旁邊的比率萬一放不下才整段掉到下一行（不裁切） */
-.kv-main{flex-wrap:wrap;}
-.kv-main>*{white-space:nowrap;}
-/* 第三行：寬度不夠時「vs …」整段換到下一行，不在字中間斷開 */
-.kv-cmp,.kv-st-cmp{display:flex;flex-wrap:wrap;column-gap:10px;}
-.kv-cmp>span,.kv-st-cmp>span{white-space:nowrap;}
-.kv-cmp-vs{font-weight:500;}
-/* 視窗再窄（含手機）四欄放不下完整數字，改兩欄 */
-@media (max-width:1100px){.kv-grid{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr));}}
+.kv-cell{min-width:0;}
+.kv-hd{display:flex;align-items:center;gap:4px;font-size:var(--kv-hd-fs);font-weight:600;letter-spacing:.05em;margin-bottom:2px;white-space:nowrap;}
+.kv-hd .mm-info{flex:0 0 auto;}   /* 標題太長（動銷率（11月整月））時只截標題、ⓘ 一定看得到 */
+.kv-title{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted);opacity:.65;}
+.kv-value{font-size:var(--kv-value-fs);font-weight:700;line-height:var(--kv-value-lh);color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap;}
+.kv-value.kv-neg{color:var(--danger);}
+.kv-foot{display:flex;align-items:center;gap:var(--kv-foot-gap);min-height:20px;margin-top:2px;white-space:nowrap;overflow:hidden;}
+.kv-chip-slot{display:inline-flex;flex:0 0 auto;}
+.kv-chip-slot:empty{display:none;}
+.kv-chip{display:inline-block;padding:1px var(--kv-chip-px);border-radius:999px;font-size:var(--kv-chip-fs);font-weight:600;line-height:18px;font-variant-numeric:tabular-nums;}
+.kv-chip-good{background:var(--success-soft);color:var(--success);}
+.kv-chip-bad{background:var(--danger-soft);color:var(--danger);}
+.kv-chip-flat{background:var(--kv-flat-bg);color:var(--text-muted);}
+.kv-sub{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--kv-sub-fs);font-weight:500;color:var(--text-muted);}
+/* 窄螢幕：一律五格一排（測試通路四格），不換行，改用縮小字級與間距（值都在上面 :root 的 --kv-*）；小字照樣 … 截斷，title 有全文 */
+@media (max-width:1100px){:root{--kv-gap:10px;--kv-hd-fs:10.5px;--kv-value-fs:18px;--kv-value-lh:26px;--kv-chip-fs:11px;--kv-chip-px:5px;--kv-sub-fs:11px;--kv-foot-gap:4px;}}
+/* 只有手機寬度才改兩欄、多列 */
+@media (max-width:640px){.kv-grid{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px;}}
 
 /* FriDay 報表上傳（2026-11-04）：站別選擇（i站尚未支援） */
 .km-fr-site{margin:0 0 10px;font-size:13px;font-weight:600;display:flex;gap:14px;align-items:center;}
