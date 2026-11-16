@@ -2611,22 +2611,38 @@ const TEST_SHOP_HELP=[
   {q:'⑥ 丟錯檔案就重新上傳覆蓋',a:'這個通路沒有清除用的按鈕。丟錯檔案的話，用同一組日期重新上傳、再產生一次報表，就會覆蓋掉舊的那份。\n（其他通路的上傳視窗有一顆清除鈕，但它只清掉「上傳的檔案紀錄」、不會刪報表 —— 要換掉一份報表一律是重傳覆蓋。）'},
   {q:'⑦ 產生報表後要看到「測試通路報表已寫入雲端」才算成功',a:'這個通路的報表【只存在雲端，不存在你的電腦裡】。按「▶ 產生報表」之後如果沒跳出那則提示、或跳出「測試通路寫入失敗」的彈窗，那份報表重新整理頁面就會消失。遇到這種情況，先按一次「▶ 產生報表」重試（檔案還在，不用重傳）；如果已經重新整理過頁面，才需要重新上傳檔案再產生一次。'},
 ];
-// 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
-//   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
-//   不會經過 pending set；但舊版可能已把它塞進 set → 保險排除掉，避免離開頁面誤跳「未同步」。
+// ══════ 待同步 key 的通路歸屬（白名單）══════
+//   _pendingSyncKeys 是各通路共用的一個集合（推送需要它們在一起），但「待推數」必須依通路切分：某通路的待推只能點亮自己的鈕。
+//   舊做法是計數端各自排除別的通路（黑名單：startsWith('ec_pchome_') 跳過）→ 以後新增通路又會漏排、再次點亮別人的鈕（PR #317 的 bug 會重演）。
+//   改成每把 key 先查「歸屬」（下面這份明確前綴表）；各計數只數自己通路。
+//   前綴表＝_sweepAllLocalReportsIntoPending 會撿進待推的那幾族（改 sweep 要一起改這裡）。
+//   歸屬不明（不在表裡）→ 'unknown'：全域鈕照數（寧可多亮、不要漏掉未同步而丟資料）並在 Console 警告一次，提醒回來補這張表。
+function _pendingKeyOwner(k){
+  if(typeof k!=='string') return 'unknown';
+  if(k.startsWith('__shop__|') || k==='_summary_v1') return 'marker';        // 不是資料、不計
+  if(k.startsWith('ec_pchome_')) return 'pchome';
+  if(k.startsWith('ec_momo_')) return 'momo';
+  if(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)) return 'coupang';
+  if(k.startsWith('ec|') || k.startsWith('ec_notes|') || k.startsWith('ec_edits|') || k.startsWith('ec_split|') || k==='_kpi_v1') return 'shopee';
+  return 'unknown';
+}
+const _pendingUnknownWarned=new Set();
+function _pendingWarnUnknown(k){ if(_pendingUnknownWarned.has(k)) return; _pendingUnknownWarned.add(k); try{ console.warn('[待同步] 歸屬不明的 key（已照算進全域鈕）：'+k+' → 請到 _pendingKeyOwner 補通路前綴'); }catch(e){} }
+// 全域鈕（蝦皮頁 global-sync-btn）的待推數：蝦皮自己的 key ＋ 歸屬不明（fail-safe）。momo／酷澎／PChome 各有自己的鈕與計數，不算在這裡。
 function _realPendingCount(){
   let n=0;
-  _pendingSyncKeys.forEach(k=>{
-    if(k.startsWith('__shop__|')) return;
-    if(k==='_summary_v1') return;
-    if(k.startsWith('ec_pchome_')) return;   // 🔴 PChome 有自己的同步鈕（pchome-sync-btn / pchomePendingKeys）→ 不計入全域鈕（global-sync-btn），否則 PChome 待推會點亮 momo/蝦皮 的鈕（跨通路洩漏）
-    n++;
-  });
-  // ⚠ PChome 待推【刻意不計入本函式】：PChome 用自有鈕與自有計數（pchomePendingKeys，讀 pchomeDirtyGet），
-  //   跨重整靠那份持久 dirty 撐亮暗、與本全域計數各自獨立。字面等值 startsWith('ec_pchome_') 排除、不影響其他平台。
+  _pendingSyncKeys.forEach(k=>{ const o=_pendingKeyOwner(k); if(o==='shopee') n++; else if(o==='unknown'){ _pendingWarnUnknown(k); n++; } });
   return n;
 }
-window.__profitPendingCount = _realPendingCount;
+// 「有沒有任何通路還有沒同步的東西」：給離開淨利表的未同步警告與側欄圓點用（各通路合計；不是任何一顆鈕的數字）。
+//   PChome 的待推靠持久 dirty 註冊表（pchomePendingKeys）撐跨重整，這裡併進來；其餘通路讀 _pendingSyncKeys。
+function _allPendingCount(){
+  const seen=new Set();
+  _pendingSyncKeys.forEach(k=>{ const o=_pendingKeyOwner(k); if(o==='marker') return; if(o==='unknown') _pendingWarnUnknown(k); seen.add(k); });
+  try{ if(typeof pchomePendingKeys==='function') pchomePendingKeys().forEach(k=>seen.add(k)); }catch(e){}
+  return seen.size;
+}
+window.__profitPendingCount = _allPendingCount;   // 離開頁面警告／側欄圓點＝各通路合計（含 PChome）；蝦皮全域鈕用 _realPendingCount（只數蝦皮）
 // bounce-back 守衛（給 firebase.js 的 app/profit 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
 //   本機有未同步變更（pending）或剛存過 → 雲端快照不覆蓋 _profitMem，保住本機版本。
 //   對照組：MOMO 已有同型別的 __momoShouldSkipCloudOverwrite（本檔搜得到），這是蝦皮淨利表缺的那一份。
@@ -21110,7 +21126,7 @@ function _momoSyncPendingCount(){
   const _repMap=_REPORT_DIRTY_GATE?_reportDirtyRead().map:null;
   const _repIn=k=>Object.prototype.hasOwnProperty.call(_repMap,k);
   // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
-  _pendingSyncKeys.forEach(k=>{ if(k.startsWith('__shop__|'))return; if(k==='_summary_v1')return; if(k.startsWith('ec_pchome_'))return; if(_REPORT_DIRTY_GATE&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')&&!_repIn(k)&&!_reportDirtyLocalFail.has(k))return; keys.add(k); });   // 🔴 PChome 有自己的同步鈕→不計入 momo 鈕（否則 PChome 待推點亮 momo 鈕、跨通路洩漏）
+  _pendingSyncKeys.forEach(k=>{ const _o=_pendingKeyOwner(k); if(_o!=='momo'&&_o!=='shopee')return; if(_REPORT_DIRTY_GATE&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')&&!_repIn(k)&&!_reportDirtyLocalFail.has(k))return; keys.add(k); });   // 白名單：只數 momo 自己的 key（＋蝦皮族 ec|／ec_notes|／ec_split|：momo 的同步會一併推它們，與下面 localStorage 那段同一批）。PChome／酷澎有自己的鈕，不洩漏進來
   // ec_notes dirty 註冊表：迴圈外讀一次。三種狀態的判準與 _notesIsDirty（本檔搜 `function _notesIsDirty`）逐條對齊：
   //   raw===null      註冊表不存在＝從沒人編輯過的正常空狀態 → 都不算（集合空）
   //   非陣列 / throw  內容損毀或 localStorage 被擋 → notesDirtyAll=true（全算進去、鈕亮）
