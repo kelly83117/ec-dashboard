@@ -13686,31 +13686,49 @@ function _pchomeKpiCompute(month,raw,prods){
   const pBy={},pnP={};
   (prods||[]).forEach(p=>{const cd=String(p.料號||'').trim();if(!cd)return;pBy[cd]=p;
     (Array.isArray(p.商品編號)?p.商品編號:[p.商品編號]).forEach(pn=>{pn=String(pn||'').trim();if(pn&&!pnP[pn])pnP[pn]=cd;});});
-  const orders=new Set(),ships=new Set(),pn0={},q={},amt={};let gross=0,s0Amt=0;
-  s0.forEach(r=>{
-    const on=String(r['訂單編號-序號']||'').trim();if(on){const i=on.lastIndexOf('-');orders.add(i>0?on.slice(0,i):on);}
-    const sh=String(r['出貨單號']||'').trim();if(sh)ships.add(sh);
-    const cd=String(r['廠商料號']||'').trim(),pn=String(r['商品編號']||'').trim(),n=Number(r['數量'])||0,a=Number(r['應付金額'])||0;
-    s0Amt+=a;if(pn&&cd&&!pn0[pn])pn0[pn]=cd;if(!cd)return;
-    gross+=n;q[cd]=(q[cd]||0)+n;amt[cd]=(amt[cd]||0)+a;
-  });
-  let retAmt=0,retQty=0;const retUn=[];
-  s2.forEach(r=>{const a=Number(r['應付金額'])||0,n=Number(r['數量'])||0;if(!a&&!n)return;retAmt+=a;retQty+=n;
-    const pn=String(r['商品編號']||'').trim(),cd=pn0[pn]||pnP[pn]||'';
-    if(cd){q[cd]=(q[cd]||0)-n;amt[cd]=(amt[cd]||0)-a;}else retUn.push({pn:pn||'（空白）',qty:n,amt:a});});
-  let cost=0;const missing=[];
-  Object.keys(q).forEach(cd=>{const p=pBy[cd],u=(p&&p.cost!=null&&p.cost!=='')?Number(p.cost):null;
-    if(u==null||!Number.isFinite(u)){if(q[cd]||amt[cd])missing.push({code:cd,qty:q[cd],amt:amt[cd]||0});return;}
-    cost+=u*q[cd];});
+  // 一個賣場（轉單／寄倉）的明細彙總：訂單貨款列＋退貨列 → 訂單數、數量、淨數量、商品成本（缺成本另列）、含稅金額。兩賣場共用，只差讀哪幾段。
+  const agg=(rows0,retRows)=>{
+    const orders=new Set(),ships=new Set(),pn0={},q={},amt={};let gross=0,s0Amt=0;
+    rows0.forEach(r=>{
+      const on=String(r['訂單編號-序號']||'').trim();if(on){const i=on.lastIndexOf('-');orders.add(i>0?on.slice(0,i):on);}
+      const sh=String(r['出貨單號']||'').trim();if(sh)ships.add(sh);
+      const cd=String(r['廠商料號']||'').trim(),pn=String(r['商品編號']||'').trim(),n=Number(r['數量'])||0,a=Number(r['應付金額'])||0;
+      s0Amt+=a;if(pn&&cd&&!pn0[pn])pn0[pn]=cd;if(!cd)return;
+      gross+=n;q[cd]=(q[cd]||0)+n;amt[cd]=(amt[cd]||0)+a;
+    });
+    let retAmt=0,retQty=0;const retUn=[];
+    retRows.forEach(r=>{const a=Number(r['應付金額'])||0,n=Number(r['數量'])||0;if(!a&&!n)return;retAmt+=a;retQty+=n;
+      const pn=String(r['商品編號']||'').trim(),cd=pn0[pn]||pnP[pn]||'';
+      if(cd){q[cd]=(q[cd]||0)-n;amt[cd]=(amt[cd]||0)-a;}else retUn.push({pn:pn||'（空白）',qty:n,amt:a});});
+    let cost=0;const missing=[];
+    Object.keys(q).forEach(cd=>{const p=pBy[cd],u=(p&&p.cost!=null&&p.cost!=='')?Number(p.cost):null;
+      if(u==null||!Number.isFinite(u)){if(q[cd]||amt[cd])missing.push({code:cd,qty:q[cd],amt:amt[cd]||0});return;}
+      cost+=u*q[cd];});
+    return{orders,ships,gross,s0Amt,retAmt,retQty,retUn,cost,missing,missAmt:missing.reduce((t,x)=>t+x.amt,0)};
+  };
+  const segRows=names=>{let a=[];e.segments.forEach(x=>{if(names.indexOf(nm(x))>=0)a=a.concat(x.rows||[]);});return a;};
+  const tn=agg(s0,s2);
+  // 寄倉（2026-11-16）：只讀寄倉段（訂單貨款明細 - 寄倉訂單；退貨＝寄倉訂單＋寄倉客退商品）；寄倉段都沒資料＝has:false，轉單結果與加寄倉前逐字相同
+  const s0c=(seg('訂單貨款明細 - 寄倉訂單')||{}).rows||[];
+  const retC=segRows(['退貨貨款明細 - 寄倉訂單','退貨貨款明細 - 寄倉客退商品(退回廠商)']);
+  const cn=agg(s0c,retC);
+  const consFeeSpecific=e.segments.filter(x=>/寄倉/.test(nm(x))&&pchomeIsFeeSeg(x)).reduce((t,x)=>t+(Number(x.總額)||0),0);   // 費用段名稱含「寄倉」（分攤運費／進貨退出運費／分攤安裝費）→ 整筆歸寄倉
+  const consHas=s0c.length>0||retC.length>0||Math.abs(consFeeSpecific)>0.005;
   const A=Number(st.A)||0,B=Number(st.B)||0,C=Number(st.C)||0,D=Number(st.D)||0;
+  const revT=tn.s0Amt-tn.retAmt,revC=cn.s0Amt-cn.retAmt,consRev=consHas?revC:0;
+  const feeAll=B+C+D,restFee=feeAll-consFeeSpecific,denomRev=Math.max(revT,0)+Math.max(revC,0);
+  const consShare=(consHas&&denomRev>0.5)?Math.max(revC,0)/denomRev:0;   // 同淨利表整戶費用規則：按淨營收比例分；兩邊都沒營收→全歸轉單
+  const consFee=consHas?(consFeeSpecific+restFee*consShare):0;
   const notes=[];
-  if(Math.abs(A-(s0Amt-retAmt))>1)notes.push('對帳單 (A) '+fmtN(A)+' 和對帳明細（訂單貨款 '+fmtN(s0Amt)+' − 退貨 '+fmtN(retAmt)+'）差 '+fmtN(A-(s0Amt-retAmt))+'：營收以對帳單為準；成本／訂單數用對帳明細（重傳對帳明細後 (A) 沒更新也會這樣）');
-  const cons=e.segments.filter(x=>/寄倉/.test(nm(x))&&((x.rows||[]).length||Number(x.總額)));
-  if(cons.length)notes.push('寄倉段有資料（'+cons.map(nm).join('、')+'）：營收、平台費在對帳單裡有算，訂單數／成本只算一般轉單');
-  if(retUn.length)notes.push('退貨對不到料號 '+retUn.length+' 筆（'+retUn.map(x=>x.pn).join('、')+'）：沒從成本扣');
-  return{ok:true,month,qty:orders.size,rev:A,cost,fee:B+C+D,tax:A*5/105,material:PCHOME_PACKAGING_COST*orders.size,
-    detail:{lines:s0.length,ships:ships.size,gross,netQty:gross-retQty,s0Amt,retAmt,retQty,A,B,C,D,missing,
-      missAmt:missing.reduce((t,x)=>t+x.amt,0),exportTime:e.匯出時間||'',period:e.期間||''},notes};
+  if(Math.abs(A-(revT+(consHas?revC:0)))>1)notes.push('對帳單 (A) '+fmtN(A)+' 和對帳明細（'+(consHas?'轉單＋寄倉 ':'')+'訂單貨款 '+fmtN(tn.s0Amt+(consHas?cn.s0Amt:0))+' − 退貨 '+fmtN(tn.retAmt+(consHas?cn.retAmt:0))+'）差 '+fmtN(A-(revT+(consHas?revC:0)))+'：營收以對帳單為準；成本／訂單數用對帳明細（重傳對帳明細後 (A) 沒更新也會這樣）');
+  if(consHas)notes.push('寄倉有資料：寄倉營收、訂單數、成本取寄倉段明細；寄倉平台費＝寄倉專屬費用段 '+fmtN(consFeeSpecific)+' ＋ 其餘費用 '+fmtN(restFee)+' × 營收比例 '+(consShare*100).toFixed(1)+'%（估算，淨利表的罰金／行銷／退貨物流會逐筆跟訂單歸屬、可能略有出入）；轉單＝整戶扣掉寄倉');
+  if(tn.retUn.length)notes.push('退貨對不到料號 '+tn.retUn.length+' 筆（'+tn.retUn.map(x=>x.pn).join('、')+'）：沒從成本扣');
+  if(consHas&&cn.retUn.length)notes.push('寄倉退貨對不到料號 '+cn.retUn.length+' 筆（'+cn.retUn.map(x=>x.pn).join('、')+'）：沒從寄倉成本扣');
+  return{ok:true,month,qty:tn.orders.size,rev:A-consRev,cost:tn.cost,fee:feeAll-consFee,tax:(A-consRev)*5/105,material:PCHOME_PACKAGING_COST*tn.orders.size,
+    consign:{has:consHas,qty:cn.orders.size,rev:revC,cost:cn.cost,fee:consFee,
+      detail:{lines:s0c.length,gross:cn.gross,netQty:cn.gross-cn.retQty,retQty:cn.retQty,s0Amt:cn.s0Amt,retAmt:cn.retAmt,missing:cn.missing,missAmt:cn.missAmt,feeSpecific:consFeeSpecific,feeRest:restFee,share:consShare}},
+    detail:{lines:s0.length,ships:tn.ships.size,gross:tn.gross,netQty:tn.gross-tn.retQty,s0Amt:tn.s0Amt,retAmt:tn.retAmt,retQty:tn.retQty,A,B,C,D,missing:tn.missing,
+      missAmt:tn.missAmt,exportTime:e.匯出時間||'',period:e.期間||''},notes};
 }
 // 對帳資料／商品主檔從雲端更新 → KPI 畫面在的話重畫（帶入鈕、等對帳、來源已更新提示跟著變）
 function _kpiPchomeRefreshIfVisible(){if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();}
@@ -13735,6 +13753,11 @@ function _kpiPchomeAutoPlan(month,row){
     fee:'對帳單 (B) '+m0(d.B)+' ＋ (C) '+m0(d.C)+' ＋ (D) '+m0(d.D)+'（含稅）',
     material:'訂單數 '+fmtN(pr.qty)+' × $'+PCHOME_PACKAGING_COST+'（一筆訂單一組包材；退貨不回沖）',
   }:{};
+  const hasCons=!!(pr.ok&&pr.consign&&pr.consign.has);
+  if(hasCons){   // 寄倉有資料：轉單的營收／平台費已扣掉寄倉份（見 _pchomeKpiCompute）
+    comp.rev='對帳單 (A)（含稅）'+m0(d.A)+' − 寄倉營收 '+m0(pr.consign.rev)+'（轉單訂單貨款 '+m0(d.s0Amt)+' − 退貨 '+m0(d.retAmt)+'）';
+    comp.fee='(B) '+m0(d.B)+' ＋ (C) '+m0(d.C)+' ＋ (D) '+m0(d.D)+' − 寄倉平台費 '+m0(pr.consign.fee)+'（含稅）';
+  }
   KPI_PCHOME_AUTO_FIELDS.forEach(f=>{
     const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['pchome',shop,f],cur:sd[f]};
     if(!pr.ok)Object.assign(it,{status:'wait',note:pr.why});
@@ -13742,6 +13765,19 @@ function _kpiPchomeAutoPlan(month,row){
       hintNote:(f==='cost'&&d.missing.length)?'缺成本 '+d.missing.length+' 個原廠編號（見上方），這些件數沒算進成本':null});
     push(it);
   });
+  if(hasCons){   // 寄倉列（'PChome-寄倉'）：寄倉段沒資料就不產生任何項目、不動寄倉格
+    const cs='PChome-寄倉',cd=pr.consign,dc=cd.detail,sdc=((row.pchome||{})[cs])||{};
+    const compC={
+      qty:'寄倉訂單貨款 '+dc.lines+' 列 → 不重複訂單編號',
+      rev:'寄倉訂單貨款 '+m0(dc.s0Amt)+' − 退貨 '+m0(dc.retAmt)+'（含稅）',
+      cost:'Σ 商品主檔成本 × 淨數量（'+fmtN(dc.gross)+' − 退貨 '+fmtN(dc.retQty)+' ＝ '+fmtN(dc.netQty)+' 件）',
+      fee:'寄倉專屬費用段 '+m0(dc.feeSpecific)+' ＋ 其餘費用 '+m0(dc.feeRest)+' × 營收比例 '+(dc.share*100).toFixed(1)+'%（含稅；估算）',
+    };
+    KPI_PCHOME_AUTO_FIELDS.forEach(f=>{
+      push({shop:cs,ms:cs,field:f,label:group.manual.find(x=>x.k===f).l,segs:['pchome',cs,f],cur:sdc[f],status:'write',val:Math.round(cd[f]),src,comp:compC[f],
+        hintNote:(f==='cost'&&dc.missing.length)?'寄倉缺成本 '+dc.missing.length+' 個原廠編號，這些件數沒算進寄倉成本':(f==='fee'?'寄倉平台費是估算（罰金／行銷／退貨物流不逐筆歸屬）':null)});
+    });
+  }
   let topHtml='';
   if(d&&d.missing.length)topHtml+=`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ 缺成本 ${d.missing.length} 個原廠編號（影響營收 ${m0(d.missAmt)}，含稅）：這些件數沒算進商品成本，照樣可以帶入；到 PChome 商品主檔補成本後重新帶入才會算</div>
     <table class="km-au-warn-tbl"><thead><tr><th>原廠編號</th><th class="km-n">淨數量</th><th class="km-n">影響營收</th></tr></thead><tbody>${d.missing.map(w=>`<tr><td>${_kpiEscAttr(w.code)}</td><td class="km-n">${fmtN(w.qty)}</td><td class="km-n">${m0(w.amt)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -13751,7 +13787,7 @@ function _kpiPchomeAutoPlan(month,row){
 }
 // 已帶入過的月份，對帳資料／商品主檔之後有更新 → 按鈕旁提示（不自動改）
 function _kpiPchomeAutoHint(month,row){
-  if(!KPI_PCHOME_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['pchome','PChome',f]))))return null;
+  if(!['PChome','PChome-寄倉'].some(sh=>KPI_PCHOME_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['pchome',sh,f])))))return null;
   try{return _kpiPchomeAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] PChome 帶入提示計算失敗',e);return null;}
 }
 const _kpiPchomeSnapLocal=new Map();
