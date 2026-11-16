@@ -1790,11 +1790,11 @@ try {
   //   profit.js 載入時從緩存 drain（見 profit.js `__pchomeOrdersCloudLatest`），保證換機/清快取後初次讀回不漏。
   //   沒定義套用函式（optlog/history 表單未上線）＝只緩存、不套用，infra 先就位。
   try {
-    window.__cloudPchomeOrders.subscribe(data => { window.__pchomeOrdersCloudLatest = data; if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
-    window.__cloudPchomeOptlog.subscribe(data => { window.__pchomeOptlogCloudLatest = data; if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
-    window.__cloudPchomeHistory.subscribe(data => { window.__pchomeHistoryCloudLatest = data; if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
-    window.__cloudPchomeProducts.subscribe(data => { window.__pchomeProductsCloudLatest = data; if (typeof window.__pchomeApplyCloudProducts === 'function') window.__pchomeApplyCloudProducts(data); });
-    window.__cloudPchomeRecon.subscribe(data => { window.__pchomeReconCloudLatest = data; if (typeof window.__pchomeApplyCloudRecon === 'function') window.__pchomeApplyCloudRecon(data); });
+    window.__cloudSubscribeCached(window.__cloudPchomeOrders, '__pchomeOrdersCloudLatest', '__pchomeApplyCloudOrders');   // 樣板見 app.js __cloudSubscribeCached
+    window.__cloudSubscribeCached(window.__cloudPchomeOptlog, '__pchomeOptlogCloudLatest', '__pchomeApplyCloudOptlog');
+    window.__cloudSubscribeCached(window.__cloudPchomeHistory, '__pchomeHistoryCloudLatest', '__pchomeApplyCloudHistory');
+    window.__cloudSubscribeCached(window.__cloudPchomeProducts, '__pchomeProductsCloudLatest', '__pchomeApplyCloudProducts');
+    window.__cloudSubscribeCached(window.__cloudPchomeRecon, '__pchomeReconCloudLatest', '__pchomeApplyCloudRecon');
   } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
 
   // ============== 博客來對帳資料 app/books_recon（2026-11-04；KPI 博客來「從報表帶入」用，之後淨利表博客來沿用） ==============
@@ -1812,7 +1812,7 @@ try {
     writePaths: (pairs) => kpiWriteTo(booksReconRef, pairs).then(() => ({ ok: true })),
   };
   try {
-    window.__cloudBooksRecon.subscribe(data => { window.__booksReconCloudLatest = data; if (typeof window.__booksApplyCloudRecon === 'function') window.__booksApplyCloudRecon(data); },
+    window.__cloudSubscribeCached(window.__cloudBooksRecon, '__booksReconCloudLatest', '__booksApplyCloudRecon',
       e => console.error('[books_recon] 訂閱失敗：', e));
   } catch (e) { console.error('[books_recon] 訂閱失敗：', e); }
 
@@ -1829,7 +1829,7 @@ try {
     writePaths: (pairs) => kpiWriteTo(fridayReconRef, pairs).then(() => ({ ok: true })),
   };
   try {
-    window.__cloudFridayRecon.subscribe(data => { window.__fridayReconCloudLatest = data; if (typeof window.__fridayApplyCloudRecon === 'function') window.__fridayApplyCloudRecon(data); },
+    window.__cloudSubscribeCached(window.__cloudFridayRecon, '__fridayReconCloudLatest', '__fridayApplyCloudRecon',
       e => console.error('[friday_recon] 訂閱失敗：', e));
   } catch (e) { console.error('[friday_recon] 訂閱失敗：', e); }
 
