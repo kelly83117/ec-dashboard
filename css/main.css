@@ -684,8 +684,10 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .summary-card-delta.up   { background: var(--danger-soft);  color: var(--danger); }
-  .summary-card-delta.down { background: var(--success-soft); color: var(--success); }
+  /* 上漲＝綠、下跌＝紅（A-310「綠＝好、紅＝不好」，#476）。
+     與同一頁「需要留意」的 .alert-chip.is-drop（營收↓紅）一致，整頁同一套語意。 */
+  .summary-card-delta.up   { background: var(--success-soft); color: var(--success); }
+  .summary-card-delta.down { background: var(--danger-soft);  color: var(--danger); }
   /* flat = 沒有比較基準（前期為 0），不顯示假的 0.0% */
   .summary-card-delta.flat { background: var(--bg); color: var(--text-muted); }
   .summary-card-compare {
@@ -1008,8 +1010,9 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .rank-delta.up   { color: var(--danger); }
-  .rank-delta.down { color: var(--success); }
+  /* 上漲＝綠、下跌＝紅（A-310，#476）。同一條通路的營收↓在右側「需要留意」也是紅的，兩邊對得起來。 */
+  .rank-delta.up   { color: var(--success); }
+  .rank-delta.down { color: var(--danger); }
   .rank-delta.flat { color: var(--text-muted); }
   .rank-empty {
     padding: 28px 12px;
@@ -1245,7 +1248,7 @@
 
   /* ------------- 儀表板首頁 · 歷年營收比較（年度總表） -------------
      外框 / 標題比照 .rank-card / .pie-card。markup 在 dashboard.js revHistSectionHtml()，不帶任何 inline style。
-     成長率：成長紅（--danger）、衰退綠（--success）、±0% / 新 / 累計中 灰。
+     成長率：成長綠（--success）、衰退紅（--danger）（A-310）、±0% / 新 / 累計中 灰。
      窄螢幕：.rev-hist-scroll 左右捲動，第一欄（月份）sticky 固定，背景要實色才蓋得住捲過去的格子。 */
   .rev-hist-card {
     background: var(--surface);
@@ -1413,8 +1416,9 @@
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
   }
-  .rev-hist-g.is-up { color: var(--danger); }
-  .rev-hist-g.is-down { color: var(--success); }
+  /* 成長＝綠、衰退＝紅（A-310，#476） */
+  .rev-hist-g.is-up { color: var(--success); }
+  .rev-hist-g.is-down { color: var(--danger); }
   .rev-hist-share {
     color: var(--text-muted);
     font-weight: 600;

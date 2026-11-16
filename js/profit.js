@@ -17386,7 +17386,7 @@ function coupangSumShopCardHTML(shop){
     </div>
     <div style="display:flex;gap:20px;margin-bottom:12px">
       <div><div style="font-size:12px;color:#9ca3af">營收</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rev">—</div></div>
-      <div><div style="font-size:12px;color:#9ca3af">純利</div><div style="font-size:17px;font-weight:700;color:#10b981" id="cup-sum-${shop}-profit">—</div></div>
+      <div><div style="font-size:12px;color:#9ca3af">純利</div><div class="cup-sum-profit-v" style="font-size:17px;font-weight:700" id="cup-sum-${shop}-profit">—</div></div>
       <div><div style="font-size:12px;color:#9ca3af">純利率</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rate">—</div></div>
     </div>
     <div style="height:8px;border-radius:4px;background:#f3f4f6" id="cup-sum-${shop}-bar"></div>
@@ -17419,7 +17419,7 @@ function coupangSummaryHTML(){
       </div>
       <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
         <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總純利</div>
-        <div style="font-size:22px;font-weight:700;color:#10b981" id="cup-sum-kpi-profit">—</div>
+        <div class="cup-sum-profit-v" style="font-size:22px;font-weight:700" id="cup-sum-kpi-profit">—</div>
       </div>
       <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
         <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">純利率</div>
@@ -17560,16 +17560,21 @@ function syncCoupangSummaryFromKpi(){
   total.rate=total.rev>0?total.pure/total.rev*100:null;
 
   const setTxt=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  // 純利負數＝紅、正數＝深色（A-310，#476；同 .mm-kpi-v.mm-neg 那一套）。
+  //   每次填值都要 toggle：切月份只重填值、不重建 HTML，不 toggle 的話紅色會留到下一個月。
+  const setNeg=(id,neg)=>{const el=document.getElementById(id);if(el)el.classList.toggle('mm-neg',!!neg);};
   setTxt('cup-sum-kpi-orders',total.qty?fmtN(total.qty):'—');
   setTxt('cup-sum-kpi-rev',total.rev?'NT$'+fmtN(Math.round(total.rev)):'—');
   setTxt('cup-sum-kpi-profit',total.rev||total.pure?'NT$'+fmtN(Math.round(total.pure)):'—');
   setTxt('cup-sum-kpi-rate',total.rate!==null?total.rate.toFixed(2)+'%':'—');
+  setNeg('cup-sum-kpi-profit',total.pure<0);
 
   const fillCard=(shopLabel,d)=>{
     setTxt(`cup-sum-${shopLabel}-orders`,(d.qty?fmtN(d.qty):'0')+' 筆訂單');
     setTxt(`cup-sum-${shopLabel}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
     setTxt(`cup-sum-${shopLabel}-profit`,d.rev||d.pure?fmtN(Math.round(d.pure)):'—');
     setTxt(`cup-sum-${shopLabel}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
+    setNeg(`cup-sum-${shopLabel}-profit`,d.pure<0);
   };
   fillCard('麻吉',majhi);
   fillCard('露營館',camp);
@@ -23525,7 +23530,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     : '—';
   const cards=[
     {label:'總營收', info:'該期所有商品營收合計。（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
-    {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
+    {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), valCls:(cur.profit<0?'mm-neg':''), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},   // 負數＝紅（A-310，#476）
     {label:'加權淨利率', info:_netMarginTip, val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「本期有銷售的商品數 ÷（目前上架 ∪ 本期有銷售）」。分子＝本期有賣出的商品（不論現在上下架）；分母＝目前上架、再加上「本期有賣、但現已下架」的商品——後者若只算「目前上架」會被漏掉（賣過的沒被計進動銷）。長期下架又沒賣的不進分母。分子必為分母子集，不會超過 100%。', val:rateVal, d:rateD},
@@ -23535,7 +23540,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   // ⚠ 未結算估算期別：數字照常顯示（一般樣式、無 ~/估/斜體）＝比照甲配未對帳月；估算僅由頂端橫幅標示。
   const cardHTML=cards.map(c=>`<div class="mm-kpi">
     <div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div>
-    <div class="mm-kpi-v"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div>
+    <div class="mm-kpi-v${c.valCls?' '+c.valCls:''}"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div>
     <div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div>
   </div>`).join('');
   // 缺成本警示（可點 → 跳批次維護 + 自動套「缺成本」篩選 + 開顯示已下架，確保兩邊看到同一批）
@@ -27889,7 +27894,7 @@ function momoRenderSummary(){
   const _dMargin = (_incomplete||_aggCross)? _mute : {txt:marginDelta,color:'#9ca3af'};
   const cards=[
     {label:'總營收', val:momoMoney(T.rev), d:_dRev},
-    {label:'總淨利', val:momoMoney(T.profit), d:_dProfit},
+    {label:'總淨利', val:momoMoney(T.profit), valCls:(T.profit<0?'mm-neg':''), d:_dProfit},   // 負數＝紅（A-310，#476）
     {label:'加權淨利率', info:'加權淨利率 ＝ 總淨利 ÷ 總營收（甲配＋乙配＋MO+ 合計）。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（各賣場依實際帳單、口徑不同）。', val:momoPct(T.margin), valColor:marginColor(T.margin), d:_dMargin},
     {label:'總銷量', val:Math.round(T.qty).toLocaleString()+' 件', d:_dQty},
     // 動銷率已移除出 KPI 卡（各賣場口徑、合計意義不大）；動銷率改放「賣場比較」圖、各賣場各自算。
@@ -27897,7 +27902,7 @@ function momoRenderSummary(){
   const _kpiNote = _incomplete
     ? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 當月未完（第 ${_incomplete.day}/${_incomplete.total} 天）：KPI 為累計至今、<b>未產出成長／衰退結論</b>（無同期間可比）。</div>`
     : (_aggCross ? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 本期跨乙配口徑變更線：<b>淨利／淨利率不與上期對比</b>（口徑不同、避免把口徑跳動誤讀為經營變化）。</div>` : '');
-  const cardHTML=cards.map(c=>`<div class="mm-kpi"><div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div><div class="mm-kpi-v"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div><div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div></div>`).join('');
+  const cardHTML=cards.map(c=>`<div class="mm-kpi"><div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div><div class="mm-kpi-v${c.valCls?' '+c.valCls:''}"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div><div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div></div>`).join('');
   const moPlusNote = moPlusEmpty.length? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 合計目前只含<b>甲配＋乙配</b>；<b>${moPlusEmpty.join('、')} 尚無資料</b>（階段三待做）未計入。有 MO+ 資料後自動納入並標估算。</div>` : '';
   el.innerHTML=`
     <div class="mm-row" style="margin-bottom:12px;align-items:center"><span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoOvSetMonth(this.value)">${monthOpts}</select></span>
@@ -30543,7 +30548,7 @@ function cupProfitTabHTML(shop){
     <div style="margin-bottom:12px"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupSelectMonth('${shop}',this.value)">${monthOpts}</select></span></div>
     <div class="mm-kpis" style="margin-bottom:10px">
       <div class="mm-kpi"><div class="mm-kpi-l">本期營收</div><div class="mm-kpi-v" id="cup-kv-rev-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-rev-cmp-${shop}"></div></div>
-      <div class="mm-kpi"><div class="mm-kpi-l">本期淨利</div><div class="mm-kpi-v" id="cup-kv-net-${shop}" style="color:#10b981">—</div><div class="mm-kpi-d" id="cup-kv-net-cmp-${shop}"></div></div>
+      <div class="mm-kpi"><div class="mm-kpi-l">本期淨利</div><div class="mm-kpi-v" id="cup-kv-net-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-net-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">加權淨利率 <span class="mm-info" title="${_momoEsc(cmpTip)}">?</span></div><div class="mm-kpi-v" id="cup-kv-rate-${shop}" style="color:#6366f1">—</div><div class="mm-kpi-d" id="cup-kv-rate-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">總銷量</div><div class="mm-kpi-v" id="cup-kv-qty-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-qty-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">動銷率 <span class="mm-info" title="動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。">?</span></div><div class="mm-kpi-v" id="cup-kv-st-${shop}" style="color:#9ca3af">—</div><div class="mm-kpi-d" style="color:#9ca3af">待商品同步</div></div>
@@ -30573,6 +30578,9 @@ function cupRenderProfitBody(shop){
   const kpi=cupKpi(rows);
   set('cup-kv-rev-'+shop,momoMoney(kpi.rev));
   set('cup-kv-net-'+shop,momoMoney(kpi.net));
+  // 本期淨利負數＝紅、正數＝深色（A-310，#476；同蝦皮五格 .kv-neg）。每次重繪都要 toggle：
+  //   殼（cupProfitTabHTML）只在切賣場時重建，切月份只跑本體，不 toggle 的話紅色會留在下一個月。
+  { const _netEl=document.getElementById('cup-kv-net-'+shop); if(_netEl) _netEl.classList.toggle('mm-neg', Number(kpi.net)<0); }
   set('cup-kv-rate-'+shop,(kpi.rate!=null?kpi.rate.toFixed(1)+'%':'—'));
   set('cup-kv-qty-'+shop,Math.round(kpi.qty||0).toLocaleString());
   // 較上期
@@ -36140,10 +36148,10 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
   var dxVal=(gate||dxRate==null)?'—':(pchomePct(dxRate)+' <span style="font-size:12px;color:#9ca3af;font-weight:400">('+dxNum+' / '+dxDen+')</span>');
   var wmTip='加權淨利率 ＝ 總淨利 ÷ 總營收（日曆月：營收由訂單明細、固定費為該帳期實際值 1:1）。'+(miss>0?('⚠ 缺成本 '+miss+' 支：營收計入、成本未計 → 偏高。'):'');
   var g=function(v){ return gate?'—':v; };
-  var kc=function(label,info,val,valColor,d,sub){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+(sub?' · '+sub:'')+'</span></div></div>'; };
+  var kc=function(label,info,val,valColor,d,sub,valCls){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v'+(valCls?' '+valCls:'')+'"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+(sub?' · '+sub:'')+'</span></div></div>'; };
   var kpi='<div class="mm-kpis">'
     +kc('總營收','該日曆月所有商品營收合計（訂單明細、未稅）。', g(pchomeMoney(T.營收)), '', kdPct(T.營收, prevT?prevT.營收:null))
-    +kc('總淨利','該日曆月淨利＝營收−成本−費用（固定費 1:1＋逐筆按日期）。（未稅）', g(pchomeMoney(T.淨利)), '', kdPct(T.淨利, prevT?prevT.淨利:null))
+    +kc('總淨利','該日曆月淨利＝營收−成本−費用（固定費 1:1＋逐筆按日期）。（未稅）', g(pchomeMoney(T.淨利)), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, ((!gate&&T.淨利<0)?'mm-neg':''))   // 負數＝紅（A-310，#476）；gate 時值是「—」不上色
     +kc('加權淨利率', wmTip, g((wm==null)?'—':pchomePct(wm)), gate?'#9ca3af':wmColor, wmDelta, '商品 '+((T.營收>0)?pchomePct((T.營收-T.成本-T.費用)/T.營收):'—'))
     +kc('總銷量','', g(pchomeNum(T.銷量)+' 件'), '', kdPct(T.銷量, prevT?prevT.銷量:null))
     +kc('動銷率','本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。', dxVal, '', dxDelta)
@@ -36398,10 +36406,10 @@ function pchomeProfitTabHTML(shop){
   var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};   // pp、中性灰（不分方向，照 momo）
   var dxVal=dxRate!=null?(pchomePct(dxRate)+' <span style="font-size:12px;color:#9ca3af;font-weight:400">('+dxNum+' / '+dxDen+')</span>'):'—';
   var wmTip='加權淨利率 ＝ 總淨利 ÷ 總營收（與總淨利卡同基準、含未分攤費用）。淨利＝營收 − 商品成本 − 平台費用（D 手續費＋罰金＋未分攤簡訊/包材等）。'+(miss>0?('⚠ 缺成本 '+miss+' 支：其營收已計入、成本未計 → 加權淨利率偏高（可能高估）。目前有成本料號涵蓋 '+pchomePct(incl)+' 營收。'):'本期所有料號都有成本、涵蓋 100% 營收。');
-  var kc=function(label,info,val,valColor,d,sub){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+(sub?' · '+sub:'')+'</span></div></div>'; };
+  var kc=function(label,info,val,valColor,d,sub,valCls){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v'+(valCls?' '+valCls:'')+'"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+(sub?' · '+sub:'')+'</span></div></div>'; };
   var kpi='<div class="mm-kpis">'
     +kc('總營收', '該期所有商品營收合計。（未稅）', pchomeMoney(T.營收), '', kdPct(T.營收, prevT?prevT.營收:null))
-    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按件）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null))
+    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按件）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, (T.淨利<0?'mm-neg':''))   // 負數＝紅（A-310，#476）
     +kc('加權淨利率', wmTip, (wm==null)?'—':pchomePct(wm), wmColor, wmDelta, '商品 '+((T.營收>0)?pchomePct((T.營收-T.成本-T.費用)/T.營收):'—'))
     +kc('總銷量', '', pchomeNum(T.銷量)+' 件', '', kdPct(T.銷量, prevT?prevT.銷量:null))
     +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)

@@ -696,6 +696,15 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-ana-h{font-size:13px;font-weight:700;color:#334155;margin-bottom:8px;border-left:3px solid #5b5fcf;padding-left:8px;line-height:1.35;}
 .mm-kpi-l{font-size:11px;color:#9ca3af;font-weight:600;}
 .mm-kpi-v{font-size:18px;font-weight:800;color:#1a1a2e;margin:2px 0 1px;font-variant-numeric:tabular-nums;}
+/* 負數的大數字一律紅（A-310「綠＝好、紅＝不好」，#476）。比照蝦皮五格 .kv-value.kv-neg：
+   正數維持 .mm-kpi-v 原本的深色、不上綠 —— 同一張卡上出現兩種綠會很明顯。
+   ⚠ 只給「本期淨利／總淨利」這種方向性金額用；加權淨利率的門檻色仍走各自的 valColor。 */
+.mm-kpi-v.mm-neg{color:var(--danger);}
+/* 酷澎｜總表的「總純利」與各店「純利」大數字：深色，負數紅（A-310，#476）。
+   這兩處不在 .mm-kpi 版面裡（那一整塊是舊的 inline style），所以另給一個 class；
+   深色沿用同一列「營收／純利率」本來就在用的 #374151，新的紅走 --danger。 */
+.cup-sum-profit-v{color:#374151;}
+.cup-sum-profit-v.mm-neg{color:var(--danger);}
 .mm-kpi-d{font-size:11px;font-weight:600;}
 .mm-kpi-d .base{color:#c7cad1;font-weight:400;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
