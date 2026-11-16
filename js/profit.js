@@ -44,11 +44,15 @@ const _reportCacheDeferred=new Map();   // key → { json, meta:{shop,month,half
 //   比較那段的原句來自 KPI_CMP_HELP 的 ①④⑤；②③ 講的是表格「上期」，不屬於任何一格，留在「ⓘ 比較基準」彈窗。
 //   文字不含雙引號／角括號，可以直接放進 title 屬性；\n 在 title 裡就是換行。
 const _KV_CMP_TIP='較上月同期：跟上個月的同一段期間比\n7 月下半 → 比 6 月下半\n7 月上半 → 比 6 月上半\n整月 → 比上個月整月\n\n有搜尋、篩選或排序的時候\n看整月 → 改成跟『篩選出來的這批商品』上個月的表現比；\n看上半月／下半月 → 比較不顯示，要看比較請先清掉搜尋、篩選和排序。\n\n基期沒有報表的時候也不顯示\n例如通路剛開始經營的第一個月，或那一期沒有產生過報表。';
+// 2026-11 五格版：每格的 ⓘ 最後都加這一行（整格的 title 放上月同期數字，見 setKpis）。
+const _KV_HOVER_TIP='\n\n滑鼠移到格子上可以看上月同期的數字。';
 const _KV_TIP={
-  rev:'目前選的期間、表格目前顯示的商品營收合計。\n\n'+_KV_CMP_TIP,
-  net:'目前選的期間、表格目前顯示的商品純利合計。純利率＝純利 ÷ 營收。\n\n'+_KV_CMP_TIP,
-  ads:'目前選的期間、表格目前顯示的商品廣告費合計。佔營收＝廣告費 ÷ 營收。\n\n'+_KV_CMP_TIP,
-  st:'正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。\n\n較上月：跟上個月整月的動銷率比，差幾個百分點。\n\n為什麼跟下面表格的筆數不一樣？\n動銷率只算「正常販售中」的商品，整個月一件都沒賣的也算在內；下面表格列的是上傳的銷售報表裡有的商品，再加上有廣告費的商品，已下架但在報表裡的也會列。兩邊範圍不同，而且動銷率數的是蝦皮商品 ID、表格數的是商品編號，所以就算選整月，筆數也不會一樣。',
+  rev:'目前選的期間、表格目前顯示的商品營收合計。\n\n'+_KV_CMP_TIP+_KV_HOVER_TIP,
+  gross:'目前選的期間、表格目前顯示的商品毛利合計 ÷ 營收合計。毛利＝莫筆克售價 − 莫筆克成本，還沒扣平台費、廣告費。跟表格的『利潤%』不同：利潤% 已經扣掉平台費。依下單日計算，所以跟通路健檢、KPI 月結（依撥款月）會差一點。\n\n'
+    +_KV_CMP_TIP.replace('整月 → 比上個月整月','整月 → 比上個月整月\n毛利率的變化是差幾個百分點（pp）')+_KV_HOVER_TIP,
+  net:'目前選的期間、表格目前顯示的商品純利合計。純利率＝純利 ÷ 營收。\n\n'+_KV_CMP_TIP+_KV_HOVER_TIP,
+  ads:'目前選的期間、表格目前顯示的商品廣告費合計。佔營收＝廣告費 ÷ 營收。\n\n'+_KV_CMP_TIP+_KV_HOVER_TIP,
+  st:'正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。\n\n較上月：跟上個月整月的動銷率比，差幾個百分點。\n\n為什麼跟下面表格的筆數不一樣？\n動銷率只算「正常販售中」的商品，整個月一件都沒賣的也算在內；下面表格列的是上傳的銷售報表裡有的商品，再加上有廣告費的商品，已下架但在報表裡的也會列。兩邊範圍不同，而且動銷率數的是蝦皮商品 ID、表格數的是商品編號，所以就算選整月，筆數也不會一樣。'+_KV_HOVER_TIP,
 };
 // 🔴 最外層卡片刻意【沒有】overflow:hidden（2026-09-04 移除）：它會把「🏷 標籤」與「☰ 欄位」
 //   這兩個 position:absolute 的面板整個裁掉，沒有捲軸、也沒有任何提示。完整理由與副作用
@@ -123,30 +127,40 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
       </div>
       <div id="header-kpi-block" class="kv-grid">
-        <!-- 三格【共用同一個骨架】，這是本區的核心規則，新增第四格請照抄：
-               第一行 標題
-               第二行 主數字 ＋【具名】比率（kv-*-rate-header）
-               第三行 較上月同期 ±X% ＋ vs 期別 ＋ 金額（kv-*-cmp-header）
-             ⚠ 排版由 .kv-grid 平均分欄（有幾格分幾欄），第三行由 .kv-cmp 換行（vs 那段整段換到下一行）。
-             改版前三格的括號位置各放各的（營收放比較幅度、純利放純利率、廣告費放佔營收比），
-             同一個位置三種語意 —— 老闆 2026-08-18 指出「沒有規則」，這次收斂成上面那三行。
-
-             ⚠ 營收沒有比率，#kv-rev-rate-header 永遠是空的（setKpis 刻意不寫入它）。
-               佔位元素仍必須存在：三格結構一致，日後有人改第二行的樣式才不會只改到兩格。
-               （那一行不會因為 span 是空的就塌掉 —— 行高由 20px 主數字撐著，2026-08-18 實測
-                 三格皆 48.5px。真正需要地板的是第三行，見下方 min-height。）
-             ⚠ 第三行的 min-height:18px 是【實測值】（量 12px 字的行框得 18.0px），不是估的。
-               cmp 取不到時整行是空字串、高度會塌成 0 → 沒有這道地板，三格底部會差一整行。
-             ⚠ 三格的字級、顏色仍是 inline style（既有技術債）；排版部分在 css/profit.css 的 .kv-row / .kv-grid / .kv-main / .kv-cmp。 -->
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收 <span class="mm-info" title="${_KV_TIP.rev}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利 <span class="mm-info" title="${_KV_TIP.net}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費 <span class="mm-info" title="${_KV_TIP.ads}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <!-- 動銷率格（蝦皮四家，_stCellSync 填）。不是頂端三格的第四格：只讀整月商品表現，不進 built、不進 lsSave、不進推送。
-             跟三格不同，樣式走 css/profit.css 的 .kv-st-*。 -->
-        <div id="kv-st-cell" class="kv-st" hidden>
-          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span> <span class="mm-info" title="${_KV_TIP.st}">?</span></div>
-          <div class="kv-st-main"><div id="kv-st-value" class="kv-st-value">…</div><span id="kv-st-note" class="kv-st-rate"></span></div>
-          <div id="kv-st-cmp" class="kv-st-cmp"></div>
+        <!-- 五格【共用同一個骨架】（2026-11 改版：營收、毛利率、廣告費、純利、動銷率），新增格子請照抄：
+               .kv-cell（整格；title＝上月同期數字，由 setKpis／_stCellSync 寫）
+                 .kv-hd    第一行 標題 ＋ ⓘ（ⓘ 自己的 title 是說明，滑鼠在 ⓘ 上看說明、在格子其他地方看上月）
+                 .kv-value 第二行 只放大數字（深色，負數加 .kv-neg 變紅），比率不再擠進這一行
+                 .kv-foot  第三行 變化小標籤（.kv-chip）＋ 一行小字（.kv-sub）
+             ⚠ 第三行一律不換行（超出用 … 截斷、完整文字在該元素 title），五格才會一樣高。
+             ⚠ 排版、字級、顏色全部在 css/profit.css 的 .kv-*，這裡不留 inline style。
+             ⚠ 營收沒有小字，#kv-rev-rate-header 永遠是空的（setKpis 刻意不寫入它），佔位元素仍保留，五格結構一致。
+             ⚠ id 沿用改版前（kv-rev-header、kv-net-cmp-header…、kv-st-*），setKpis／_stCellSync 以外沒有人讀這些 id。 -->
+        <div id="kv-rev-cell" class="kv-cell">
+          <div class="kv-hd"><span class="kv-title">營收</span> <span class="mm-info" title="${_KV_TIP.rev}">?</span></div>
+          <div id="kv-rev-header" class="kv-value">—</div>
+          <div class="kv-foot"><span id="kv-rev-cmp-header" class="kv-chip-slot"></span><span id="kv-rev-rate-header" class="kv-sub"></span></div>
+        </div>
+        <div id="kv-gross-cell" class="kv-cell">
+          <div class="kv-hd"><span class="kv-title">毛利率</span> <span class="mm-info" title="${_KV_TIP.gross}">?</span></div>
+          <div id="kv-gross-header" class="kv-value">—</div>
+          <div class="kv-foot"><span id="kv-gross-cmp-header" class="kv-chip-slot"></span><span id="kv-gross-rate-header" class="kv-sub"></span></div>
+        </div>
+        <div id="kv-ads-cell" class="kv-cell">
+          <div class="kv-hd"><span class="kv-title">廣告費</span> <span class="mm-info" title="${_KV_TIP.ads}">?</span></div>
+          <div id="kv-ads-header" class="kv-value">—</div>
+          <div class="kv-foot"><span id="kv-ads-cmp-header" class="kv-chip-slot"></span><span id="kv-ads-rate-header" class="kv-sub"></span></div>
+        </div>
+        <div id="kv-net-cell" class="kv-cell">
+          <div class="kv-hd"><span class="kv-title">純利</span> <span class="mm-info" title="${_KV_TIP.net}">?</span></div>
+          <div id="kv-net-header" class="kv-value">—</div>
+          <div class="kv-foot"><span id="kv-net-cmp-header" class="kv-chip-slot"></span><span id="kv-net-rate-header" class="kv-sub"></span></div>
+        </div>
+        <!-- 動銷率格（蝦皮四家，_stCellSync 填；測試通路 hidden，變四格）。只讀整月商品表現，不進 built、不進 lsSave、不進推送。 -->
+        <div id="kv-st-cell" class="kv-cell" hidden>
+          <div class="kv-hd"><span id="kv-st-title" class="kv-title">動銷率</span> <span class="mm-info" title="${_KV_TIP.st}">?</span></div>
+          <div id="kv-st-value" class="kv-value">…</div>
+          <div class="kv-foot"><span id="kv-st-cmp" class="kv-chip-slot"></span><span id="kv-st-note" class="kv-sub"></span></div>
         </div>
       </div>
     </div>
@@ -32354,11 +32368,13 @@ function _stPrevYm(ym){
 // 比率用畫面上的 0.1% 比，較上月才會跟兩個月顯示的數字對得起來
 const _stPct10=e=>Math.round(e.soldNormal/e.normal*1000);
 // 這一格要顯示什麼（純函式）。month＝'YYYY/MM'、half＝'full'|'first'|'second'；cur、prev＝_stRead 的結果。
+//   2026-11 五格版：回 {title, value, note, chip, cellTitle}。chip＝較上月的小標籤（_kvChip，pp），cellTitle＝整格的 title（上月數字或上月狀態）。
+//   跟改版前的判斷完全相同，只換輸出：改版前第三行的「較上月 …／較上月 —」與「vs 9月 93.2%」改成 chip 與 cellTitle。
 function _stCellView(month,half,cur,prev,prevYm){
   const mm=Number(month.slice(5,7));
   const title=half==='first'||half==='second'?`動銷率（${mm}月整月）`:'動銷率';
-  const out={title,value:'—',note:'',cmp:'',vs:'',dir:''};
-  // 本月沒有數字：第 2 行放狀態，第 3 行留空（沒有東西可比）
+  const out={title,value:'—',note:'',chip:'',cellTitle:''};
+  // 本月沒有數字：小字放狀態，沒有標籤（沒有東西可比）
   if(cur.state==='loading'){out.value='…';return out;}
   if(cur.state==='failed'){out.note='讀取失敗';return out;}
   if(cur.state==='none'){out.note=`尚未上傳 ${mm} 月整月商品表現（洞察表）`;return out;}
@@ -32366,15 +32382,14 @@ function _stCellView(month,half,cur,prev,prevYm){
   const a=_stPct10(cur);
   out.value=(a/10).toFixed(1)+'%';
   out.note=`${cur.soldNormal} / ${cur.normal} 有賣出`;
-  // 第 3 行永遠顯示，跟旁邊三格一樣。上個月的狀態決定怎麼寫；沒有比較的情況一律灰色（dir 留空）
+  // 上個月沒有可比的數字：不顯示標籤，狀態放在整格 title
   const pm=Number((prevYm||'').slice(5,7));
-  if(!prev||prev.state==='loading'){out.cmp='較上月 …';return out;}
-  if(prev.state==='failed'){out.cmp='較上月 —';out.vs=`${pm}月讀取失敗`;return out;}
-  if(!(prev.state==='ok'&&prev.normal>0)){out.cmp='較上月 —';out.vs=`${pm}月尚未上傳`;return out;}
-  const b=_stPct10(prev),d=a-b;
-  out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)} 個百分點`;
-  out.vs=`vs ${pm}月 ${(b/10).toFixed(1)}%`;
-  out.dir=d>0?'up':d<0?'down':'flat';
+  if(!prev||prev.state==='loading'){out.cellTitle=`${pm}月讀取中…`;return out;}
+  if(prev.state==='failed'){out.cellTitle=`${pm}月讀取失敗`;return out;}
+  if(!(prev.state==='ok'&&prev.normal>0)){out.cellTitle=`${pm}月尚未上傳`;return out;}
+  const b=_stPct10(prev);
+  out.chip=_kvChip(a-b,'pp',false);
+  out.cellTitle=`${pm}月 ${(b/10).toFixed(1)}%`;
   return out;
 }
 function _stCellSync(shop){
@@ -32389,8 +32404,11 @@ function _stCellSync(shop){
   cell.hidden=false;
   const put=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text;};
   put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-note',v.note);
+  const tt=document.getElementById('kv-st-title');if(tt)tt.setAttribute('title',v.title);   // 窄螢幕標題被 … 截斷時看得到全文
+  const n=document.getElementById('kv-st-note');if(n){if(v.note)n.setAttribute('title',v.note);else n.removeAttribute('title');}   // 小字太長被 … 截掉時看得到全文
   const c=document.getElementById('kv-st-cmp');
-  if(c)c.innerHTML=v.cmp?`<span class="kv-st-d${v.dir==='up'||v.dir==='down'?' kv-st-'+v.dir:''}">${v.cmp}</span>${v.vs?`<span class="kv-st-vs">${v.vs}</span>`:''}`:'';
+  if(c)c.innerHTML=v.chip;
+  if(v.cellTitle)cell.setAttribute('title',v.cellTitle);else cell.removeAttribute('title');
 }
 // ══════ 「🎯 零動銷」彈窗（蝦皮四家；塊 A，2026-11-09 上線時叫「在架沒賣」，2026-11-10 改名；MOMO 版見 openZeroSalesModal）══════
 //   列出「在架但這個月沒賣出」的商品，給老闆救動銷率用。
@@ -32933,18 +32951,18 @@ function _lastMonthSameTotals(shop){
     if(!p)return null;
     const rep=lsLoad(shop,p.month,p.half);
     if(!rep||!rep.built||!rep.built.length)return null;
-    let lmRev=0,lmAds=0,lmPure=0;
+    let lmRev=0,lmAds=0,lmPure=0,lmGross=0;   // lmGross：2026-11 五格版毛利率格用（上月同期毛利率＝lmGross ÷ lmRev）
     if(lmFiltOn){
       // 篩選子集：一次 forEach 建 {code→{rev,ads,pure}}、再一次 forEach 查表加總（O(n+m)，
       //   形狀同 getPrevPeriodMap 的對照表；【不要】改成逐列 rep.built.find，那是 O(n×m)）。
       //   上期沒有的品號（新品）查不到 → 計 0。三格共用同一份表、同一次迴圈。
       const lmMap={};
-      rep.built.forEach(r=>{if(r.code)lmMap[r.code]={rev:r.rev||0,ads:r.adsFee||0,pure:r.pureProfit||0};});
-      s._filtered.forEach(r=>{const b=lmMap[r.code];if(b){lmRev+=b.rev;lmAds+=b.ads;lmPure+=b.pure;}});
+      rep.built.forEach(r=>{if(r.code)lmMap[r.code]={rev:r.rev||0,ads:r.adsFee||0,pure:r.pureProfit||0,gross:r.gross||0};});
+      s._filtered.forEach(r=>{const b=lmMap[r.code];if(b){lmRev+=b.rev;lmAds+=b.ads;lmPure+=b.pure;lmGross+=b.gross;}});
     }else{
-      rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;});
+      rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;lmGross+=r.gross||0;});
     }
-    return {rev:lmRev,ads:lmAds,pure:lmPure,month:p.month,half:p.half};
+    return {rev:lmRev,ads:lmAds,pure:lmPure,gross:lmGross,month:p.month,half:p.half};
   }catch{return null;}
 }
 // 第 6 參數 cmp = _lastMonthSameTotals(shop) 的回傳值：
@@ -32974,66 +32992,68 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
   if(shop!==curShop)return;
   _stCellSync(shop);   // 動銷率格：只讀快取，沒有才去雲端拿，不影響下面三格
 
-  // ── 第二行：主數字 ＋【具名】比率 ──
-  //   具名是這次改版的核心：改版前純利那格是裸的「(22.7%)」、廣告費是裸的「(10.41%)」，
-  //   跟營收那格的「(+0.2% 較上期)」佔同一個位置卻是完全不同性質的東西。
-  //   加上名字之後，位置決定語意：第二行永遠是「本期的某個比率」，第三行永遠是「跟基期比」。
-  const hRev=document.getElementById('kv-rev-header');
-  const hNet=document.getElementById('kv-net-header');
-  const hAds=document.getElementById('kv-ads-header');
-  if(hRev)hRev.textContent='NT$ '+fmtN(rev);
-  if(hNet){hNet.textContent='NT$ '+fmtN(pure);hNet.style.color=pure>=0?'#10b981':'#ef4444';}
-  if(hAds)hAds.textContent='NT$ '+fmtN(ads);
-  // ⚠ #kv-rev-rate-header（營收的比率位）【刻意不寫入】：營收沒有比率，該位置留白。
-  //   佔位元素仍在模板裡，理由見 __profitTabHtml 的註解。
-  const nRate=document.getElementById('kv-net-rate-header');
-  if(nRate)nRate.textContent=rev?`純利率 ${(pure/rev*100).toFixed(1)}%`:'';
-  const aRate=document.getElementById('kv-ads-rate-header');
-  if(aRate)aRate.textContent=rev?`佔營收 ${(ads/rev*100).toFixed(2)}%`:'';
-
-  // ── 第三行：較上月同期 ──
+  // ══ 2026-11 五格版（營收、毛利率、廣告費、純利、動銷率）══
+  //   數字邏輯跟改版前完全相同（rev／ads／pure 照參數、純利率＝pure÷rev、佔營收＝ads÷rev、較上月同期％＝(本期−基期)÷基期、只在基期>0 算），
+  //   只換位置和格式；新的只有毛利率＝gross÷rev（gross 是呼叫端已經加總好的 Σr.gross，不另外算）。
+  //   每格：第二行只放大數字（深色，負數 .kv-neg 紅）；第三行＝變化小標籤（_kvChip）＋一行小字；
+  //   上月同期的金額／比率不顯示在畫面上，改放在整格的 title（滑鼠移到格子上看）。
+  //
   // 🔴 文案一律「上月同期」，【絕對不要】出現「上期」兩個字：表格逐列與小計列的「上期」
   //   走 getPrevPeriodKey 的【滾動】基準，跟這裡的【上月同一段期間】不是同一個東西，
-  //   而且兩者會同時出現在同一個畫面上。期別短字串（vs 7月上半）是使用者唯一的辨識線索。
-  //
-  // ⚠ 期別用短寫法「vs 7月上半」（比照 MOMO 的 mm-kpi-d，見 _lmPeriodShort），
-  //   但【金額保留】—— 這一點【刻意與 MOMO 不同，不是漏抄】：MOMO 那張卡只寫「vs 7月整月」
-  //   不給基期金額，因為 MOMO 全頁只有一套基準、沒有對照的需要。蝦皮同一畫面上有兩套基準，
-  //   金額是使用者對帳時唯一能自己驗證「頂端這個 +7.2% 是拿什麼算的」的東西。拿掉就沒得驗。
-  //
-  // 顯示規則（三格一致）：
-  //   · !cmp（取不到報表 / 半月＋篩選 / 篩選過渡態，見 _lastMonthSameTotals 的三路規則）
-  //     → 三格第三行【全部】留空。不顯示「上月同期 —」：
-  //     永遠是破折號的欄位只會讓人以為壞掉（沿用改版前的既有決定）。
-  //   · cmp 存在 → 金額【一律顯示，含 NT$ 0】；百分比【只在基期 > 0 時】顯示。
-  //     🔴 改版前寫的是 (prevAds&&prevAds>0)，會把「上月同期沒投廣告($0)」整條藏掉 ——
-  //        而「上月同期 0、本期 24 萬」正是最該被看見的情況。這次刻意改掉。
-  //     🔴 基期 <= 0 不算百分比還有第二個理由（純利專屬）：分母為負時 (本期−基期)/基期
-  //        的符號會翻轉，「本期虧更多」會顯示成正成長。寧可只給金額，
-  //        也不要給一個方向相反的百分比。三格共用 base>0 這一條就同時涵蓋兩種情況。
-  //
-  // ⚠ 廣告費的漲跌【維持中性灰、不上綠紅】（改版前既有決定，逐字保留）：廣告費變多不必然
-  //   是壞事（營收可能同步變多），用漲跌色暗示好壞會誤導判斷。營收與純利才上綠紅。
-  // ⚠ 金額用 fmtN，而 fmtN 會吃掉負號（Math.abs）。基期純利可能為負且這一行沒有顏色可以
-  //   暗示正負 → 自己補上 '−'。本期主數字不必補：它有紅色可辨（見上方 hNet）。
-  const lmLine=(cur,base,colored)=>{
-    if(!cmp)return'';
-    let pct='';
-    if(base>0){
-      const d=(cur-base)/base*100;
-      const col=colored?(d>=0?'#10b981':'#ef4444'):'inherit';
-      pct=`<span style="color:${col}">較上月同期 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
-    }
-    const per=_lmPeriodShort(cmp.month,cmp.half);
-    const amt=`vs ${per} ${base<0?'−':''}NT$ ${fmtN(base)}`;
-    return `${pct}<span class="kv-cmp-vs">${amt}</span>`;
-  };
-  const cRev=document.getElementById('kv-rev-cmp-header');
-  if(cRev)cRev.innerHTML=lmLine(rev,cmp&&cmp.rev,true);
-  const cNet=document.getElementById('kv-net-cmp-header');
-  if(cNet)cNet.innerHTML=lmLine(pure,cmp&&cmp.pure,true);
-  const cAds=document.getElementById('kv-ads-cmp-header');
-  if(cAds)cAds.innerHTML=lmLine(ads,cmp&&cmp.ads,false);
+  //   而且兩者會同時出現在同一個畫面上。期別短字串（9月上半）是使用者唯一的辨識線索。
+  // 🔴 比較顯示規則沿用改版前（判斷全部在 _lastMonthSameTotals，這裡不另外擋）：
+  //   · !cmp（取不到報表／半月＋篩選／篩選過渡態）→ 五格都不顯示標籤、格子 title 也不放上月。
+  //     判斷一律寫 !cmp，【絕對不要】寫 cmp===null（漏傳第 6 參數時 undefined 會放行）。
+  //   · cmp 存在 → title 一律放基期金額（含 $0、含負數）；百分比標籤【只在基期 > 0 時】顯示：
+  //     純利基期為負時 (本期−基期)/基期 的符號會翻轉，寧可只給 title 金額，也不給方向相反的百分比。
+  //   · 廣告費的標籤一律灰色（改版前既有決定）：廣告費變多不必然是壞事，用好壞色會誤導。
+  //   · 標籤顯示出來四捨五入是 0.0 的一律灰色寫「持平」、不加箭頭。
+  // ⚠ fmtN 會吃掉負號（Math.abs），所以金額一律走 _kvMoney 自己補「−」。
+  const per=cmp?_lmPeriodShort(cmp.month,cmp.half):'';
+  const put=(id,html,cls)=>{const el=document.getElementById(id);if(!el)return;el.innerHTML=html;if(cls!==undefined)el.className=cls;};
+  const setTitle=(id,t)=>{const el=document.getElementById(id);if(!el)return;if(t)el.setAttribute('title',t);else el.removeAttribute('title');};
+  const valCls=neg=>'kv-value'+(neg?' kv-neg':'');
+  const putSub=(id,text)=>{put(id,text);setTitle(id,text);};   // 小字：窄螢幕被 … 截斷時滑鼠移上去看全文（同動銷率小字）
+  const pctChip=(cur,base,neutral)=>(cmp&&base>0)?_kvChip(Math.round((cur-base)/base*1000),'%',neutral):'';
+
+  // 營收
+  put('kv-rev-header',_kvMoney(rev),valCls(rev<0));
+  put('kv-rev-cmp-header',pctChip(rev,cmp&&cmp.rev,false));
+  // ⚠ #kv-rev-rate-header（營收的小字位）【刻意不寫入】：營收沒有小字，佔位元素保留讓五格結構一致。
+  setTitle('kv-rev-cell',cmp?`${per} ${_kvMoney(cmp.rev)}`:'');
+
+  // 毛利率（比率用畫面上的 0.1% 比：pp 差才會跟本期、title 裡上月顯示的兩個數字對得起來，同動銷率 _stPct10）
+  const g10=rev>0?Math.round(gross/rev*1000):null;
+  const bg10=(cmp&&cmp.rev>0&&Number.isFinite(cmp.gross))?Math.round(cmp.gross/cmp.rev*1000):null;
+  put('kv-gross-header',g10==null?'—':(g10/10).toFixed(1)+'%',valCls(g10!=null&&g10<0));
+  put('kv-gross-cmp-header',(g10!=null&&bg10!=null)?_kvChip(g10-bg10,'pp',false):'');
+  putSub('kv-gross-rate-header',rev?'毛利 '+_kvWan(gross):'');   // 營收 0（含沒有報表）不顯示，同廣告費、純利的小字
+  setTitle('kv-gross-cell',bg10!=null?`${per} ${(bg10/10).toFixed(1)}%`:'');
+
+  // 廣告費
+  put('kv-ads-header',_kvMoney(ads),valCls(ads<0));
+  put('kv-ads-cmp-header',pctChip(ads,cmp&&cmp.ads,true));
+  putSub('kv-ads-rate-header',rev?`佔營收 ${(ads/rev*100).toFixed(1)}%`:'');
+  setTitle('kv-ads-cell',cmp?`${per} ${_kvMoney(cmp.ads)}`:'');
+
+  // 純利
+  put('kv-net-header',_kvMoney(pure),valCls(pure<0));
+  put('kv-net-cmp-header',pctChip(pure,cmp&&cmp.pure,false));
+  putSub('kv-net-rate-header',rev?`純利率 ${(pure/rev*100).toFixed(1)}%`:'');
+  setTitle('kv-net-cell',cmp?`${per} ${_kvMoney(cmp.pure)}`:'');
+}
+// 五格版的金額與標籤（純函式）。
+//   _kvMoney：$ 加千分位、負數補「−」（四捨五入是 0 不補）。
+//   _kvWan：≥1 萬寫「X.X萬」、未滿 1 萬寫整數加千分位（同通路健檢 _hlFmtWan 的規則）。
+//   _kvChip(d10, unit, neutral)：d10＝變化 ×10 後的整數（已四捨五入到畫面上的 0.1），unit＝'%'|'pp'。
+//     0 ⇒ 灰色「持平」；neutral（廣告費）⇒ 一律灰；其他越高越好：正＝綠、負＝紅。
+function _kvMoney(v){const n=Math.round(v);return (n<0?'−':'')+'$'+Math.abs(n).toLocaleString();}
+function _kvWan(v){const n=Math.round(Math.abs(v)),s=v<0&&n>0?'−':'';return n<10000?s+n.toLocaleString():s+(Math.round(n/1000)/10).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'萬';}
+function _kvChip(d10,unit,neutral){
+  if(!Number.isFinite(d10))return '';
+  if(d10===0)return '<span class="kv-chip kv-chip-flat">持平</span>';
+  const cls=neutral?'kv-chip-flat':(d10>0?'kv-chip-good':'kv-chip-bad');
+  return `<span class="kv-chip ${cls}">${d10>0?'▲':'▼'}${(Math.abs(d10)/10).toFixed(1)}${unit}</span>`;
 }
 function syncHeaderKpis(shop){
   if(shop==='總表'||!state[shop]){return;}
