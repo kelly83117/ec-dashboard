@@ -34771,6 +34771,21 @@ function pchomePCReset(){
   ['cost','supply','price','ship'].forEach(function(k){ var el=document.getElementById('pch-pc-'+k); if(el) el.value=S.orig[k]==null?'':S.orig[k]; });
   pchomePCRefresh();
 }
+// 把這次試算組成一句話，填進「優化紀錄」分頁的輸入框（type 預設「調價」）；只填、不送出（照 momoPCComposeNote／momoPCToOptlog）
+function pchomePCComposeNote(){
+  var S=_pchomePC; if(!S) return '';
+  var money=function(x){ return '$'+(Math.round(x*100)/100); }, nm={cost:'成本',supply:'供貨價',ship:'運費+包材',price:'售價'};
+  var parts=['cost','supply','ship','price'].filter(function(k){ return !_momoPCSame(S.cur[k],S.orig[k]); }).map(function(k){ return nm[k]+' '+(S.orig[k]==null?'—':money(S.orig[k]))+'→'+(S.cur[k]==null?'—':money(S.cur[k])); });
+  var m0=pchomeEstNetMargin(S.orig.cost,S.orig.supply,S.est,S.orig.ship), m1=pchomeEstNetMargin(S.cur.cost,S.cur.supply,S.est,S.cur.ship);
+  return parts.join('，')+((m0!=null&&m1!=null&&Math.abs(m0-m1)>1e-9)?'，估計淨利率 '+pchomePct(m0)+'→'+pchomePct(m1):'');
+}
+function pchomePCToOptlog(){
+  var S=_pchomePC; if(!S) return; var txt=pchomePCComposeNote();
+  if(!txt){ if(typeof showToast==='function') showToast('還沒有修改，沒有可帶入的內容','info'); return; }
+  pchomeAnaSwitchTab('optlog');
+  var ts=document.getElementById('pchome-optlog-type'), ni=document.getElementById('pchome-optlog-note'); if(!ni) return;
+  if(ts) ts.value='調價'; ni.value='試算：'+txt; ni.focus();
+}
 function pchomePCRender(){
   var el=document.getElementById('pch-ana-pane-pricing'); var S=_pchomePC; if(!el||!S) return;
   var LB='font-size:13px;font-weight:700;color:#334155', INP='height:44px;box-sizing:border-box;border-radius:8px;padding:0 12px;font-size:16px;width:100%;'+_MOMO_PC_PLAIN;
@@ -34801,7 +34816,9 @@ function pchomePCRefresh(){
   if(bar){ var n=dirty.length;
     bar.innerHTML='<div style="border-top:1px solid #e2e8f0;background:'+(n?'#fffbeb':'#f8fafc')+';padding:12px 16px;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div style="font-size:13px;color:'+(n?'#78350f':'#64748b')+'">'+(n?('<b>已試改 '+n+' 格</b>（'+dirty.join('、')+'）· 只是試算，不會存'):'還沒試改任何值')+'</div>'
-      +'<button onclick="pchomePCReset()" '+(n?'':'disabled')+' style="height:40px;padding:0 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;cursor:pointer;font-family:inherit;'+(n?'':'opacity:.5;cursor:not-allowed;')+'">全部還原</button></div>'; }
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button onclick="pchomePCReset()" '+(n?'':'disabled')+' style="height:40px;padding:0 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;cursor:pointer;font-family:inherit;'+(n?'':'opacity:.5;cursor:not-allowed;')+'">全部還原</button>'
+      +'<button onclick="pchomePCToOptlog()" '+(n?'':'disabled')+' style="height:40px;padding:0 16px;border-radius:8px;border:1px solid #c7d2fe;background:#fff;color:#3730a3;font-size:14px;cursor:pointer;font-family:inherit;'+(n?'':'opacity:.5;cursor:not-allowed;')+'">帶入優化紀錄</button></div></div>'; }
 }
 function pchomeRenderAnalysis(shop, p){
   // 版面照 momo 商品分析彈窗（momoRenderAnalysis）：標題列＋三分頁（分析｜定價與成本｜優化紀錄）、max-width 900。
@@ -36686,7 +36703,7 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel, pchomeOnSearch, pchomeRenderProfitBody,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
-  pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomePCInput, pchomePCReset, pchomeAddOptlogModal, pchomeDeleteOptlog,
+  pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomePCInput, pchomePCReset, pchomePCToOptlog, pchomeAddOptlogModal, pchomeDeleteOptlog,
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }
