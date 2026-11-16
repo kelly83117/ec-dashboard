@@ -13650,7 +13650,7 @@ async function __kpiShopeeRestore(month,opts){
 //     商品成本＝Σ product.cost × 淨數量（段0 − 段2；退貨回沖成本，同淨利表）
 //     平台費＝對帳單 (B)+(C)+(D)（含稅原值）
 //     稅金＝營收 × 5/105（公式欄，同 MOMO；帶入不寫，跟著營收算）
-//     耗材＝段0 出貨件數（gross，退貨不回沖）× PCHOME_PACKAGING_COST
+//     耗材＝訂單數（不重複訂單編號，退貨不回沖）× PCHOME_PACKAGING_COST（一筆訂單一組包材；2026-11-06 起，同淨利表）
 //   這五格（訂單數／營收／商品成本／平台費／耗材）是一般手填格，「從對帳單帶入」寫進去才有值、才算已填（同 MOMO）。
 //   沒有對帳明細或對帳單 → {ok:false}：帶入鈕 disabled＋「等對帳」、格子維持空白、不做估算 → 該月自然未完成。
 //   快照存 snapshots.{月}.preAutofillPchome，還原用 __kpiPchomeRestore。
@@ -13708,7 +13708,7 @@ function _pchomeKpiCompute(month,raw,prods){
   const cons=e.segments.filter(x=>/寄倉/.test(nm(x))&&((x.rows||[]).length||Number(x.總額)));
   if(cons.length)notes.push('寄倉段有資料（'+cons.map(nm).join('、')+'）：營收、平台費在對帳單裡有算，訂單數／成本只算一般轉單');
   if(retUn.length)notes.push('退貨對不到料號 '+retUn.length+' 筆（'+retUn.map(x=>x.pn).join('、')+'）：沒從成本扣');
-  return{ok:true,month,qty:orders.size,rev:A,cost,fee:B+C+D,tax:A*5/105,material:PCHOME_PACKAGING_COST*gross,
+  return{ok:true,month,qty:orders.size,rev:A,cost,fee:B+C+D,tax:A*5/105,material:PCHOME_PACKAGING_COST*orders.size,
     detail:{lines:s0.length,ships:ships.size,gross,netQty:gross-retQty,s0Amt,retAmt,retQty,A,B,C,D,missing,
       missAmt:missing.reduce((t,x)=>t+x.amt,0),exportTime:e.匯出時間||'',period:e.期間||''},notes};
 }
@@ -13733,7 +13733,7 @@ function _kpiPchomeAutoPlan(month,row){
     rev:'對帳單 (A)（含稅）＝訂單貨款 '+m0(d.s0Amt)+' − 退貨 '+m0(d.retAmt),
     cost:'Σ 商品主檔成本 × 淨數量（'+fmtN(d.gross)+' − 退貨 '+fmtN(d.retQty)+' ＝ '+fmtN(d.netQty)+' 件）',
     fee:'對帳單 (B) '+m0(d.B)+' ＋ (C) '+m0(d.C)+' ＋ (D) '+m0(d.D)+'（含稅）',
-    material:'出貨件數 '+fmtN(d.gross)+' × $'+PCHOME_PACKAGING_COST+'（退貨不回沖）',
+    material:'訂單數 '+fmtN(pr.qty)+' × $'+PCHOME_PACKAGING_COST+'（一筆訂單一組包材；退貨不回沖）',
   }:{};
   KPI_PCHOME_AUTO_FIELDS.forEach(f=>{
     const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['pchome',shop,f],cur:sd[f]};
@@ -34427,8 +34427,8 @@ function _pchomeShipPackDefault(shop){
 //   毛利率與「偏保守」原理只放估計淨利率的 title tooltip、不攤在畫面上。售價由供貨價÷0.75 回推（填進售價欄、可覆寫）。
 // PChome 自付物流成本常數（宅配通運費＋包材；PChome 對帳單沒有這兩筆，必須另算進淨利）。
 //   PCHOME_BOX_FREIGHT：每箱運費（未稅）。來源＝2026-09 宅配通實際 S60 最新費率。宅配通對帳單上傳上線後改為由實際資料計算近期每箱平均。
-//   PCHOME_PACKAGING_COST：每件包材（未稅）。
-//   PCHOME_DEFAULT_SHIP_PACK：批次維護定價試算「運費+包材」預設值＝每箱運費＋每件包材（單件單箱假設）；不再寫死 87。
+//   PCHOME_PACKAGING_COST：每筆訂單包材（未稅；一筆訂單一組，2026-11-06 起不再按件）。
+//   PCHOME_DEFAULT_SHIP_PACK：批次維護定價試算「運費+包材」預設值＝每箱運費＋每筆訂單包材（單件單箱單訂單假設）；不再寫死 87。
 var PCHOME_BOX_FREIGHT=84;
 var PCHOME_PACKAGING_COST=3;
 var PCHOME_DEFAULT_SHIP_PACK=PCHOME_BOX_FREIGHT+PCHOME_PACKAGING_COST;
@@ -35648,7 +35648,7 @@ function pchomeProfitCalc(entry, shop){
   products.forEach(function(p){ var code=String(p.料號||'').trim(); if(!code) return;
     var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; if(psh!==shop) return;
     if(!bySku[code]) order.push(code); });
-  // ── 自付物流（宅配通運費 按箱＋包材 按件）：只「轉單」有；寄倉＝PChome 倉出貨、我方未付→兩項皆 0。退貨不減箱、不回沖包材。皆未稅、不除 1.05。
+  // ── 自付物流（宅配通運費 按箱＋包材 按訂單）：只「轉單」有；寄倉＝PChome 倉出貨、我方未付→兩項皆 0。退貨不減箱、不回沖包材。皆未稅、不除 1.05。
   //   運費：一箱＝段0 一個不重複出貨單號；每箱 PCHOME_BOX_FREIGHT 按箱內各列營收比例分（單列全給、箱內皆0營收則均分）。無出貨單號列不算箱、不分運費。
   //   包材：一筆訂單＝段0 一個不重複訂單編號（訂單編號-序號 去最後一段序號）；每筆 PCHOME_PACKAGING_COST 按訂單內各列營收比例分（照運費分攤、float 份額 → 每筆訂單剛好 3、Σ包材＝3×訂單數）。退貨不回沖、整筆取消/應出貨0 不算。
   var 運費By={}, 包材By={}, _boxN=0, _noShipRows=0, _orderN=0, _packQty=0;
@@ -36523,7 +36523,7 @@ function pchomeProfitTabHTML(shop){
   var kc=function(label,info,val,valColor,d,sub,valCls){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v'+(valCls?' '+valCls:'')+'"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+(sub?' · '+sub:'')+'</span></div></div>'; };
   var kpi='<div class="mm-kpis">'
     +kc('總營收', '該期所有商品營收合計。（未稅）', pchomeMoney(T.營收), '', kdPct(T.營收, prevT?prevT.營收:null))
-    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按件）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, (T.淨利<0?'mm-neg':''))   // 負數＝紅（A-310，#476）
+    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按訂單）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, (T.淨利<0?'mm-neg':''))   // 負數＝紅（A-310，#476）
     +kc('加權淨利率', wmTip, (wm==null)?'—':pchomePct(wm), wmColor, wmDelta, '商品 '+((T.營收>0)?pchomePct((T.營收-T.成本-T.費用)/T.營收):'—'))
     +kc('總銷量', '', pchomeNum(T.銷量)+' 件', '', kdPct(T.銷量, prevT?prevT.銷量:null))
     +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
@@ -36579,7 +36579,7 @@ function pchomeExportExcel(shop){
       (x.售價!=null)?x.售價:'',
       x.營收,                                // 完整精度未稅營收
       x.銷量,
-      (x.費用合計>0.005)?x.費用合計:'',       // 逐列費用（未稅）＝平台費＋自付運費(按箱)＋包材(按件)；比照畫面費用欄
+      (x.費用合計>0.005)?x.費用合計:'',       // 逐列費用（未稅）＝平台費＋自付運費(按箱)＋包材(按訂單)；比照畫面費用欄
       (x.商品淨利!=null)?x.商品淨利:'',        // 分攤運費包材前
       (x.商品淨利率!=null)?x.商品淨利率*100:'',
       (x.淨利!=null)?x.淨利:'',
