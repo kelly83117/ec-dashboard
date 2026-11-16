@@ -33497,11 +33497,11 @@ window.__healthProductSnapshot=function(platform,shop,month){
       out.months=pchomeCalendarMonths();
       out.rows=[];out.subTotals={};
       if(out.months.indexOf(month)>=0){
-        const pages={};
-        products.forEach(p=>{ const c=String(p.料號||'').trim(); if(!c)return;
-          (Array.isArray(p.商品編號)?p.商品編號:(p.商品編號==null?[]:[p.商品編號])).forEach(v=>{ v=String(v||'').trim(); if(!v)return;
-            const seg=v.split('-'),b=seg.length>1?seg.slice(0,-1).join('-'):v; (pages[c]=pages[c]||[]); if(pages[c].indexOf(b)<0)pages[c].push(b); }); });
         ['轉單','寄倉'].forEach(sub=>{
+          const pages={};   // 這個賣場的商編（該賣場上架資料；同料號在兩個賣場的商編不同）
+          pchomeProductsOfShop(sub,products).forEach(p=>{ const c=String(p.料號||'').trim(); if(!c)return;
+            (Array.isArray(p.商品編號)?p.商品編號:(p.商品編號==null?[]:[p.商品編號])).forEach(v=>{ v=String(v||'').trim(); if(!v)return;
+              const seg=v.split('-'),b=seg.length>1?seg.slice(0,-1).join('-'):v; (pages[c]=pages[c]||[]); if(pages[c].indexOf(b)<0)pages[c].push(b); }); });
           const calc=pchomeCalendarCalc(month,sub),skus=(calc&&calc.skus)||[];
           out.subTotals[sub]={sold:calc.bizCount||0,total:skus.filter(x=>!x.discontinued||x.hasBiz).length};
           skus.forEach(x=>{ const c=String(x.料號||'').trim();
@@ -33658,7 +33658,7 @@ function pchomeLatestExport(products){ var mx=''; (products||[]).forEach(functio
 //   消失於清單：listing 來源 ＋ 有 lastSeenExport（缺席不推導→避免首次同步把舊記錄全誤判消失）＋ ≠ 最新戳記。source:'manual'（批次維護手建、從沒在清單）永不套用。
 function pchomeVanished(p, latestExport){ if(!p||(p.source||'listing')==='manual') return false; return !!(p.lastSeenExport && latestExport && p.lastSeenExport!==latestExport); }
 // 上架清單來源、每次上傳會更新的欄位（合併時只碰這些；cost 另由 costMap 重查、其餘我方欄位不碰）。
-var PCHOME_LISTING_FIELDS=['商品名','規格','商品編號','供貨價','售價','毛利率PC','可賣量','缺貨','出貨方式','shop','商品狀態'];
+var PCHOME_LISTING_FIELDS=['商品名','規格','商品編號','供貨價','售價','毛利率PC','可賣量','缺貨','出貨方式','出貨方式清單','shop','商品狀態'];
 // ── PChome 待推 dirty 持久化（跨重整）──
 //   ec_pchome_recon / ec_pchome_products 現已搬到各自獨立 doc（app/pchome_recon / app/pchome_products），
 //   由 __pchomeApplyCloudRecon / __pchomeApplyCloudProducts 的 dirty 檢查擋雲端 echo（同 orders）。
@@ -34262,16 +34262,24 @@ function pchomeParseListing(buf){
   var H=rows[hi].map(function(c){return String(c).trim();});
   var col=function(re){ for(var i=0;i<H.length;i++){ if(re.test(H[i])) return i; } return -1; };
   var ci={編號:col(/商品編號/),名:col(/商品名稱/),規:col(/規格名稱/),規品:col(/規格品/),狀:col(/商品狀態/),出:col(/出貨方式/),量:col(/可賣量/),毛:col(/毛利率/),售:col(/售價/),供:col(/成本/),料:col(/廠商料號/)};
+  // 出貨方式（K 欄）逐列判斷：含「寄倉」→寄倉，其餘（轉單／空）→轉單。一個料號可同時有轉單、寄倉兩種上架（不同商品編號、價格可不同）：
+  //   主欄位（名稱/供貨價/售價/商編/可賣量/狀態）＝轉單那份（沒有轉單才用寄倉那份）；兩邊都有 → 寄倉那份另存在 寄倉{} overlay；出貨方式清單 記有哪些賣場。
+  var shipOf=function(v){ return /寄倉/.test(String(v||''))?'寄倉':'轉單'; };
   var byCode={};
   for(var j=hi+1;j<rows.length;j++){ var r=rows[j]||[]; var 料號=String(r[ci.料]||'').trim(), 編號=String(r[ci.編號]||'').trim();
     if(!編號) continue;
     if(String(r[ci.規品]||'').trim()==='是' && 料號==='-' && /-000$/.test(編號)) continue;   // 規格母商品：排除，不算缺成本
     if(!料號 || 料號==='-') continue;
-    var o=byCode[料號]; if(!o){ o=byCode[料號]={料號:料號,商品名:String(r[ci.名]||''),規格:String(r[ci.規]||'').trim(),商品編號:[],供貨價:Number(r[ci.供])||0,售價:Number(r[ci.售])||0,毛利率PC:String(r[ci.毛]||''),可賣量:Number(r[ci.量])||0,出貨方式:String(r[ci.出]||'').trim(),商品狀態:String(r[ci.狀]||'').trim()}; }
+    var sh=shipOf(r[ci.出]);
+    var g=byCode[料號]||(byCode[料號]={}); var o=g[sh];
+    if(!o){ o=g[sh]={商品名:String(r[ci.名]||''),規格:String(r[ci.規]||'').trim(),商品編號:[],供貨價:Number(r[ci.供])||0,售價:Number(r[ci.售])||0,毛利率PC:String(r[ci.毛]||''),可賣量:Number(r[ci.量])||0,商品狀態:String(r[ci.狀]||'').trim()}; }
     if(編號 && o.商品編號.indexOf(編號)<0) o.商品編號.push(編號);
-    o.可賣量=Math.min(o.可賣量, Number(r[ci.量])||0);   // 同料號多列 → 可賣量取最小（缺貨保守）
+    o.可賣量=Math.min(o.可賣量, Number(r[ci.量])||0);   // 同料號同賣場多列 → 可賣量取最小（缺貨保守）
   }
-  return Object.keys(byCode).map(function(k){return byCode[k];});
+  return Object.keys(byCode).map(function(k){ var g=byCode[k], list=[]; if(g['轉單']) list.push('轉單'); if(g['寄倉']) list.push('寄倉');
+    var main=g['轉單']||g['寄倉'], out=Object.assign({料號:k}, main, {出貨方式:list[0], 出貨方式清單:list});
+    if(g['轉單']&&g['寄倉']) out.寄倉=g['寄倉'];
+    return out; });
 }
 
 // ── PChome 同步雲端（自有鈕，因全域 #header-kpi-row 在 PChome 頁被藏）──
@@ -34581,8 +34589,22 @@ function pchomeProductKeyLocked(p){ var reasons=[], 料號=String((p&&p.料號)|
     if(mktHit) reasons.push('行銷推廣費逐筆引用'); }
   return { has:reasons.length>0, reasons:reasons };
 }
-// 本賣場商品（PChome 商品主檔 shop-agnostic；依 p.shop/出貨方式 分轉單/寄倉，同 pchomeProfitCalc 過濾）
-function pchomeBatchProducts(shop){ return (pchomeLoadProducts()||[]).filter(function(p){ var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; return psh===shop; }); }
+// 賣場歸屬（轉單／寄倉）：商品主檔一個料號一筆。上傳上架清單時依檔案「出貨方式」自動分辨，記在 出貨方式清單（可同時有轉單、寄倉）；
+//   舊資料（還沒重傳過清單）沒有這個欄位 → 退回舊規則：p.shop／出貨方式 含「寄倉」→寄倉，其餘→轉單。
+function pchomeShopsOf(p){
+  if(p && Array.isArray(p.出貨方式清單) && p.出貨方式清單.length) return p.出貨方式清單;
+  return [/寄倉/.test(String((p&&(p.shop||p.出貨方式))||''))?'寄倉':'轉單'];
+}
+function pchomeInShop(p, shop){ return pchomeShopsOf(p).indexOf(shop)>=0; }
+// 某賣場看到的商品檢視：寄倉且該料號另有一份「寄倉上架資料」（p.寄倉：名稱／供貨價／售價／商編／可賣量／狀態）→ 蓋在主欄位上回一份複本；其他情況回原物件。
+function pchomeShopView(p, shop){
+  if(shop==='寄倉' && p && p.寄倉 && typeof p.寄倉==='object' && pchomeInShop(p,'寄倉')){
+    return Object.assign({}, p, p.寄倉, {shop:'寄倉', 出貨方式:'寄倉', 缺貨:(Number(p.寄倉.可賣量)===0)}); }
+  return p;
+}
+function pchomeProductsOfShop(shop, all){ return (all||pchomeLoadProducts()||[]).filter(function(p){ return pchomeInShop(p,shop); }).map(function(p){ return pchomeShopView(p,shop); }); }
+// 本賣場商品（PChome 商品主檔 shop-agnostic；依 出貨方式 分轉單/寄倉，同 pchomeProfitCalc 過濾）
+function pchomeBatchProducts(shop){ return pchomeProductsOfShop(shop); }
 // 商品歷程時間軸（新到舊；讀 ec_pchome_history[料號]）
 function pchomeHistoryTimelineHTML(料號){ var h=pchomeHistoryFor(料號)||[]; if(!h.length) return '<div style="font-size:12px;color:#9ca3af">尚無歷程</div>';
   var chTxt=function(e){ return (e.changes&&e.changes.length)?e.changes.map(function(c){return c.field+' '+(c.from||'—')+'→'+(c.to||'—');}).join('；'):''; };
@@ -34594,6 +34616,7 @@ function pchomeRefreshSyncBtn(shop){ var el=document.getElementById('pchome-sync
 //   PChome 無 S1103/月銷量序列 → 不畫 momo 那些圖（momo 有的資料 PChome 沒有）；範圍＝歷程時間軸 + 優化紀錄（檢視/新增/刪除）。
 function pchomeOpenAnalysis(shop, 料號){
   var p=(pchomeLoadProducts()||[]).find(function(x){ return String(x.料號||'').trim()===String(料號).trim(); });
+  if(p) p=pchomeShopView(p,shop);
   if(!p){ if(typeof showToast==='function') showToast('找不到商品 '+料號,'error'); return; }
   if(_pchomePC && (_pchomePC.shop!==shop||String(_pchomePC.sku)!==String(料號)) && _pchomePCDirtyCount()>0 && !confirm('有 '+_pchomePCDirtyCount()+' 格未儲存，確定切換到別的商品？')) return;
   var ov=document.getElementById('pchome-analysis-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-analysis-overlay'; document.body.appendChild(ov); }
@@ -34793,16 +34816,16 @@ function pchomePCSaveConfirm(){
   var shop=S.shop, sku=S.sku, products=pchomeLoadProducts()||[];
   var p=products.find(function(x){ return String(x.料號||'').trim()===String(sku).trim(); }); if(!p){ alert('找不到商品 '+sku); return; }
   var okNum=function(x){ return typeof x==='number'&&isFinite(x)&&x>=0; };
-  var price=(S.cur.price==null)?(p.售價==null?0:p.售價):S.cur.price;   // 售價空白＝不動
+  var _pv=pchomeShopView(p,shop), price=(S.cur.price==null)?(_pv.售價==null?0:_pv.售價):S.cur.price;   // 售價空白＝不動
   if(!okNum(S.cur.cost)||!okNum(S.cur.supply)||!okNum(price)){ alert('成本 / 供貨價 / 售價需為 ≥0 的數字'); return; }
   var shipSet=!_momoPCSame(S.cur.ship,S.orig.ship), ship=shipSet?(S.cur.ship>=0?S.cur.ship:0):undefined;   // 沒改運費+包材就不寫（預設值是當期平均、不是商品自己的值）
-  var r=pchomeCommitProductEdit(shop, products, p, {cost:S.cur.cost, supply:S.cur.supply, price:price, shipPack:ship, newName:p.商品名||'', newSku:p.料號, newPnArr:p.商品編號||[], note:note});
+  var r=pchomeCommitProductEdit(shop, products, p, {cost:S.cur.cost, supply:S.cur.supply, price:price, shipPack:ship, newName:(pchomeShopView(p,shop).商品名||''), newSku:p.料號, newPnArr:p.商品編號||[], note:note});
   if(!r||!r.ok) return;
   if(wantOpt&&optNote){ pchomeAddOptlog(shop, sku, {type:optType, note:optNote}); }
   pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
   App.closeModal();
   try{ pchomeRenderProfitBody(shop); }catch(e){}   // 背景總表跟上（沒開總表＝no-op）
-  var p2=(pchomeLoadProducts()||[]).find(function(x){ return String(x.料號||'').trim()===String(sku).trim(); }); if(p2) pchomeRenderAnalysis(shop, p2);   // 彈窗重建（歷程時間軸、原值都更新）
+  var p2=(pchomeLoadProducts()||[]).find(function(x){ return String(x.料號||'').trim()===String(sku).trim(); }); if(p2) pchomeRenderAnalysis(shop, pchomeShopView(p2,shop));   // 彈窗重建（歷程時間軸、原值都更新）
   if(typeof showToast==='function') showToast('已儲存並記錄歷程（記得按 ☁ 同步雲端）','success');
 }
 function pchomePCRender(){
@@ -35082,14 +35105,15 @@ function pchomeCommitProductEdit(shop, products, p, o){
   var lock=pchomeProductKeyLocked(p);
   var newSku=(o.newSku==null)?p.料號:o.newSku, newPnArr=o.newPnArr||(p.商品編號||[]);
   var skuChanged=(!lock.has)&&(newSku!==p.料號);
+  var T=(shop==='寄倉'&&p.寄倉&&typeof p.寄倉==='object'&&pchomeInShop(p,'寄倉'))?p.寄倉:p;
   var shipSet=(o.shipPack!==undefined), shipPack=o.shipPack;
   var changes=[];
-  if(newName!==(p.商品名||'')) changes.push({field:'商品名稱',from:p.商品名||'',to:newName});
+  if(newName!==(T.商品名||'')) changes.push({field:'商品名稱',from:T.商品名||'',to:newName});
   if(skuChanged) changes.push({field:'原廠編號',from:p.料號,to:newSku});
   if(!lock.has){ var oldPn=(p.商品編號||[]).join('、'), newPn=newPnArr.join('、'); if(oldPn!==newPn) changes.push({field:'PChome商品編號',from:oldPn||'—',to:newPn||'—'}); }
-  var costCh=(Number(p.cost)||0)!==cost, supCh=(Number(p.供貨價)||0)!==supply, priceCh=(Number(p.售價)||0)!==price, shipCh=shipSet&&(Number(p.shippingPackaging)||0)!==shipPack;
+  var costCh=(Number(p.cost)||0)!==cost, supCh=(Number(T.供貨價)||0)!==supply, priceCh=(Number(T.售價)||0)!==price, shipCh=shipSet&&(Number(p.shippingPackaging)||0)!==shipPack;
   var oldSku=p.料號;
-  p.商品名=newName; p.cost=cost; p.供貨價=supply; p.售價=price; if(shipSet) p.shippingPackaging=shipPack;
+  T.商品名=newName; p.cost=cost; T.供貨價=supply; T.售價=price; if(shipSet) p.shippingPackaging=shipPack;
   if(!lock.has){ p.商品編號=newPnArr; if(skuChanged){ p.料號=newSku; } }
   p.原廠編號=p.料號;   // 原廠編號＝料號，恆同值
   pchomeSaveProducts(products);
@@ -35237,7 +35261,7 @@ function pchomeSyncTabHTML(shop){
       +'<div id="'+id+'-'+shop+'" style="font-size:12px;margin-top:6px"></div></div></div>';
   };
   return '<div class="pf-pchome-upbox" style="max-width:860px">'
-    +'<div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">兩個上傳入口。<b>上架商品清單</b>＝商品主檔來源（名稱／供貨價／售價／出貨方式／上下架），上傳後<b>先預覽差異、確認才合併</b>（消失標下架、不刪除）。<b>莫筆克成本檔</b>＝各倉商品列表，匯入<b>四賣場共用成本表</b>（原廠編號→成本；人工維護值保留不覆蓋）。補成本／改成本請到<b>批次維護</b>。</div>'
+    +'<div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">兩個上傳入口。<b>上架商品清單</b>＝商品主檔來源（名稱／供貨價／售價／出貨方式／上下架），上傳後<b>先預覽差異、確認才合併</b>（消失標下架、不刪除）。<b>莫筆克成本檔</b>＝各倉商品列表，匯入<b>四賣場共用成本表</b>（原廠編號→成本；人工維護值保留不覆蓋），並同步更新 PChome 商品成本。<b>轉單、寄倉共用同一份商品主檔：不論在哪一頁上傳，上架清單依「出貨方式」欄自動分辨賣場，兩邊一起更新。</b>補成本／改成本請到<b>批次維護</b>。</div>'
     +fileRow('pchome-listing-msg','上架商品清單','.xls（實為 xlsx）· 商品主檔，差異預覽後合併','.xls,.xlsx','pchomeListingFile')
     +fileRow('pchome-cost-msg','莫筆克成本檔','元創數位_各倉_商品列表 .xlsx · 匯入共用成本表','.xlsx,.xls','pchomeCostFile')
     +'</div>';
@@ -35252,13 +35276,25 @@ function pchomeCostFile(shop,e){
   momoReadWorkbook(f).then(function(wb){
     var rows=wb.sheet('商品資料')||wb.firstSheet();
     var cost=momoParseCostList(rows);
+    var oldMap=Object.assign({}, (typeof momoLoadCostByOrigin==='function'?momoLoadCostByOrigin():{})||{});   // 匯入前的成本表（判斷商品成本是不是跟著成本表走）
     var r=momoPersistCostByOrigin(cost.costByOrigin)||{};
     var added=r.added||0, updated=r.updated||0, prot=(r.protected&&r.protected.length)||0;
-    if(msg){ msg.textContent='已匯入共用成本表：新增 '+added+'、更新 '+updated+(prot?('、保留人工值 '+prot):'')+'（四賣場共用）。到「☁ 同步雲端」推上雲（成本表隨 MOMO 同步）。'; msg.style.color='#059669'; }
+    var pc=pchomeApplyCostTable(oldMap);   // 兩個賣場共用同一份商品主檔 → 一次上傳兩邊一起更新
+    if(msg){ msg.textContent='已匯入共用成本表：新增 '+added+'、更新 '+updated+(prot?('、保留人工值 '+prot):'')+'（四賣場共用）。PChome 商品成本同步更新 '+pc.changed+' 個（轉單、寄倉一起）'+(pc.kept?('，手動改過的 '+pc.kept+' 個保留'):'')+'。到「☁ 同步雲端」推上雲（成本表隨 MOMO 同步）。'; msg.style.color='#059669'; }
   }).catch(function(err){
     var m=(err&&err.message)||String(err);
     if(msg){ msg.textContent='解析失敗：'+(/password/i.test(m)?'檔案有密碼保護，請先解密再上傳。':m); msg.style.color='#dc2626'; }
   });
+}
+// 成本表匯入後更新 PChome 商品成本：只更新「跟著成本表走」的商品＝商品成本空白／0，或等於匯入前成本表的值（沒被人工改離）；其餘（批次維護手動改過）保留。
+function pchomeApplyCostTable(oldMap){
+  var map=(typeof momoLoadCostByOrigin==='function'?momoLoadCostByOrigin():{})||{}, list=pchomeLoadProducts()||[], changed=0, kept=0;
+  list.forEach(function(p){ var code=String(p.料號||'').trim(); if(!code) return; var nv=map[code]; if(!(Number(nv)>0)) return; nv=Number(nv);
+    var cur=(p.cost==null||p.cost==='')?null:Number(p.cost); if(cur===nv) return;
+    var ov=oldMap[code], follows=(cur==null||!(cur>0)||(ov!=null&&Number(ov)===cur));
+    if(follows){ p.cost=nv; changed++; } else kept++; });
+  if(changed) pchomeSaveProducts(list);
+  return {changed:changed, kept:kept};
 }
 var _pchomeListingPending={};   // {shop:{newList, 匯出時間, plan}}（解析後暫存，確認才合併寫入；不直接落地）
 function pchomeListingFile(shop,e){
@@ -35272,7 +35308,7 @@ function pchomeListingFile(shop,e){
       var existing=pchomeLoadProducts();
       var plan=pchomeBuildListingPlan(existing, list, 匯出t);
       _pchomeListingPending[shop]={ newList:list, 匯出時間:匯出t, plan:plan };
-      if(msg){ msg.textContent='已解析 '+list.length+' 料號（匯出時間 '+(匯出t||'未知')+'）——下方預覽差異，確認後才寫入。'; msg.style.color='#374151'; }
+      if(msg){ msg.textContent='已解析 '+list.length+' 料號（轉單 '+list.filter(function(o){return o.出貨方式清單.indexOf('轉單')>=0;}).length+'、寄倉 '+list.filter(function(o){return o.出貨方式清單.indexOf('寄倉')>=0;}).length+'；依檔案「出貨方式」自動分辨，兩個賣場一起更新）（匯出時間 '+(匯出t||'未知')+'）——下方預覽差異，確認後才寫入。'; msg.style.color='#374151'; }
       pchomeRenderListingPreview(shop, plan, 匯出t);
     }catch(err){ if(msg){ msg.textContent='解析失敗：'+_momoEsc(String(err&&err.message||err)); msg.style.color='#dc2626'; } }
     try{ e.target.value=''; }catch(_e){}   // 允許重傳同檔
@@ -35290,9 +35326,11 @@ function pchomeBuildListingPlan(existing, newList, 匯出t){
     PCHOME_LISTING_FIELDS.forEach(function(fld){ var a=ex[fld], b=o[fld];
       if(fld==='缺貨') b=(Number(o.可賣量)===0);
       if(fld==='shop') b=(o.出貨方式||'轉單');
+      if(fld==='出貨方式清單') a=pchomeShopsOf(ex);   // 舊資料沒有這欄 → 用舊規則推出來比，免得每筆都被當成有變更
       var sa=JSON.stringify(a==null?null:a), sb=JSON.stringify(b==null?null:b);
       if(sa!==sb) diffs.push({欄:fld, 舊:a, 新:b});
     });
+    if(JSON.stringify(ex.寄倉||null)!==JSON.stringify(o.寄倉||null)) diffs.push({欄:'寄倉', 舊:(ex.寄倉?'有':'無'), 新:(o.寄倉?'有（已更新）':'無')});   // 同料號另有一份寄倉上架資料
     if(diffs.length) updates.push({料號:code, 商品名:o.商品名, diffs:diffs});
     else unchanged.push(code);
   });
@@ -35318,7 +35356,8 @@ function pchomeApplyListingMerge(shop){
     var rec = ex ? Object.assign({}, ex) : { sku:code, 料號:code, origin:code, source:'listing' };
     // 只更新 listing 來源欄位
     rec.商品名=o.商品名; rec.規格=o.規格; rec.商品編號=o.商品編號; rec.供貨價=o.供貨價; rec.售價=o.售價;
-    rec.毛利率PC=o.毛利率PC; rec.可賣量=o.可賣量; rec.缺貨=(Number(o.可賣量)===0); rec.出貨方式=o.出貨方式; rec.shop=(o.出貨方式||'轉單'); rec.商品狀態=o.商品狀態;
+    rec.毛利率PC=o.毛利率PC; rec.可賣量=o.可賣量; rec.缺貨=(Number(o.可賣量)===0); rec.出貨方式=o.出貨方式; rec.出貨方式清單=(o.出貨方式清單||[o.出貨方式||'轉單']); rec.shop=(o.出貨方式||'轉單'); rec.商品狀態=o.商品狀態;
+    if(o.寄倉) rec.寄倉=o.寄倉; else delete rec.寄倉;
     rec.cost=(c!=null?Number(c):(ex&&ex.cost!=null?Number(ex.cost):null));   // cost 由共用表重查（護手動成本）；查不到留既有
     rec.lastSeenExport=匯出t; if(!rec.source) rec.source='listing'; rec.origin=rec.origin||code; rec.sku=rec.sku||code; rec.料號=code;
     delete rec.匯出時間;   // 舊的 per-列 匯出時間欄位已由 lastSeenExport 取代，順手清掉
@@ -35338,7 +35377,7 @@ function pchomeRenderListingPreview(shop, plan, 匯出t){
   var ov=document.getElementById('pchome-listing-ov'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-listing-ov'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=function(e){ if(e.target===ov) pchomeCancelListingMerge(shop); };
-  var fldName={商品名:'商品名',規格:'規格',商品編號:'商品編號',供貨價:'供貨價',售價:'售價',毛利率PC:'毛利率',可賣量:'可賣量',缺貨:'缺貨',出貨方式:'出貨方式',shop:'賣場',商品狀態:'商品狀態'};
+  var fldName={商品名:'商品名',規格:'規格',商品編號:'商品編號',供貨價:'供貨價',售價:'售價',毛利率PC:'毛利率',可賣量:'可賣量',缺貨:'缺貨',出貨方式:'出貨方式',出貨方式清單:'出貨方式（轉單／寄倉）',寄倉:'寄倉上架資料',shop:'賣場',商品狀態:'商品狀態'};
   var fmtv=function(v){ if(v==null) return '（無）'; if(Array.isArray(v)) return v.join('、'); return String(v); };
   var sect=function(title,color,rows){ return '<div style="margin-bottom:10px"><div style="font-weight:700;color:'+color+';margin-bottom:4px">'+title+'</div>'+rows+'</div>'; };
   var addRows=plan.adds.length? '<div style="font-size:12px;color:#374151;line-height:1.7">'+plan.adds.slice(0,200).map(function(x){return '· '+esc(x.料號)+' '+esc(x.商品名||'');}).join('<br>')+(plan.adds.length>200?'<br>…共 '+plan.adds.length+' 筆':'')+'</div>' : '<div style="color:#9ca3af;font-size:12px">無</div>';
@@ -35650,7 +35689,7 @@ function _pchomeFrSrcText(fr){ if(!fr) return ''; if(fr.source==='kpi-actual') r
 function pchomeProfitCalc(entry, shop){
   var segs=(entry&&entry.segments)||[];
   var rows=(segs[PCHOME_SEG[shop]]||{rows:[]}).rows||[];
-  var products=pchomeLoadProducts(), pBy={}; products.forEach(function(p){ pBy[p.料號]=p; });
+  var products=pchomeLoadProducts(), pBy={}; products.forEach(function(p){ pBy[p.料號]=p; }); pchomeProductsOfShop(shop, products).forEach(function(p){ pBy[p.料號]=p; });   // 本賣場檢視蓋過（寄倉的名稱／供貨價／商編）
   var _latestExport=pchomeLatestExport(products);   // 供「消失於清單」推導（lastSeenExport ≠ 最新戳記）
   var pnToCode={}; rows.forEach(function(r){ var pn=String(r['商品編號']||'').trim(), code=String(r['廠商料號']||'').trim(); if(pn&&code&&!pnToCode[pn]) pnToCode[pn]=code; });
   var bySku={}, order=[];
@@ -35772,7 +35811,7 @@ function pchomeProfitCalc(entry, shop){
   //   零銷列營收/銷量/罰金＝0 → 對合計貢獻 0（合計/KPI 與只列有售時完全相同，這是驗收錨點）。
   //   ⚠ 按賣場過濾（寄倉 bug 修）：只推「屬本賣場」的商品（明確寄倉→寄倉、其餘一律轉單；空值/未知安全歸轉單、不讓轉單商品消失）。
   products.forEach(function(p){ var code=String(p.料號||'').trim(); if(!code) return;
-    var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; if(psh!==shop) return;
+    if(!pchomeInShop(p,shop)) return;
     if(!bySku[code]) order.push(code); });
   // ── 自付物流（宅配通運費 按箱＋包材 按訂單）：只「轉單」有；寄倉＝PChome 倉出貨、我方未付→兩項皆 0。退貨不減箱、不回沖包材。皆未稅、不除 1.05。
   //   運費：一箱＝段0 一個不重複出貨單號；每箱 PCHOME_BOX_FREIGHT 按箱內各列營收比例分（單列全給、箱內皆0營收則均分）。無出貨單號列不算箱、不分運費。
@@ -36221,7 +36260,7 @@ function pchomeCalendarMonths(){   // 訂單明細出現過的日曆月(轉單�
 }
 // 日曆月計算：回傳與 pchomeProfitCalc 同形狀（skus/合計/加權淨利率/… + __calendar/fixedKnown 供 render 閘）。
 function pchomeCalendarCalc(calMonth, shop){
-  var products=pchomeLoadProducts(), pBy={}; products.forEach(function(p){ pBy[p.料號]=p; });
+  var products=pchomeLoadProducts(), pBy={}; products.forEach(function(p){ pBy[p.料號]=p; }); pchomeProductsOfShop(shop, products).forEach(function(p){ pBy[p.料號]=p; });   // 本賣場檢視蓋過（寄倉的名稱／供貨價／商編）
   var _latestExport=pchomeLatestExport(products);
   var orders=pchomeLoadOrders();   // keyed by 訂單編號-序號；含轉單日期
   var recon=pchomeLoadRecon();
@@ -36291,7 +36330,7 @@ function pchomeCalendarCalc(calMonth, shop){
 
   // 併入零銷上架品（本賣場）→ 合計不變、動銷率分母用
   products.forEach(function(p){ var code=String(p.料號||'').trim(); if(!code) return;
-    var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; if(psh!==shop) return;
+    if(!pchomeInShop(p,shop)) return;
     if(!bySku[code]){ order.push(code); } });
 
   // ── 自付運費（混合）：已對帳→段0 出貨單號當箱（權威）；未對帳→訂單明細不重複訂單編號當箱（估算）。
@@ -36379,9 +36418,9 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
   var prevT=prevCalc?prevCalc.合計:null, prevLbl=prevKey||'上月';
   var hasPrev=!!(prevCalc && !gate && prevCalc.fixedKnown);
   var kdPct=function(cur,prev){ if(!hasPrev||cur==null||prev==null||prev===0) return {txt:'—',color:'#9ca3af'}; var d=(cur-prev)/Math.abs(prev)*100,up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%',color:up?'#059669':'#dc2626'}; };
-  var _dx=pchomeDxByCode(calc), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
+  var _dx=pchomeDxByCode(calc,shop), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
   var dxRate=dxDen>0?dxNum/dxDen:null;
-  var _pdx=prevCalc?pchomeDxByCode(prevCalc):{num:0,den:0}, pdxDen=_pdx.den;
+  var _pdx=prevCalc?pchomeDxByCode(prevCalc,shop):{num:0,den:0}, pdxDen=_pdx.den;
   var pdxRate=(prevCalc&&pdxDen>0)?_pdx.num/pdxDen:null;
   var dxDelta=(hasPrev&&dxRate!=null&&pdxRate!=null)?(function(){var d=(dxRate-pdxRate)*100,up=d>=0;return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'pp',color:up?'#059669':'#dc2626'};})():{txt:'—',color:'#9ca3af'};
   var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};
@@ -36421,7 +36460,7 @@ var _pchomeSearch={};        // shop → 搜尋字串（照 momo _momoSearch）�
 function pchomeBaseCount(shop, calc){
   var active={}; (calc&&calc.skus||[]).forEach(function(x){ if(!x.discontinued) active[String(x.料號||'').trim()]=1; });
   var set={};
-  (pchomeLoadProducts()||[]).forEach(function(p){ var code=String(p.料號||'').trim(); if(!active[code]) return;
+  pchomeProductsOfShop(shop).forEach(function(p){ var code=String(p.料號||'').trim(); if(!active[code]) return;
     var pn=p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]);
     arr.forEach(function(v){ v=String(v||'').trim(); if(!v) return; var seg=v.split('-'); set[seg.length>1?seg.slice(0,-1).join('-'):v]=1; }); });
   return Object.keys(set).length;
@@ -36430,9 +36469,9 @@ function pchomeBaseCount(shop, calc){
 //   分母＝（目前上架 ∪ 本期有售）那批料號所掛的商編去重數；分子＝其中「本期有售」料號所掛的商編去重數（分子必為分母子集）。
 //   料號→商編取商品主檔（一料號可掛多個商編；多個料號可共用同一商編＝同一款只算一個）。某料號有售＝它掛的商編都算有售（對帳明細只回一個商編，無法分辨該料號哪個商編賣的）。
 //   沒掛商編的料號不進分子分母。只改總表動銷率卡；通路健檢的動銷率（__healthProductSnapshot）仍是料號口徑、沒動。
-function pchomeDxByCode(calc){
+function pchomeDxByCode(calc, shop){
   var map={};
-  (pchomeLoadProducts()||[]).forEach(function(p){ var c=String(p.料號||'').trim(); if(!c) return;
+  pchomeProductsOfShop(shop).forEach(function(p){ var c=String(p.料號||'').trim(); if(!c) return;
     var pn=p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), bs=[];
     arr.forEach(function(v){ v=String(v||'').trim(); if(!v) return; var seg=v.split('-'); bs.push(seg.length>1?seg.slice(0,-1).join('-'):v); });
     map[c]=bs; });
@@ -36653,9 +36692,9 @@ function pchomeProfitTabHTML(shop){
   var hasPrev=!!(prevCalc && !open);   // 有上期資料【且本期已結束】才算 delta；否則「—」（同 momo：無上期/本期未完都靜音）
   var kdPct=function(cur,prev){ if(!hasPrev||cur==null||prev==null||prev===0) return {txt:'—',color:'#9ca3af'}; var d=(cur-prev)/Math.abs(prev)*100,up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%',color:up?'#059669':'#dc2626'}; };   // 絕對量：%、綠▲/紅▼
   // 動銷率（照 momo）：分子＝本期有售(不論上下架)、分母＝目前上架 ∪ 本期有售
-  var _dx=pchomeDxByCode(calc), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
+  var _dx=pchomeDxByCode(calc,shop), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
   var dxRate=dxDen>0?dxNum/dxDen:null;
-  var _pdx=prevCalc?pchomeDxByCode(prevCalc):{num:0,den:0}, pdxDen=_pdx.den;
+  var _pdx=prevCalc?pchomeDxByCode(prevCalc,shop):{num:0,den:0}, pdxDen=_pdx.den;
   var pdxRate=(prevCalc&&pdxDen>0)?_pdx.num/pdxDen:null;
   var dxDelta=(hasPrev&&dxRate!=null&&pdxRate!=null)?(function(){var d=(dxRate-pdxRate)*100,up=d>=0;return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'pp',color:up?'#059669':'#dc2626'};})():{txt:'—',color:'#9ca3af'};   // pp、綠▲/紅▼（升＝好）
   var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};   // pp、中性灰（不分方向，照 momo）
