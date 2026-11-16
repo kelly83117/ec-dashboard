@@ -33522,11 +33522,11 @@ window.__healthProductSnapshot=function(platform,shop,month){
           pchomeProductsOfShop(sub,products).forEach(p=>{ const c=String(p.料號||'').trim(); if(!c)return;
             (Array.isArray(p.商品編號)?p.商品編號:(p.商品編號==null?[]:[p.商品編號])).forEach(v=>{ v=String(v||'').trim(); if(!v)return;
               const seg=v.split('-'),b=seg.length>1?seg.slice(0,-1).join('-'):v; (pages[c]=pages[c]||[]); if(pages[c].indexOf(b)<0)pages[c].push(b); }); });
-          const calc=pchomeCalendarCalc(month,sub),skus=(calc&&calc.skus)||[];
+          const calc=pchomeCalendarCalc(month,sub),skus=(calc&&calc.skus)||[], soldB={}; ((calc&&calc.soldBases)||[]).forEach(b=>{ soldB[b]=1; });
           out.subTotals[sub]={sold:calc.bizCount||0,total:skus.filter(x=>!x.discontinued||x.hasBiz).length};
           skus.forEach(x=>{ const c=String(x.料號||'').trim();
             out.rows.push({key:c,sub,pages:pages[c]||[],name:String(x.商品名||''),rev:+x.營收||0,profit:x.淨利==null?null:+x.淨利,qty:+x.銷量||0,
-              sold:!!x.hasBiz,active:!x.discontinued,costKnown:!!x.costKnown,cost:x.成本==null?null:+x.成本}); });   // cost：健檢商品標籤算毛利率用
+              sold:!!x.hasBiz,soldPages:(calc&&Array.isArray(calc.soldBases))?(pages[c]||[]).filter(b=>soldB[b]):null,active:!x.discontinued,costKnown:!!x.costKnown,cost:x.成本==null?null:+x.成本}); });   // cost：健檢商品標籤算毛利率用；soldPages＝該列商編裡自己有銷售的（動銷率商編口徑）
           try{ const ol=pchomeLoadOptlog(sub)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(e=>bump(s,e&&e.date))); }catch{}
         });
       }
@@ -36018,6 +36018,11 @@ function pchomeProfitCalc(entry, shop){
       var sum=list.reduce(function(a,x){return a+Math.max(x.rev,0);},0);
       list.forEach(function(x){ var share=(sum>0)?(PCHOME_PACKAGING_COST*Math.max(x.rev,0)/sum):(PCHOME_PACKAGING_COST/list.length); 包材By[x.code]=(包材By[x.code]||0)+share; }); });
   }
+  // 動銷率（商編口徑）：每筆銷售列自己的商編淨銷量（段0 數量 − 退貨列數量，退貨列也有商品編號）>0 才算該商編有售
+  var _soldPn={}; rows.forEach(function(r){ var b=pchomeBaseCode(r['商品編號']); if(b) _soldPn[b]=(_soldPn[b]||0)+(Number(r['數量'])||0); });
+  segs.forEach(function(s){ if(!retNames[String(s.對帳項目||'').trim()]) return; (s.rows||[]).forEach(function(r){ var b=pchomeBaseCode(r['商品編號']); if(b) _soldPn[b]=(_soldPn[b]||0)-(Number(r['數量'])||0); }); });
+  var _hasPn=rows.some(function(r){ return !!pchomeBaseCode(r['商品編號']); });   // 訂單明細（未對帳合成月）只有料號、沒有商品編號 → 分不出商編，不給 soldBases（動銷率退回「有售料號掛的商編」舊口徑）
+  var soldBases=_hasPn?Object.keys(_soldPn).filter(function(b){ return _soldPn[b]>0; }):undefined;
   var skus=order.map(function(code){
     var o=bySku[code]||{料號:code,商品名:'',規格:'',營收:0,銷量:0,罰金:0,reconPN:'',單位成本:0};   // 零銷（不在 recon）→ 空業績殼
     var p=pBy[code], unit=(p&&p.cost!=null)?Number(p.cost):null, ck=(unit!=null);
@@ -36067,7 +36072,7 @@ function pchomeProfitCalc(entry, shop){
   return { skus:skus, 未分攤:unalloc, 未分攤未稅:unalloc/1.05, dTotal:dTotal, dSource:dSource, feeState:feeState, penaltyUnattributed:penaltyUnattributed,
     合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,費用合計:費用合計Total,運費:totFreight,包材:totPack,淨利:totProfit},
     加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
-    bizCount:biz.length, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
+    bizCount:biz.length, soldBases:soldBases, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
     簡訊費推算:{列數:smsShipLineCount, 退貨物流筆數:smsReturnLogisticsCount, 推算:smsEst, 含稅:smsEst, 未稅:smsEst/1.05}, 簡訊費實際:smsActual,
     // 簡訊費五個自驗欄（月對帳核對報告用；docs §9）：推算＝出貨列數＋退貨物流筆數；實際＝對帳單 D5。
     smsEstimate:smsEst, smsShipLineCount:smsShipLineCount, smsReturnLogisticsCount:smsReturnLogisticsCount, smsReturnGoodsCount:smsReturnGoodsCount, smsActualD5:smsActual,
@@ -36646,17 +36651,22 @@ function pchomeBaseCount(shop, calc){
 }
 // 動銷率（商編口徑，2026-11-16 老闆定案：分母改商編數）：商編＝商品編號去最後一段規格碼、去重（同 pchomeBaseCount 的定義）。
 //   分母＝（目前上架 ∪ 本期有售）那批料號所掛的商編去重數；分子＝其中「本期有售」料號所掛的商編去重數（分子必為分母子集）。
-//   料號→商編取商品主檔（一料號可掛多個商編；多個料號可共用同一商編＝同一款只算一個）。某料號有售＝它掛的商編都算有售（對帳明細只回一個商編，無法分辨該料號哪個商編賣的）。
+//   料號→商編取商品主檔（一料號可掛多個商編；多個料號可共用同一商編＝同一款只算一個）。分子＝calc.soldBases（每筆銷售列自己的商編、扣退貨後淨數量>0；2026-11-16 起，之前是「有售料號掛的商編都算」會略為高估）。
 //   沒掛商編的料號不進分子分母。只改總表動銷率卡；通路健檢的動銷率（__healthProductSnapshot）仍是料號口徑、沒動。
+// 商品編號 → 商編（去最後一段規格碼；沒有「-」就原樣）。商編款數、動銷率、健檢商品頁共用同一個規則。
+//   動銷率分子的精確口徑（每筆銷售列自己的商編）只在【已對帳帳務月】做得到（對帳 CSV 段0 每列有商品編號）；
+//   日曆月／未對帳月只有訂單明細（沒有商品編號欄）→ 退回「有售料號掛的商編都算有售」（略為高估，十月實測差 1 個）。
+function pchomeBaseCode(v){ v=String(v||'').trim(); if(!v) return ''; var seg=v.split('-'); return seg.length>1?seg.slice(0,-1).join('-'):v; }
 function pchomeDxByCode(calc, shop){
   var map={};
   pchomeProductsOfShop(shop).forEach(function(p){ var c=String(p.料號||'').trim(); if(!c) return;
     var pn=p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), bs=[];
     arr.forEach(function(v){ v=String(v||'').trim(); if(!v) return; var seg=v.split('-'); bs.push(seg.length>1?seg.slice(0,-1).join('-'):v); });
     map[c]=bs; });
-  var den={}, num={};
+  var den={}, num={}, precise=!!(calc&&Array.isArray(calc.soldBases));
   ((calc&&calc.skus)||[]).forEach(function(x){ if(!(!x.discontinued||x.hasBiz)) return;
-    (map[String(x.料號||'').trim()]||[]).forEach(function(b){ den[b]=1; if(x.hasBiz) num[b]=1; }); });
+    (map[String(x.料號||'').trim()]||[]).forEach(function(b){ den[b]=1; if(!precise && x.hasBiz) num[b]=1; }); });   // 舊口徑（沒有 soldBases）：有售料號掛的商編都算有售
+  if(precise) calc.soldBases.forEach(function(b){ den[b]=1; num[b]=1; });   // 精確口徑：只有「自己有銷售」的商編算有售（同 MOMO 商品頁／蝦皮商品 ID）；賣出的商編一定進分母
   return {num:Object.keys(num).length, den:Object.keys(den).length};
 }
 // 總表表格 body：依目前模式重算 calc→套排序/篩選/搜尋→寫進 #pchome-tbl-<shop>。搜尋只呼叫這支（殼不動、焦點不掉）。

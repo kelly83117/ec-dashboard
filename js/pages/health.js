@@ -589,6 +589,7 @@ function _hlProdNormalize(raw) {
       const ck = _hlCompanyKey(r.key, 'code:' + r.key);
       return { key: r.key, sub: r.sub, name: r.name, company: ck.key, fallback: ck.fallback, pages,
         rev: +r.rev || 0, profit: r.profit == null ? null : +r.profit, costKnown: !!r.costKnown && r.profit != null, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0,
+        soldPages: Array.isArray(r.soldPages) ? r.soldPages.slice() : null,   // 這一列的商編裡「自己有銷售」的（PChome 動銷率商編口徑；沒有＝舊口徑，整列有售就整列的頁都算有售）
         cost: r.cost == null || !_hlFinite(+r.cost) ? null : +r.cost }; });
   }
   base.rows = rows;
@@ -608,7 +609,8 @@ function _hlSellThrough(rows) {
     if (inDen) c.den = true; if (r.sold) c.sold = true;
     r.pages.forEach(p => {
       const g = page[p] || (page[p] = { den: false, sold: false });
-      if (inDen) g.den = true; if (r.sold) g.sold = true;
+      if (inDen) g.den = true;
+      if (Array.isArray(r.soldPages) ? r.soldPages.indexOf(p) >= 0 : r.sold) g.sold = true;   // soldPages 有給（PChome）→ 頁要自己有銷售才算有售；沒給（MOMO／蝦皮）→ 照舊
       if (inDen) c.pages[p] = true;
     });
   });
