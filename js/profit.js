@@ -11201,7 +11201,14 @@ const KPI_GROUPS=[
   //   稅金＝公式欄（營收×5/105，同 MOMO；既有手填值＝手動覆蓋保留、不算格數）。耗材＝autoFill（訂單數×2.5，商城兩店；灰底可覆蓋、不算格數；既有手填值保留）。
   //   退貨運費＝手填、不算格數（目前無資料源，留白不算缺格；空白在純利以 0 計）。酷澎買斷淨利表無資料源 → 全手填（耗材也手填、不 autoFill；退貨運費同樣不算格數）。
   {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-露營館','酷澎買斷'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費'},{k:'ret',l:'退貨運費'},{k:'material',l:'耗材'}],
+    // desc＝填寫模式表頭 ⓘ「資料來源」（2026-11-16 補齊：每一欄都要有；改帶入口徑要同步改這裡）。
+    manual:[
+      {k:'qty',l:'訂單數',desc:'來源：淨利表 → 酷澎 → 訂單明細，該月訂單編號數（非件數）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
+      {k:'rev',l:'營收',desc:'來源：淨利表酷澎訂單明細，Σ選項價格×量 − 賣家券（淨額，營收已是退貨後）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
+      {k:'cost',l:'商品成本',desc:'來源：淨利表酷澎訂單明細 × 莫筆克成本表，Σ成本×量（缺成本的原廠編號可補）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
+      {k:'fee',l:'平台費',desc:'來源：淨利表酷澎訂單明細，營收 × (成交 5.5% ＋ 金流 2% ＋ 免運 7%) ＋ 發票 $2／訂單；按「從淨利表帶入」寫入，酷澎買斷手填。'},
+      {k:'ret',l:'退貨運費',desc:'來源：手填（目前沒有資料來源，留白不算缺格，純利以 0 計）。'},
+      {k:'material',l:'耗材',desc:'商城兩店：訂單數 × 單價（自動，可手動覆蓋）；酷澎買斷：手填（留白不算缺格）。'}],
     order:['qty','rev','cost','fee','ret','tax','material'],   // 填寫模式欄序（tax 是公式欄、由 fillFormula 插在退貨運費後、耗材前）
     fillFormula:['tax'],
     // 退貨運費、耗材：都不計入填寫格數（分母只算 訂單數／營收／商品成本／平台費）。
@@ -11219,7 +11226,16 @@ const KPI_GROUPS=[
     // shopSince：這家店從這個月起才算進填寫進度／寄倉運費共用格（見 _kpiFillSlots、_kpiFieldMergeStatus）。
     //   之前的月份數字照樣可以填、合計照樣算，只是不列缺格、也不參與共用格攤提（歷史月份結果不變）。
     shopSince:{'mo+2號店(玩樂)':'2026-10'},
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款'}],
+    // desc＝填寫模式表頭 ⓘ「資料來源」（2026-11-16 補齊；來源＝「從對帳單帶入」，見 _kpiMomoAutoPlan）。
+    manual:[
+      {k:'qty',l:'訂單數',desc:'甲配／乙配：C1105 出貨報表不重複配送單號（排除未出即退）；MO+：月對帳明細不重複訂單號碼。按「從對帳單帶入」寫入。'},
+      {k:'rev',l:'營收(進價稅)',desc:'甲配／乙配：月對帳單 (對帳金額 ＋ 客退) × 1.05；MO+：對帳明細 A 貨款 ＋ B 運費代收（＝PDF 發票金額）。含稅，按「從對帳單帶入」寫入。'},
+      {k:'cost',l:'商品成本',desc:'甲配／乙配：MOMO 總表整月 Σ對帳數量 × 成本；MO+：對帳明細數量（依原廠編號）× 成本表成本。成本未稅，缺成本的品號不算。按「從對帳單帶入」寫入。'},
+      {k:'ret',l:'退貨金額',desc:'甲配／乙配：客退 × 1.05 ＋ 退貨貨款分頁 −(對帳金額＋稅額)；MO+：0（退貨已在 A 貨款扣掉）。按「從對帳單帶入」寫入。'},
+      {k:'ship',l:'寄倉運費',desc:'來源：手填（照帳單）。MO+ 三店共用一格、填總額，按訂單數攤進各店純利；甲配不適用。'},
+      {k:'misc',l:'各項費用',desc:'甲配／乙配：專屬費用（甲＝物流費用；乙＝寄倉分攤運費＋倉租）＋ 共用費用依營收佔比分攤；MO+：C 物流運費 ＋ D 手續費。含稅，按「從對帳單帶入」寫入。'},
+      {k:'material',l:'耗材',desc:'甲配、MO+ 各店：訂單數 × $3（自動，可手動覆蓋）；乙配（寄倉）不適用。'},
+      {k:'receivable',l:'應收帳款',desc:'甲配／乙配共用一格：月對帳 PDF 實際應付 A＋C−E＋G；MO+：每店 A＋B−C−D（＝PDF 實際應付）。不進純利。按「從對帳單帶入」寫入。'}],
     formula:[
       // 2026-10-01：稅金／純利／純利率改用「實際營收」這一格（有手動覆蓋就用覆蓋值，沒有就是 營收(進價稅) − 退貨金額）。
       //   ⚠ 依賴 _kpiCalcAll 依 formula 陣列順序填值：actualRev 必須排在 tax／pure 前面。
@@ -11283,8 +11299,12 @@ const KPI_GROUPS=[
     commonShop:'PChome',
     fieldMerge:{ship:{notApplicable:['PChome']},material:{notApplicable:['PChome-寄倉']}},
     // fee、material 的 desc：表頭 ⓘ 說明（手填欄位有 desc 才顯示 ⓘ）。material 用 getter：PCHOME_PACKAGING_COST 宣告在後面
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'平台費 = 對帳單 (B)+(C)+(D)，含退貨物流費、罰金、固定費（含稅原值）'},
-      {k:'ship',l:'寄倉運費'},
+    manual:[
+      {k:'qty',l:'訂單數',desc:'來源：PChome 月對帳明細，不重複訂單編號（退貨不回沖）；按「從對帳單帶入」寫入。'},
+      {k:'rev',l:'營收',desc:'來源：PChome 對帳單 (A)，含稅（＝訂單貨款 − 退貨貨款）；按「從對帳單帶入」寫入。'},
+      {k:'cost',l:'商品成本',desc:'來源：PChome 對帳明細 × 商品主檔成本，Σ成本 × 淨數量（退貨回沖成本）；按「從對帳單帶入」寫入。'},
+      {k:'fee',l:'平台費',desc:'平台費 = 對帳單 (B)+(C)+(D)，含退貨物流費、罰金、固定費（含稅原值）'},
+      {k:'ship',l:'寄倉運費',desc:'來源：手填（照寄倉帳單）；轉單不適用。'},
       {k:'material',l:'耗材',get desc(){return '轉單：訂單數 × $'+KPI_MATERIAL_PER_ORDER.pchome+'（自動計算，同淨利表包材：每筆訂單 $3）；寄倉：不適用';}}],
     commonCostLabel:'宅配通運費（我方自付的出貨運費；整組一個數字）',
     commonCostShortLabel:'物流運費',
@@ -11309,9 +11329,13 @@ const KPI_GROUPS=[
     // 2026-11-04 主站「從報表帶入」（app/friday_recon，見下方「FriDay 主站對帳資料」）：訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
     //   物流運費（宅配運費，我們自付）手填；稅金＝公式欄（同 MOMO）。手續費只改顯示名稱「平台費」（key 還是 fee）。拿掉退貨運費（雲端既有值不刪；查過正式站沒有存值）。
     //   2026-11-05 耗材改自動計算（autoFill＝訂單數 × $3，照 MOMO 甲配耗材；灰底、即時算、可手動覆蓋、不計入填寫格數）；i站同。
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},
+    manual:[
+      {k:'qty',l:'訂單數',desc:'來源：FriDay 訂單匯出報表的訂單數；按「從報表帶入」寫入（主站；i站手填）。'},
+      {k:'rev',l:'營收',desc:'來源：FriDay 訂單匯出報表的營收；按「從報表帶入」寫入（主站；i站手填）。'},
+      {k:'cost',l:'商品成本',desc:'來源：FriDay 訂單匯出 × 成本表（原廠編號），Σ成本 × 數量；按「從報表帶入」寫入（主站；i站手填）。'},
       {k:'fee',l:'平台費',get desc(){return '平台費 = 活動贊助費＋銷售獎勵金（Σ總貨款 × 2% × 2）＋ 超商物流費（有物流包裹號的超商訂單 × $'+FRIDAY_CVS_FEE+'）＋ 系統使用費 $'+FRIDAY_SYS_FEE+' ＋ 訂單處理費（訂單數 × $'+FRIDAY_ORDER_FEE+'）＋ 促銷折扣負擔（結帳單明細加總）';}},
-      {k:'ship',l:'物流運費'},{k:'material',l:'耗材'}],
+      {k:'ship',l:'物流運費',desc:'來源：手填（宅配運費，我方自付，照帳單）。'},
+      {k:'material',l:'耗材',desc:'訂單數 × $'+KPI_MATERIAL_PER_ORDER.friday+'（自動，可手動覆蓋）'}],
     // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。
     autoFill:{material:{shops:['FriDay-主站','FriDay-i站'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*KPI_MATERIAL_PER_ORDER.friday,desc:'耗材 = 訂單數 × $'+KPI_MATERIAL_PER_ORDER.friday+'（可手動覆蓋）'}},
     order:['qty','rev','cost','fee','tax','ship','material','pure','pureRate'],
@@ -11334,7 +11358,14 @@ const KPI_GROUPS=[
     fieldMerge:{ship:{notApplicable:['博客來-轉單']},freight:{notApplicable:['博客來-寄倉']}},
     // 耗材 autoFill：照 MOMO 甲配耗材的寫法（存了值＝手動覆蓋、沒存＝訂單數×單價的灰底預設、不算填寫進度）。寄倉／轉單都適用。
     autoFill:{material:{shops:['博客來-寄倉','博客來-轉單'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*KPI_MATERIAL_PER_ORDER.books,desc:'耗材 = 訂單數 × $'+KPI_MATERIAL_PER_ORDER.books+'（可手動覆蓋）'}},
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'},{k:'freight',l:'物流運費'},{k:'material',l:'耗材'}],
+    manual:[
+      {k:'qty',l:'訂單數',desc:'來源：博客來訂單明細報表的訂單明細筆數；按「從報表帶入」寫入（寄倉；轉單手填）。'},
+      {k:'rev',l:'營收',desc:'來源：博客來對帳表，寄倉 Σ成本小計；按「從報表帶入」寫入（寄倉；轉單手填）。'},
+      {k:'cost',l:'商品成本',desc:'來源：博客來對帳表商品 × 成本表（商品貨號＝原廠編號），Σ成本 × 淨數量；按「從報表帶入」寫入（寄倉；轉單手填）。'},
+      {k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},
+      {k:'ship',l:'寄倉運費',desc:'來源：手填（照寄倉帳單）；轉單不適用。'},
+      {k:'freight',l:'物流運費',desc:'來源：手填（我方自付的出貨運費）；寄倉由博客來出貨，不適用。'},
+      {k:'material',l:'耗材',desc:'訂單數 × $'+KPI_MATERIAL_PER_ORDER.books+'（自動，可手動覆蓋）'}],
     order:['qty','rev','cost','fee','tax','ship','freight','material','pure','pureRate'],
     formula:[
       // ⚠ tax 要排在 pure 前面（_kpiCalcAll 依序算）
@@ -34567,19 +34598,19 @@ function pchomeOpenAnalysis(shop, 料號){
   var ov=document.getElementById('pchome-analysis-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-analysis-overlay'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
   ov.onclick=function(e){ if(e.target===ov) pchomeCloseAnalysis(); };
-  _pchomeAnaTab='cost';   // 換商品／重開都從第一個分頁開始（_pchomeAnaTab 只在彈窗開著時代表目前分頁，不跨商品記憶）
+  _pchomeAnaTab='analysis';   // 換商品／重開都從第一個分頁開始（_pchomeAnaTab 只在彈窗開著時代表目前分頁，不跨商品記憶）
   pchomeRenderAnalysis(shop, p);
 }
 function pchomeCloseAnalysis(){ _pchomePC=null; try{ _pchomeAnalysisCharts.forEach(function(c){try{c.destroy();}catch(e){}}); _pchomeAnalysisCharts=[]; }catch(e){} var ov=document.getElementById('pchome-analysis-overlay'); if(ov) ov.remove(); }
 // 分頁切換（照 momo momoAnaSwitchTab）：純切 display、不重算；月銷量圖只建一次（pchomeRenderAnalysis），切到定價分析頁才 resize（隱藏時尺寸為 0，不重建、不重複 canvas）。
 function pchomeAnaSwitchTab(tab){
   _pchomeAnaTab=tab;
-  ['cost','pricing','opt'].forEach(function(t){
+  ['analysis','pricing','optlog'].forEach(function(t){
     var pane=document.getElementById('pch-ana-pane-'+t); if(pane) pane.style.display=(t===tab)?'':'none';
     var b=document.getElementById('pch-ana-tab-'+t);
     if(b){ var on=(t===tab); b.setAttribute('aria-selected',on?'true':'false'); b.style.fontWeight=on?'700':'500'; b.style.color=on?'#4f46e5':'#64748b'; b.style.borderBottom=on?'2px solid #4f46e5':'2px solid transparent'; }
   });
-  if(tab==='pricing'){ _pchomeAnalysisCharts.forEach(function(c){ try{ c.resize(); }catch(e){} }); }
+  if(tab==='analysis'){ _pchomeAnalysisCharts.forEach(function(c){ try{ c.resize(); }catch(e){} }); }   // 圖表只建一次；隱藏時尺寸為 0，切回分析頁才 resize（照 momoAnaSwitchTab）
 }
 // ───────── PChome 總表「📊 階層圖」淨利率分佈 modal（照 momoOpenHierarchy 原樣複製；PChome 口徑）─────────
 function pchomeHierarchyStats(shop){
@@ -34670,7 +34701,7 @@ function pchomeOpenHierarchy(shop){
   document.body.appendChild(ov);
 }
 var _pchomeAnalysisCharts=[];   // 單品分析 modal 的 Chart.js 實例，關窗時 destroy（比照 momo _momoAnalysisCharts，避免記憶體洩漏/重複 canvas）
-var _pchomeAnaTab='cost';   // 單品分析 modal 目前分頁（cost 成本／pricing 定價分析／opt 優化）；模組變數、不存 localStorage（比照 momo _momoAnaTab）
+var _pchomeAnaTab='analysis';   // 單品分析 modal 目前分頁（cost 成本／pricing 定價分析／opt 優化）；模組變數、不存 localStorage（比照 momo _momoAnaTab）
 // 月銷量圖資料：逐月取「總表那列同一個銷量」（pchomeProfitCalc / pchomeCalendarCalc 的 skus[].銷量），不另開計算路徑。
 //   橫軸跟總表當下模式（帳務月／日曆月）。每月 calc 只算一次（forEach 內，非每根 bar 重算）。
 //   🔴 刻意偏離 momo（momoSkuMonthly 只留有生意的月）：改成「第一個有銷量的月 → 最新有資料的月」，中間零銷量月也畫 bar=0；
@@ -34684,9 +34715,9 @@ function pchomeSkuMonthly(shop, code){
     var calc=null, unrecon=false;
     if(mode==='calendar'){ calc=pchomeCalendarCalc(m, shop); unrecon=!(calc&&calc.fixedKnown); }
     else { var entry=pchomeMonthEntry(m); calc=entry?pchomeProfitCalc(entry, shop):null; unrecon=!!(entry&&entry.__fromOrders); }
-    var qty=0;
-    if(calc&&calc.skus){ var row=calc.skus.filter(function(x){return String(x.料號)===String(code);})[0]; if(row) qty=Number(row.銷量)||0; }
-    out.push({ mo:m, label:m.slice(2,4)+'/'+m.slice(5,7), qty:qty, unrecon:unrecon });
+    var qty=0, margin=null;
+    if(calc&&calc.skus){ var row=calc.skus.filter(function(x){return String(x.料號)===String(code);})[0]; if(row){ qty=Number(row.銷量)||0; if(row.hasBiz&&row.costKnown&&row.淨利率!=null&&isFinite(row.淨利率)) margin=Math.round(row.淨利率*1000)/10; } }   // margin：總表同一支 calc 的淨利率（含運費包材）％；無業績／缺成本→null（折線斷開）
+    out.push({ mo:m, label:m.slice(2,4)+'/'+m.slice(5,7), qty:qty, margin:margin, unrecon:unrecon });
   });
   var firstIdx=-1; for(var i=0;i<out.length;i++){ if(out[i].qty>0){ firstIdx=i; break; } }
   if(firstIdx<0) return [];   // 從未有銷量 → 空（呼叫端顯空狀態、不畫空圖）
@@ -34741,7 +34772,7 @@ function pchomePCReset(){
   pchomePCRefresh();
 }
 function pchomePCRender(){
-  var el=document.getElementById('pch-ana-pc'); var S=_pchomePC; if(!el||!S) return;
+  var el=document.getElementById('pch-ana-pane-pricing'); var S=_pchomePC; if(!el||!S) return;
   var LB='font-size:13px;font-weight:700;color:#334155', INP='height:44px;box-sizing:border-box;border-radius:8px;padding:0 12px;font-size:16px;width:100%;'+_MOMO_PC_PLAIN;
   var fld=function(key,label,note){ return '<div style="display:flex;flex-direction:column;gap:6px"><label for="pch-pc-'+key+'" style="'+LB+'">'+label+'</label>'
     +'<input id="pch-pc-'+key+'" type="number" step="any" value="'+(S.cur[key]==null?'':S.cur[key])+'" oninput="pchomePCInput(\''+key+'\',this.value)" style="'+INP+'">'
@@ -34773,41 +34804,49 @@ function pchomePCRefresh(){
       +'<button onclick="pchomePCReset()" '+(n?'':'disabled')+' style="height:40px;padding:0 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;cursor:pointer;font-family:inherit;'+(n?'':'opacity:.5;cursor:not-allowed;')+'">全部還原</button></div>'; }
 }
 function pchomeRenderAnalysis(shop, p){
+  // 版面照 momo 商品分析彈窗（momoRenderAnalysis）：標題列＋三分頁（分析｜定價與成本｜優化紀錄）、max-width 900。
+  //   分析頁＝目前值 → 月銷量長條（上方標數字）→ 淨利率折線 → 商品異動時間軸；定價與成本頁＝試價工作台（pchomePCRender）；優化紀錄頁＝優化紀錄區塊。
+  //   PChome 沒有 S1103（瀏覽量／成交均價）與跨通路 → 那兩區塊不放。「目前值」（總表同口徑淨利率）是 PChome 自己的需求，放分析頁最上方。
   var ov=document.getElementById('pchome-analysis-overlay'); if(!ov) return;
   var esc=_momoEsc;
   var disc=!pchomeIsActive(p)?' <span style="font-size:12px;color:#9ca3af;font-weight:600">· 已下架</span>':'';
   var pnstr=(p.商品編號||[]).join('、');
   var series=pchomeSkuMonthly(shop, p.料號), modeLbl=(_pchomeViewMode[shop]==='calendar')?'日曆月':'帳務月', hasUnrecon=series.some(function(s){return s.unrecon;});
   var tabBtn=function(id,label){ var on=(_pchomeAnaTab===id); return '<button role="tab" id="pch-ana-tab-'+id+'" aria-selected="'+(on?'true':'false')+'" onclick="pchomeAnaSwitchTab(\''+id+'\')" style="padding:10px 16px;border:none;background:none;font-size:14px;font-weight:'+(on?'700':'500')+';color:'+(on?'#4f46e5':'#64748b')+';border-bottom:'+(on?'2px solid #4f46e5':'2px solid transparent')+';cursor:pointer;font-family:inherit">'+label+'</button>'; };
-  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">'
+  var empty='<div style="font-size:12px;color:#94a3b8;padding:16px;text-align:center;background:#f8fafc;border-radius:8px">此商品尚無銷量資料。</div>';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:900px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">'
     +'<div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
     +'<div style="min-width:0"><div style="font-size:16px;font-weight:800;color:#1e293b;line-height:1.35">'+esc(p.商品名||p.料號)+disc+'</div>'
     +'<div style="font-size:12px;color:#94a3b8;margin-top:2px">原廠編號 '+esc(p.料號||'—')+(pnstr?' · PChome 商品編號 '+esc(pnstr):'')+' · '+esc(shop)+'</div></div>'
     +'<button onclick="pchomeCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button></div>'
-    +'<div role="tablist" style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid #e2e8f0">'+tabBtn('cost','成本')+tabBtn('pricing','定價分析')+tabBtn('opt','優化')+'</div>'
+    +'<div role="tablist" style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid #e2e8f0">'+tabBtn('analysis','分析')+tabBtn('pricing','定價與成本')+tabBtn('optlog','優化紀錄<span id="pch-ana-tab-optlog-n"></span>')+'</div>'
     +'<div style="padding:16px 20px;max-height:calc(100vh - 200px);overflow:auto">'
-    +'<div id="pch-ana-pane-cost" style="'+(_pchomeAnaTab==='cost'?'':'display:none')+'">'
-    +'<div class="mm-ana-sec"><div class="mm-ana-h">目前值</div>'+pchomeAnaCurrentHTML(shop,p)+'</div>'
-    +'<div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>'+pchomeHistoryTimelineHTML(p.料號)+'</div>'
+    +'<div id="pch-ana-pane-analysis" style="'+(_pchomeAnaTab==='analysis'?'':'display:none')+'">'
+      +'<div class="mm-ana-sec"><div class="mm-ana-h">目前值</div>'+pchomeAnaCurrentHTML(shop,p)+'</div>'
+      +'<div class="mm-ana-sec"><div class="mm-ana-h">月銷量（件）· '+modeLbl+'</div>'
+        +(series.length?'<div style="position:relative;height:180px"><canvas id="pch-ana-qty"></canvas></div>'+(hasUnrecon?'<div style="font-size:11px;color:#94a3b8;margin-top:4px"><span style="color:#c7d2fe">■</span> 淺色＝未對帳月（銷量為應出貨估算）</div>':''):empty)+'</div>'
+      +'<div class="mm-ana-sec"><div class="mm-ana-h">淨利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:'+_MOMO_CY+'">■</span> 青=已對帳(系統計算)　<span style="color:'+_MOMO_GY+'">■</span> 灰=未對帳(估算)</span></div>'
+        +(series.length?'<div style="position:relative;height:160px"><canvas id="pch-ana-margin"></canvas></div><div style="font-size:11px;color:#d97706;margin-top:4px">註：各月淨利率取總表同一支計算（含運費包材）；成本一律用商品主檔「目前」成本回算（無歷史成本版本），改成本後歷史月會一起變，看趨勢別看絕對值。缺成本或當月沒有業績的月份不畫點。</div>':empty)+'</div>'
+      +'<div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>'+pchomeHistoryTimelineHTML(p.料號)+'</div>'
     +'</div>'
-    +'<div id="pch-ana-pane-pricing" style="'+(_pchomeAnaTab==='pricing'?'':'display:none')+'">'
-    +'<div class="mm-ana-sec"><div class="mm-ana-h">試價工作台</div><div id="pch-ana-pc"></div></div>'
-    +'<div class="mm-ana-sec"><div class="mm-ana-h">月銷量（件）· '+modeLbl+'</div>'
-      +(series.length
-        ? '<div style="position:relative;height:180px"><canvas id="pch-ana-qty"></canvas></div>'+(hasUnrecon?'<div style="font-size:11px;color:#94a3b8;margin-top:4px"><span style="color:#c7d2fe">■</span> 淺色＝未對帳月（銷量為應出貨估算）</div>':'')
-        : '<div style="font-size:12px;color:#94a3b8;padding:16px;text-align:center;background:#f8fafc;border-radius:8px">此商品尚無銷量資料。</div>')
-    +'</div>'
-    +'</div>'
-    +'<div id="pch-ana-pane-opt" style="'+(_pchomeAnaTab==='opt'?'':'display:none')+'">'
-    +'<div class="mm-ana-sec" id="pchome-optlog-sec"></div>'
-    +'</div>'
+    +'<div id="pch-ana-pane-pricing" style="'+(_pchomeAnaTab==='pricing'?'':'display:none')+'"></div>'
+    +'<div id="pch-ana-pane-optlog" style="'+(_pchomeAnaTab==='optlog'?'':'display:none')+'"><div class="mm-ana-sec" id="pchome-optlog-sec"></div></div>'
     +'</div></div>';
-  // 月銷量長條（innerHTML 後建立；存實例供關窗 destroy）。外觀全照 momo：bar/180px/borderRadius4/y整數/無圖例/無數字標示/hover tooltip。
+  // 圖表（innerHTML 後同步建立；存實例供關窗 destroy）。月銷量外觀照 momo：bar/180px/borderRadius4/y整數/無圖例/長條上方標數字（含 0）；淨利率折線照 momo：160px、青/灰點、y 軸 %。
   _pchomeAnalysisCharts.forEach(function(c){try{c.destroy();}catch(e){}}); _pchomeAnalysisCharts=[];
-  if(typeof Chart!=='undefined' && series.length){ var cv=document.getElementById('pch-ana-qty');
-    if(cv) _pchomeAnalysisCharts.push(new Chart(cv.getContext('2d'),{ type:'bar',
-      data:{labels:series.map(function(s){return s.label;}), datasets:[{label:'月銷量', data:series.map(function(s){return s.qty;}), backgroundColor:series.map(function(s){return s.unrecon?'#c7d2fe':'#5b5fcf';}), borderRadius:4}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} })); }
+  if(typeof Chart!=='undefined' && series.length){
+    var labels=series.map(function(s){return s.label;});
+    var barLabels={ id:'pchomeBarLabels', afterDatasetsDraw:function(chart){ var ctx=chart.ctx; chart.data.datasets.forEach(function(ds,di){ var meta=chart.getDatasetMeta(di); if(!meta||meta.hidden) return; meta.data.forEach(function(bar,i){ var v=ds.data[i]; if(v==null) return; ctx.save(); ctx.fillStyle=v===0?'#94a3b8':'#475569'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(String(v), bar.x, bar.y-3); ctx.restore(); }); }); } };
+    var cv=document.getElementById('pch-ana-qty');
+    if(cv) _pchomeAnalysisCharts.push(new Chart(cv.getContext('2d'),{ type:'bar', plugins:[barLabels],
+      data:{labels:labels, datasets:[{label:'月銷量', data:series.map(function(s){return s.qty;}), backgroundColor:series.map(function(s){return s.unrecon?'#c7d2fe':'#5b5fcf';}), borderRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:16}},plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} }));
+    var mg=document.getElementById('pch-ana-margin');
+    if(mg) _pchomeAnalysisCharts.push(new Chart(mg.getContext('2d'),{ type:'line',
+      data:{labels:labels, datasets:[{label:'淨利率', data:series.map(function(s){return s.margin;}), borderColor:'#64748b', tension:.3, spanGaps:true,
+        pointBackgroundColor:series.map(function(s){return s.unrecon?_MOMO_GY:_MOMO_CY;}), pointBorderColor:series.map(function(s){return s.unrecon?_MOMO_GY:_MOMO_CY;}), pointRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+'%';}}}}} }));
+  }
   _pchomePC=pchomePCInit(shop,p); pchomePCRender();   // 每次（重）畫彈窗都重建試價狀態
   pchomeRenderOptlogSection(shop, p.料號);
 }
@@ -34822,6 +34861,7 @@ function pchomeRenderOptlogSection(shop, 料號){
       +'<span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">'+_momoEsc(e.note||'')+(e.by?' <span style="color:#94a3b8">· '+_momoEsc(momoOptlogUserToName(e.by)||e.by)+'</span>':'')+'</span>'
       +'<a onclick="pchomeDeleteOptlog(\''+shop+'\',\''+_momoEsc(料號)+'\','+i+')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>';
   }).join('') : '<div style="font-size:12px;color:#94a3b8;padding:4px 0">尚無優化紀錄。記下調價/上下架/做活動等人工動作，之後跟銷量並看因果。</div>';
+  { var bn=document.getElementById('pch-ana-tab-optlog-n'); if(bn) bn.textContent=list.length?' ('+list.length+')':''; }   // 分頁籤上的筆數（照 momo）
   el.innerHTML='<div class="mm-ana-h">優化紀錄'+(list.length?'（'+list.length+'）':'')+'</div>'
     +'<div style="margin-bottom:8px">'+rows+'</div>'
     +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
