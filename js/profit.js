@@ -163,6 +163,8 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div class="kv-foot"><span id="kv-st-cmp" class="kv-chip-slot"></span><span id="kv-st-note" class="kv-sub"></span></div>
         </div>
       </div>
+      <!-- 期間提示（PROFIT_PERIOD_NOTICES）：目前通路＋期間有對到才顯示，否則 hidden、不佔位置。由 setKpis → _periodNoticeSync 寫。 -->
+      <div id="kv-period-notice" class="kv-notice" hidden><span class="kv-notice-i">ⓘ</span><span id="kv-period-notice-text"></span></div>
     </div>
   </div>
   <!-- 酷澎上傳已於 PR-3 移到「訂單明細」子分頁（cupRenderUploadTab）；此 modal 移除，避免與子分頁 input id 重複 -->
@@ -5750,6 +5752,29 @@ function _rateMonthOf(shop){
 }
 // 上傳視窗費率旁的說明小字（白話）
 const SHOP_RATE_NOTE='費率依月份自動帶入；2026/12 起四家都是 21%（維克 2026/11 起與其他三家相同）';
+// ── 淨利表期間提示：上方五格正下方一行灰字（2026-11）──
+//   某些通路某個期間的數字需要特別說明時（例：手續費調漲日跟費率生效月不一致），在這裡加一筆就好。
+//   shops＝通路名（同 state 的 key）；month＝'YYYY-MM'；periods＝半月代碼（同 HALVES 的 id：'first' 上半、'second' 下半、'full' 整月）。
+//   只在淨利表的通路頁顯示（setKpis → _periodNoticeSync）；沒列的通路（測試通路、MOMO、酷澎、PChome）永遠不顯示。
+const PROFIT_PERIOD_NOTICES=Object.freeze([
+  {shops:['好麻吉','玩樂','森之旅','維克'],month:'2026-12',periods:['first','full'],
+   text:'蝦皮 12/11 才調漲手續費，系統 12/1 起就用 21% 估算，所以本期純利略為低估（約 0.2～0.3 個百分點）；月結以 KPI 為準。'},
+]);
+// 純函式：某通路某期（month 'YYYY/MM' 或 'YYYY-MM'，half 'first'|'second'|'full'）要顯示的提示文字；沒有 ⇒ ''（多筆對到用換行接起來）
+function _periodNoticeText(shop,month,half){
+  const ym=_rateYm(month);
+  if(!ym||!shop||!half)return '';
+  return PROFIT_PERIOD_NOTICES.filter(n=>n.month===ym&&n.shops.includes(shop)&&n.periods.includes(half)).map(n=>n.text).join('\n');
+}
+function _periodNoticeSync(shop){
+  const box=document.getElementById('kv-period-notice'),txt=document.getElementById('kv-period-notice-text');
+  if(!box||!txt)return;
+  const s=state[shop]||{};
+  const t=shop===TEST_SHOP_ID?'':_periodNoticeText(shop,s.curMonth,s.curHalf);
+  txt.textContent=t;
+  if(t){box.setAttribute('title',t);box.hidden=false;}
+  else{box.removeAttribute('title');box.hidden=true;}
+}
 
 // ── 取得對應的「上期」區間 key ──
 function getPrevPeriodKey(shop, month, half) {
@@ -32990,6 +33015,7 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
   const deadAdsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
   const adsEl=document.getElementById('kv-ads-'+shop);if(adsEl)adsEl.innerHTML=deadAdsHtml;
   if(shop!==curShop)return;
+  _periodNoticeSync(shop);   // 期間提示（五格下方一行），跟五格同一個時機更新
   _stCellSync(shop);   // 動銷率格：只讀快取，沒有才去雲端拿，不影響下面三格
 
   // ══ 2026-11 五格版（營收、毛利率、廣告費、純利、動銷率）══

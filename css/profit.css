@@ -2136,6 +2136,12 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .kv-chip-bad{background:var(--danger-soft);color:var(--danger);}
 .kv-chip-flat{background:var(--kv-flat-bg);color:var(--text-muted);}
 .kv-sub{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--kv-sub-fs);font-weight:500;color:var(--text-muted);}
+/* 期間提示（PROFIT_PERIOD_NOTICES）：五格正下方一行灰字，字級同 .kv-sub；可以換行、不截斷（全文也在 title）。
+   沒有提示時元素 hidden，連 .kv-row 的 gap 都不佔。 */
+:root{--kv-notice-lh:1.5;--kv-notice-gap:4px;}
+.kv-notice{display:flex;align-items:flex-start;gap:var(--kv-notice-gap);font-size:var(--kv-sub-fs);font-weight:500;line-height:var(--kv-notice-lh);color:var(--text-muted);white-space:pre-line;overflow-wrap:anywhere;}
+.kv-notice[hidden]{display:none;}
+.kv-notice-i{flex:0 0 auto;}
 /* 窄螢幕：一律五格一排（測試通路四格），不換行，改用縮小字級與間距（值都在上面 :root 的 --kv-*）；小字照樣 … 截斷，title 有全文 */
 @media (max-width:1100px){:root{--kv-gap:10px;--kv-hd-fs:10.5px;--kv-value-fs:18px;--kv-value-lh:26px;--kv-chip-fs:11px;--kv-chip-px:5px;--kv-sub-fs:11px;--kv-foot-gap:4px;}}
 /* 只有手機寬度才改兩欄、多列 */
