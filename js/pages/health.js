@@ -134,7 +134,7 @@ const HEALTH_RULES = _hlDeepFreeze({
     subs: [
       { key: 'sellThrough', label: '動銷率', w: 0.3, unit: 'pct',
         formula: '本期有銷售的公司商品數 ÷（目前上架 ∪ 本期有銷售的公司商品數）',
-        desc: '能賣的商品裡，這個月真的有賣出的比例（PChome 以公司商品計：料號去掉規格碼，雨衣四色算 1 個；蝦皮、MOMO 的算法見完整規則）' },
+        desc: '能賣的商品裡，這個月真的有賣出的比例（PChome 以商編計：商品編號去掉規格碼；蝦皮、MOMO 的算法見完整規則）' },
       { key: 'lossShare', label: '虧損商品營收占比', w: 0.4, zero: 0.055, full: 0.005, unit: 'pct',
         formula: '純利 < 0 的商品營收 ÷ 全部商品營收', desc: '營收有多少是由賠錢商品賣出來的，越低越好' },
       { key: 'lowShare', label: '低利商品營收占比', w: 0, scored: false, unit: 'pct',
@@ -144,7 +144,7 @@ const HEALTH_RULES = _hlDeepFreeze({
         formula: '本月與上個月都虧損的商品數 ÷ 本月有銷售的商品數', desc: '連續兩個月都在賠的商品比例，越低越好' },
       { key: 'sellThroughPage', label: '動銷率（商品頁口徑）', w: 0, scored: false, unit: 'pct',
         formula: '本期有銷售的商品頁數 ÷（目前上架 ∪ 本期有銷售的商品頁數）', desc: '每個通路商品頁各算一個',
-        why: '商品頁口徑＝PChome 商品編號去最後一段、每頁算一個，給你對照；PChome 的分數用公司商品口徑（雨衣四色算 1 個）。MOMO 的動銷率本身就以商品頁計（同淨利表 MOMO 總覽），不用這一項。' },
+        why: '商品頁口徑＝商品編號去最後一段、每頁算一個，給你對照。PChome（2026-11-16 起）與 MOMO 的動銷率本身就以商品頁／商編計（同各自的淨利表總覽），不用這一項。' },
       { key: 'deadDupPages', label: '多頁商品中零動銷的頁', w: 0, scored: false, unit: 'count',
         formula: '同一個公司商品開了好幾個商品頁、而且這個月有賣，其中沒賣出的頁數', desc: '重複商品頁裡沒在動的頁',
         why: '公司商品口徑只要其中一頁有賣就算「有動」，會把沒在動的重複頁藏起來，所以另外列出這個數字，只供參考、不計分。' },
@@ -649,11 +649,13 @@ function _hlShopeeStApply(subs, ch, m, snap) {
 // MOMO（甲配、乙配、MO+）的動銷率口徑（#416）：跟淨利表 MOMO 總覽同一套，畫面說明也用這句。
 const HL_MOMO_ST_FORMULA = '本期有銷售的商品頁 ÷（目前上架 ∪ 本期有銷售）';
 const HL_MOMO_ST_DESC = `同淨利表 MOMO 總覽：${HL_MOMO_ST_FORMULA}。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
+const HL_PCHOME_ST_FORMULA = '本期有銷售的商編數 ÷（目前上架 ∪ 本期有銷售）的商編數';
+const HL_PCHOME_ST_DESC = `同淨利表 PChome 總覽卡：${HL_PCHOME_ST_FORMULA}。商編＝商品編號去最後一段規格碼、去重；轉單、寄倉合併。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
 // 動銷率 ⓘ 說明分平台（照程式實際算法：_hlShopeeStApply／_hlMomoStApply／_hlSellThrough＋profit.js __healthProductSnapshot 的 PChome sold＝hasBiz、active＝!discontinued）
 const HL_ST_HOW_LINES = Object.freeze([
   '蝦皮＝洞察表整月商品表現，正常商品裡這個月有賣出的比例。',
   `MOMO＝同淨利表 MOMO 總覽，${HL_MOMO_ST_FORMULA}。`,
-  'PChome＝本期有銷售的商品款數 ÷（目前沒停售 ∪ 本期有銷售的款數），轉單、寄倉合併；料號去掉最後一段規格碼算一款（雨衣四色算 1 個），料號不是「英文字母＋數字－數字」的各自算一款。',
+  `PChome＝同淨利表 PChome 總覽卡，${HL_PCHOME_ST_FORMULA}；商編＝商品編號去最後一段規格碼、去重，轉單、寄倉合併。`,
 ]);
 // 把 MOMO 的動銷率子指標換成 momoPeriodTotals 的數字（純函式：只讀 snap.prod 的 st，由 profit.js 帶進來）。跟 minSold 脫鉤：只要這個月有商品層資料就算。
 //   商品層還沒好、這個月沒有銷售資料 ⇒ 不動，沿用 _hlStructureDim 給的狀態（載入中、尚未上傳…）。
@@ -815,8 +817,16 @@ function _hlStructureDim(ch, m, snap, R) {
   const st = _hlSellThrough(rows), sT = by('sellThrough'), sP = by('sellThroughPage'), sD = by('deadDupPages');
   if (!t.sellThrough) [sT, sP, sD].forEach(s => set(s, 'na', '不適用：這個類型不評動銷率'));
   else if (!st) [sT, sP, sD].forEach(s => set(s, 'pending', '尚未上傳：沒有上架狀態，算不出分母'));
-  else if (!st.company.den) [sT, sP, sD].forEach(s => set(s, 'insufficient', '資料不足：沒有上架或有銷售的商品'));
-  else {
+  else if (!(ch.prod && ch.prod.platform === 'pchome' ? st.page.den : st.company.den)) [sT, sP, sD].forEach(s => set(s, 'insufficient', '資料不足：沒有上架或有銷售的商品'));
+  else if (ch.prod && ch.prod.platform === 'pchome') {
+    // PChome（2026-11-16 起）：動銷率以商編計（商品編號去最後一段規格碼、去重），分子分母同淨利表 PChome 總覽卡的動銷率；商品頁那項不再另列（主數字本身就是商編口徑，同 MOMO）。
+    sT.raw = st.page.num / st.page.den; sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
+    _hlStCount(sT, st.page.num, st.page.den);
+    Object.assign(sT, { formula: HL_PCHOME_ST_FORMULA, note: HL_PCHOME_ST_DESC });
+    sT.trace = { src, text: `有銷售的商編 ${st.page.num} ÷ 上架或有銷售的商編 ${st.page.den}（轉單、寄倉合併；同淨利表 PChome 總覽卡）` };
+    Object.assign(sP, { status: 'na', reason: '不適用：PChome 動銷率本身就以商編計', raw: null, score: null, trace: null });
+    sD.raw = st.deadDupPages; sD.trace = { src, text: `多頁公司商品裡沒賣出的頁 ${st.deadDupPages} 頁` };
+  } else {
     sT.raw = st.company.num / st.company.den; sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
     _hlStCount(sT, st.company.num, st.company.den);
     sT.trace = { src, text: `有銷售的公司商品 ${st.company.num} ÷ 上架或有銷售的公司商品 ${st.company.den}` + (st.fallback ? `（其中 ${st.fallback} 個編號格式不符，改用商品頁計）` : '') };
