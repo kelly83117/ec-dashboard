@@ -19,6 +19,24 @@ window.addEventListener('error', function(e) {
 //   · 只載一次：promise 快取（__profitLoaded），切頁進出不重載；失敗會清掉、可重試。
 //   · ?v= 讀 <meta app-version>（單一版號源、跟部署版號一致、不會漂；同 offices.js fetch pricing.json 的招式）。
 //   · import('./profit.js') 在本模組（js/app.js）解析 → js/profit.js（相對路徑正確）。
+// ══════ 雲端文件「緩存＋補套（cache + drain）」共用樣板 ══════
+//   問題：profit.js 是【動態載入】（進淨利表才 import），但 firebase.js 在 boot 就訂閱雲端文件。首個快照到的時候
+//   profit.js 定義的套用函式還不存在 → 被略過；之後文件內容不變、onSnapshot 不再觸發 → 初次 hydrate 永遠漏（換機／清快取後資料讀不回來）。
+//   解法（每個「訂閱在 firebase.js、套用函式在動態載入模組」的雲端文件都要照做，新增文件時直接用這兩支，不要各自手寫）：
+//     firebase.js 訂閱：  window.__cloudSubscribeCached(cloudObj, '__xxxCloudLatest', '__xxxApplyCloud', onErr)   → 先緩存最新快照、套用函式在才套用
+//     動態模組定義套用函式後：  window.__cloudDrainLatest('__xxxCloudLatest', '__xxxApplyCloud')                     → 補套一次緩存
+//   緩存名稱慣例 window.__<名稱>CloudLatest（undefined＝還沒收到第一個快照；其他狀況＝最新快照），其他程式靠它判斷「雲端資料到了沒」。
+window.__cloudSubscribeCached = function (cloudObj, latestName, applyName, onErr) {
+  return cloudObj.subscribe(function (data) {
+    window[latestName] = data;
+    if (typeof window[applyName] === 'function') window[applyName](data);
+  }, onErr);
+};
+window.__cloudDrainLatest = function (latestName, applyName) {
+  try {
+    if (typeof window[latestName] !== 'undefined' && typeof window[applyName] === 'function') window[applyName](window[latestName]);
+  } catch (e) { console.error('[drain] ' + applyName + ' 補套失敗', e); }
+};
 window.__profitLoaded = null;    // 載入 promise（第一次 __ensureProfit 呼叫時建立；≠已載完）
 window.__profitReady = false;    // 🔴 true = profit.js 模組【已執行完、window 匯出/__profitTabHtml 都掛好】。判「已載」一律看這個，不要看 __profitLoaded（那只代表 promise 已建、可能還沒 resolve）
 window.__ensureProfit = function () {
