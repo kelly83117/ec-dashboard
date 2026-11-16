@@ -14083,7 +14083,7 @@ window.__booksApplyCloudRecon=function(data){
     if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();
   }catch(e){console.error('[books_recon] 套用雲端失敗：',e);}
 };
-try{if(typeof window.__booksReconCloudLatest!=='undefined')window.__booksApplyCloudRecon(window.__booksReconCloudLatest);}catch(e){}
+window.__cloudDrainLatest('__booksReconCloudLatest','__booksApplyCloudRecon');
 function booksLoadRecon(){try{return(Store._profitMem&&Store._profitMem[BOOKS_RECON_KEY])||{};}catch{return{};}}
 // ── 上傳：多選檔案 → 解析 → 預覽（摘要＋核對）→ 確認才寫 app/books_recon ──
 function kpiBooksUpload(){
@@ -14515,7 +14515,7 @@ window.__fridayApplyCloudRecon=function(data){
     if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();
   }catch(e){console.error('[friday_recon] 套用雲端失敗：',e);}
 };
-try{if(typeof window.__fridayReconCloudLatest!=='undefined')window.__fridayApplyCloudRecon(window.__fridayReconCloudLatest);}catch(e){}
+window.__cloudDrainLatest('__fridayReconCloudLatest','__fridayApplyCloudRecon');
 function fridayLoadRecon(){try{return(Store._profitMem&&Store._profitMem[FRIDAY_RECON_KEY])||{};}catch{return{};}}
 const FRIDAY_SITE='主站';   // 預設站別（讀取端 fallback）；上傳走每份檔案自動判斷 _SCM→主站／_BCM→i站 或手選
 const FRIDAY_SITES=['主站','i站'];
@@ -33784,7 +33784,7 @@ window.addEventListener('pchomeOrdersReady', function(){
 // 🔴 drain：profit.js 是動態載入（進淨利表才 import），firebase.js 的 boot 訂閱早就緒、首個雲端快照在
 //   __pchomeApplyCloudOrders 尚未定義時就觸發過了（會漏掉初次 hydrate）。firebase.js 把最新快照緩存在
 //   window.__pchomeOrdersCloudLatest；此處在 apply 定義後立刻補套一次 → 換機/清快取後訂單能從雲端讀回。
-try{ if(typeof window.__pchomeOrdersCloudLatest!=='undefined') window.__pchomeApplyCloudOrders(window.__pchomeOrdersCloudLatest); }catch(e){}
+window.__cloudDrainLatest('__pchomeOrdersCloudLatest','__pchomeApplyCloudOrders');
 
 // ══════════ 商品主檔 / 對帳資料 → 各自獨立 doc（app/pchome_products / app/pchome_recon）══════════
 //   背景：這兩個原本是 app/profit 的泛用欄位，體積最大（products ~150KB、recon ~50KB/月）→ 把 app/profit 推向 1MB
@@ -33848,8 +33848,8 @@ function pchomeApplyCloudRerender(){
   pchomeRefreshOverviewIfActive();
 }
 // 🔴 drain（profit.js 動態載入，boot 訂閱早於這裡就緒、首個快照在 apply 未定義時就觸發過）：apply 定義後補套一次。
-try{ if(typeof window.__pchomeProductsCloudLatest!=='undefined') window.__pchomeApplyCloudProducts(window.__pchomeProductsCloudLatest); }catch(e){}
-try{ if(typeof window.__pchomeReconCloudLatest!=='undefined') window.__pchomeApplyCloudRecon(window.__pchomeReconCloudLatest); }catch(e){}
+window.__cloudDrainLatest('__pchomeProductsCloudLatest','__pchomeApplyCloudProducts');
+window.__cloudDrainLatest('__pchomeReconCloudLatest','__pchomeApplyCloudRecon');
 
 // ── 遷移 / 清理（正式站 console 手動跑；都冪等）──────────────────────────────────────────
 //   __pchomeMigrateProductsRecon()：讀 app/profit 現值（權威，不依賴本機）→ 寫入新 doc。重跑不重複（內容相同即跳過）。
@@ -33949,7 +33949,7 @@ window.__pchomeApplyCloudOptlog=function(docData){ try{ var data=docData||{};
   Object.keys(data).forEach(function(shop){ var k='ec_pchome_optlog|'+shop; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
     var v=data[shop]; if(v&&typeof v==='object'){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=v; Store._mem=Store._mem||{}; Store._mem[k]=v; } });
 }catch(e){ console.error('[pchome optlog] 套用雲端失敗：',e); } };
-try{ if(typeof window.__pchomeOptlogCloudLatest!=='undefined') window.__pchomeApplyCloudOptlog(window.__pchomeOptlogCloudLatest); }catch(e){}   // drain（動態載入時序，見訂單明細同註）
+window.__cloudDrainLatest('__pchomeOptlogCloudLatest','__pchomeApplyCloudOptlog');   // drain（動態載入時序，見訂單明細同註）
 // ── history（商品歷程；獨立 doc、非內嵌 product）──
 function pchomeHistoryKey(){ return 'ec_pchome_history'; }
 function pchomeLoadHistory(){ var k=pchomeHistoryKey();
@@ -33989,7 +33989,7 @@ async function pchomeSyncHistory(){   // read-merge-write：每料號一欄；�
 window.__pchomeApplyCloudHistory=function(docData){ try{ var k='ec_pchome_history'; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
   var data=docData||{}; Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=data; Store._mem=Store._mem||{}; Store._mem[k]=data;
 }catch(e){ console.error('[pchome history] 套用雲端失敗：',e); } };
-try{ if(typeof window.__pchomeHistoryCloudLatest!=='undefined') window.__pchomeApplyCloudHistory(window.__pchomeHistoryCloudLatest); }catch(e){}
+window.__cloudDrainLatest('__pchomeHistoryCloudLatest','__pchomeApplyCloudHistory');
 
 // 已對帳判定：對帳資料（各帳務月訂單貨款明細段）出現過的「訂單編號-序號」集合。
 function pchomeReconOrderKeys(){ var all=pchomeLoadRecon(), set={};
