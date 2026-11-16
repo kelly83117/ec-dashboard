@@ -36379,10 +36379,10 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
   var prevT=prevCalc?prevCalc.合計:null, prevLbl=prevKey||'上月';
   var hasPrev=!!(prevCalc && !gate && prevCalc.fixedKnown);
   var kdPct=function(cur,prev){ if(!hasPrev||cur==null||prev==null||prev===0) return {txt:'—',color:'#9ca3af'}; var d=(cur-prev)/Math.abs(prev)*100,up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%',color:up?'#059669':'#dc2626'}; };
-  var dxDen=calc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length, dxNum=calc.bizCount||0;
+  var _dx=pchomeDxByCode(calc), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
   var dxRate=dxDen>0?dxNum/dxDen:null;
-  var pdxDen=prevCalc?prevCalc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length:0;
-  var pdxRate=(prevCalc&&pdxDen>0)?(prevCalc.bizCount||0)/pdxDen:null;
+  var _pdx=prevCalc?pchomeDxByCode(prevCalc):{num:0,den:0}, pdxDen=_pdx.den;
+  var pdxRate=(prevCalc&&pdxDen>0)?_pdx.num/pdxDen:null;
   var dxDelta=(hasPrev&&dxRate!=null&&pdxRate!=null)?(function(){var d=(dxRate-pdxRate)*100,up=d>=0;return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'pp',color:up?'#059669':'#dc2626'};})():{txt:'—',color:'#9ca3af'};
   var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};
   var dxVal=(gate||dxRate==null)?'—':(pchomePct(dxRate)+' <span style="font-size:12px;color:#9ca3af;font-weight:400">('+dxNum+' / '+dxDen+')</span>');
@@ -36394,7 +36394,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
     +kc('總淨利','該日曆月淨利＝營收−成本−費用（固定費 1:1＋逐筆按日期）。（未稅）', g(pchomeMoney(T.淨利)), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, ((!gate&&T.淨利<0)?'mm-neg':''))   // 負數＝紅（A-310，#476）；gate 時值是「—」不上色
     +kc('加權淨利率', wmTip, g((wm==null)?'—':pchomePct(wm)), gate?'#9ca3af':wmColor, wmDelta, '商品 '+((T.營收>0)?pchomePct((T.營收-T.成本-T.費用)/T.營收):'—'))
     +kc('總銷量','', g(pchomeNum(T.銷量)+' 件'), '', kdPct(T.銷量, prevT?prevT.銷量:null))
-    +kc('動銷率','本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。', dxVal, '', dxDelta)
+    +kc('動銷率','本期有銷售的商編數 ÷（目前上架 ∪ 本期有售）的商編數。商編＝商品編號去最後一段規格碼、去重。', dxVal, '', dxDelta)
     +'</div>';
   var statusBanner=gate
     ? '<div class="mm-banner mm-banner-err">⚠ <b>資料未完整（'+esc(key)+'）</b>：此日曆月的固定費所屬帳期（帳務月 '+esc(key)+'）<b>尚未匯入對帳資料</b> → 淨利結構性不完整（固定費缺）。<b>只列明細、不給總覽 KPI</b>。到「月對帳」補匯入該期對帳後，本月自動變可看。</div>'
@@ -36425,6 +36425,21 @@ function pchomeBaseCount(shop, calc){
     var pn=p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]);
     arr.forEach(function(v){ v=String(v||'').trim(); if(!v) return; var seg=v.split('-'); set[seg.length>1?seg.slice(0,-1).join('-'):v]=1; }); });
   return Object.keys(set).length;
+}
+// 動銷率（商編口徑，2026-11-16 老闆定案：分母改商編數）：商編＝商品編號去最後一段規格碼、去重（同 pchomeBaseCount 的定義）。
+//   分母＝（目前上架 ∪ 本期有售）那批料號所掛的商編去重數；分子＝其中「本期有售」料號所掛的商編去重數（分子必為分母子集）。
+//   料號→商編取商品主檔（一料號可掛多個商編；多個料號可共用同一商編＝同一款只算一個）。某料號有售＝它掛的商編都算有售（對帳明細只回一個商編，無法分辨該料號哪個商編賣的）。
+//   沒掛商編的料號不進分子分母。只改總表動銷率卡；通路健檢的動銷率（__healthProductSnapshot）仍是料號口徑、沒動。
+function pchomeDxByCode(calc){
+  var map={};
+  (pchomeLoadProducts()||[]).forEach(function(p){ var c=String(p.料號||'').trim(); if(!c) return;
+    var pn=p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), bs=[];
+    arr.forEach(function(v){ v=String(v||'').trim(); if(!v) return; var seg=v.split('-'); bs.push(seg.length>1?seg.slice(0,-1).join('-'):v); });
+    map[c]=bs; });
+  var den={}, num={};
+  ((calc&&calc.skus)||[]).forEach(function(x){ if(!(!x.discontinued||x.hasBiz)) return;
+    (map[String(x.料號||'').trim()]||[]).forEach(function(b){ den[b]=1; if(x.hasBiz) num[b]=1; }); });
+  return {num:Object.keys(num).length, den:Object.keys(den).length};
 }
 // 總表表格 body：依目前模式重算 calc→套排序/篩選/搜尋→寫進 #pchome-tbl-<shop>。搜尋只呼叫這支（殼不動、焦點不掉）。
 function pchomeRenderProfitBody(shop){
@@ -36638,10 +36653,10 @@ function pchomeProfitTabHTML(shop){
   var hasPrev=!!(prevCalc && !open);   // 有上期資料【且本期已結束】才算 delta；否則「—」（同 momo：無上期/本期未完都靜音）
   var kdPct=function(cur,prev){ if(!hasPrev||cur==null||prev==null||prev===0) return {txt:'—',color:'#9ca3af'}; var d=(cur-prev)/Math.abs(prev)*100,up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%',color:up?'#059669':'#dc2626'}; };   // 絕對量：%、綠▲/紅▼
   // 動銷率（照 momo）：分子＝本期有售(不論上下架)、分母＝目前上架 ∪ 本期有售
-  var dxDen=calc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length, dxNum=calc.bizCount||0;
+  var _dx=pchomeDxByCode(calc), dxDen=_dx.den, dxNum=_dx.num;   // 商編口徑（分母＝商編數）
   var dxRate=dxDen>0?dxNum/dxDen:null;
-  var pdxDen=prevCalc?prevCalc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length:0;
-  var pdxRate=(prevCalc&&pdxDen>0)?(prevCalc.bizCount||0)/pdxDen:null;
+  var _pdx=prevCalc?pchomeDxByCode(prevCalc):{num:0,den:0}, pdxDen=_pdx.den;
+  var pdxRate=(prevCalc&&pdxDen>0)?_pdx.num/pdxDen:null;
   var dxDelta=(hasPrev&&dxRate!=null&&pdxRate!=null)?(function(){var d=(dxRate-pdxRate)*100,up=d>=0;return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'pp',color:up?'#059669':'#dc2626'};})():{txt:'—',color:'#9ca3af'};   // pp、綠▲/紅▼（升＝好）
   var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};   // pp、中性灰（不分方向，照 momo）
   var dxVal=dxRate!=null?(pchomePct(dxRate)+' <span style="font-size:12px;color:#9ca3af;font-weight:400">('+dxNum+' / '+dxDen+')</span>'):'—';
@@ -36652,7 +36667,7 @@ function pchomeProfitTabHTML(shop){
     +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按訂單）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null), null, (T.淨利<0?'mm-neg':''))   // 負數＝紅（A-310，#476）
     +kc('加權淨利率', wmTip, (wm==null)?'—':pchomePct(wm), wmColor, wmDelta, '商品 '+((T.營收>0)?pchomePct((T.營收-T.成本-T.費用)/T.營收):'—'))
     +kc('總銷量', '', pchomeNum(T.銷量)+' 件', '', kdPct(T.銷量, prevT?prevT.銷量:null))
-    +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
+    +kc('動銷率', '本期有銷售的商編數 ÷（目前上架 ∪ 本期有售）的商編數。商編＝商品編號去最後一段規格碼、去重（同上方「商編」）。分子＝本期有賣出的料號（不論上下架）所掛的商編；分母＝目前上架＋「本期有賣但已下架」料號所掛的商編；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
     +'</div>';
   // KPI 下方狀態橫幅（照 momo verifyTxt 位置/class；文字照 PChome 實況：未對帳＝CSV(D)實際+簡訊推算，非費率/退貨率估算）。已對帳→無橫幅（同 momo，狀態由 feeChip 綠標＋tooltip 表達）。併入原表格下方 smsBanner，不重複。
   var bd=calc.estBreakdown;
