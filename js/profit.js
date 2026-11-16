@@ -103,7 +103,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           </div>
         </div>
         <div class="pf-tabgrp">
-          <button class="stab pf-pchome" style="font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setPChomeShop('轉單',this)">PChome</button>
+          <button class="stab pf-pchome" style="font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setPChomeShop('總表',this)">PChome｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setPChomeShop('轉單',this)"><span class="sdot" style="background:#E60012"></span>轉單</button>
             <button class="stab" style="font-size:15px" onclick="setPChomeShop('寄倉',this)"><span class="sdot" style="background:#ff6b6b"></span>寄倉</button>
@@ -357,6 +357,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
+  <div id="pchome-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="pchome-content-轉單" class="shop-content" style="padding:16px 20px"></div>
   <div id="pchome-content-寄倉" class="shop-content" style="padding:16px 20px"></div>
   <!-- 對帳分頁的容器。🔴 id 前綴【必須】是 recon-content-，不可以用 content-：
@@ -33762,6 +33763,7 @@ window.addEventListener('pchomeOrdersReady', function(){
     if(_pchomeOrderPending[shop]||(_pchomeOrderStaged[shop]&&_pchomeOrderStaged[shop]['轉單'])) return;   // 使用者正在上傳/預覽 → 不重繪，免蓋掉
     var el=document.getElementById('pchome-content-'+shop); if(el&&el.classList.contains('active')) pchomeRenderSub(shop);
   }); }catch(e){}
+  pchomeRefreshOverviewIfActive();
 });
 // 🔴 drain：profit.js 是動態載入（進淨利表才 import），firebase.js 的 boot 訂閱早就緒、首個雲端快照在
 //   __pchomeApplyCloudOrders 尚未定義時就觸發過了（會漏掉初次 hydrate）。firebase.js 把最新快照緩存在
@@ -33827,6 +33829,7 @@ function pchomeApplyCloudRerender(){
     var el=document.getElementById('pchome-content-'+shop);
     if(el && el.classList.contains('active') && (_pchomeSub[shop]||'profit')!=='batch') pchomeRenderSub(shop);
   }); }catch(e){}
+  pchomeRefreshOverviewIfActive();
 }
 // 🔴 drain（profit.js 動態載入，boot 訂閱早於這裡就緒、首個快照在 apply 未定義時就觸發過）：apply 定義後補套一次。
 try{ if(typeof window.__pchomeProductsCloudLatest!=='undefined') window.__pchomeApplyCloudProducts(window.__pchomeProductsCloudLatest); }catch(e){}
@@ -34438,8 +34441,162 @@ function setPChomeShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(function(el){el.classList.remove('active');});
   var el=document.getElementById('pchome-content-'+shop);
-  if(el){ el.classList.add('active'); pchomeRenderShop(shop); }
+  if(el){ el.classList.add('active'); if(shop==='總表') pchomeRenderOverview(); else pchomeRenderShop(shop); }   // 總表＝兩賣場合計（照 momo momoRenderSummary，每次進來重繪）
   var kpi=document.getElementById('header-kpi-row'); if(kpi)kpi.style.display='none';
+}
+// ══════ PChome｜總表（照 momo momoRenderSummary：期別 → KPI 四卡 → 各賣場分析 → 趨勢／淨利率／營收佔比／賣場比較四圖 → 各賣場銷量 Top10；賣場＝轉單、寄倉）══════
+//   資料＝各賣場【帳務月】總表同一支 pchomeProfitCalc（與賣場總表同值同口徑，不另開計算）。動銷率＝商編口徑（pchomeDxByCode，同總表動銷率卡）。
+//   不放 momo 乙配專屬的呆滯庫存／倉租規則；PChome 沒有口徑變更線。未對帳月照賣場總表標「未對帳」。
+var PCHOME_OV_SHOPS=['轉單','寄倉'];
+var PCHOME_OV_COLOR={'轉單':'#E60012','寄倉':'#ff6b6b'};
+var _pchomeOvPeriod='';          // 總表目前期別（帳務月 'YYYY-MM'）；空＝最新月
+var _pchomeOvCharts=[];
+function pchomeOvDestroyCharts(){ _pchomeOvCharts.forEach(function(c){ try{c.destroy();}catch(e){} }); _pchomeOvCharts=[]; }
+function pchomeOvSetMonth(v){ _pchomeOvPeriod=v; pchomeRenderOverview(); }
+function pchomeRefreshOverviewIfActive(){ try{ var el=document.getElementById('pchome-content-總表'); if(el&&el.classList.contains('active')) pchomeRenderOverview(); }catch(e){} }
+// 某賣場某帳務月的合計＋逐商品（從賣場總表同一支 calc 取）
+function pchomeOvShopData(m, shop){
+  var entry=pchomeMonthEntry(m); if(!entry) return {has:false, rev:0, profit:0, qty:0, margin:0, dxNum:0, dxDen:0, skus:[]};
+  var calc=pchomeProfitCalc(entry, shop), T=calc.合計||{}, rev=T.營收||0, profit=T.淨利||0;
+  var dx=pchomeDxByCode(calc, shop);
+  return {has:true, entry:entry, calc:calc, rev:rev, profit:profit, qty:T.銷量||0, margin:(rev>0?profit/rev*100:0), dxNum:dx.num, dxDen:dx.den, skus:calc.skus||[]};
+}
+// 各賣場分析（照 momoShopAnalysis 規則 1～5；6／7 是 momo 乙配倉租專屬、不放）：賠錢／低淨利高營收／淨利率惡化／斷貨（可賣量 0 仍有銷量）／缺成本。取影響金額前 2 項。
+function pchomeShopAnalysis(shop, m, prevM, incomplete){
+  var cfg=MOMO_ANALYSIS_CFG, products=pchomeProductsOfShop(shop), out={shop:shop, hasProducts:products.length>0, suggestions:[], missN:0, missRev:0, noAnomaly:false, topImpact:-1};
+  if(!products.length) return out;
+  var cur=pchomeOvShopData(m, shop), prev=prevM?pchomeOvShopData(prevM, shop):null, stockOut={};
+  products.forEach(function(p){ if(p.缺貨) stockOut[String(p.料號||'').trim()]=1; });
+  var prevBy={}; if(prev) prev.skus.forEach(function(x){ prevBy[String(x.料號)]=x; });
+  var money=pchomeMoney, rows=[], missRev=0, missN=0;
+  cur.skus.forEach(function(x){ if(!x.hasBiz) return;
+    var rev=Number(x.營收)||0, qty=Number(x.銷量)||0, covered=!!x.costKnown, marginR=(covered&&x.淨利率!=null&&isFinite(x.淨利率))?x.淨利率*100:null, profitR=(x.淨利==null?null:Number(x.淨利));
+    if(!covered){ missRev+=rev; missN++; }
+    var px=prevBy[String(x.料號)], pm=(px&&px.hasBiz&&px.costKnown&&px.淨利率!=null&&isFinite(px.淨利率))?px.淨利率*100:null;
+    rows.push({sku:String(x.料號), name:x.商品名||'', rev:rev, qty:qty, marginR:marginR, profitR:profitR, covered:covered, curCost:Number(x.成本)||0, prevMarginR:pm, prevRev:px?(Number(px.營收)||0):0, prevQty:px?(Number(px.銷量)||0):0, prevCost:px?(Number(px.成本)||0):0}); });
+  out.missN=missN; out.missRev=missRev;
+  var revSorted=rows.map(function(r){return r.rev;}).filter(function(v){return v>0;}).sort(function(a,b){return b-a;});
+  var revThreshold=revSorted.length?revSorted[Math.max(0,Math.floor(revSorted.length*cfg.topRevPctile)-1)]:Infinity, sugg=[], esc=_momoEsc;
+  // 規則1 賠錢
+  var losers=rows.filter(function(r){ return r.covered&&r.marginR!=null&&r.marginR<0; });
+  if(losers.length){ var totalLoss=losers.reduce(function(a,r){return a+Math.max(0,-(r.profitR||0));},0), worst=losers.slice().sort(function(x,y){return (-(x.profitR||0))-(-(y.profitR||0));})[0];
+    sugg.push({impact:totalLoss, html:'<b>'+losers.length+' 項賠錢商品</b>，合計虧 '+money(totalLoss)+'<span class="mm-anlz-d">最慘 '+esc(worst.sku)+'：淨利率 '+(worst.marginR!=null?worst.marginR.toFixed(1):'—')+'%、虧 '+money(-(worst.profitR||0))+'</span>'}); }
+  // 規則2 低淨利高營收
+  var lowHi=rows.filter(function(r){ return r.covered&&r.marginR!=null&&r.marginR>=0&&r.marginR<cfg.lowMarginPct&&r.rev>=revThreshold; });
+  if(lowHi.length){ var sumRev=lowHi.reduce(function(a,r){return a+r.rev;},0), w2=lowHi.slice().sort(function(x,y){return y.rev-x.rev;})[0];
+    sugg.push({impact:sumRev, html:'<b>'+lowHi.length+' 項低淨利高營收</b>，合計營收 '+money(sumRev)+'<span class="mm-anlz-d">最大 '+esc(w2.sku)+'：淨利率 '+w2.marginR.toFixed(1)+'%、營收 '+money(w2.rev)+'</span>'}); }
+  // 規則3 淨利率惡化（兩期都要有實際銷售；未完／無上期不產出）
+  if(!incomplete && prev){
+    var wor=rows.filter(function(r){ return r.covered&&r.marginR!=null&&r.prevMarginR!=null&&r.rev>0&&r.qty>0&&r.prevRev>0&&r.prevQty>0&&(r.prevMarginR-r.marginR)>cfg.marginDropPt; })
+      .map(function(r){ return {r:r, drop:r.prevMarginR-r.marginR, impact:r.rev*((r.prevMarginR-r.marginR)/100)}; }).sort(function(x,y){return y.impact-x.impact;});
+    if(wor.length){ var w=wor[0], r=w.r, avgPc=r.qty>0?r.rev/r.qty:0, avgPp=r.prevQty>0?r.prevRev/r.prevQty:0, ucC=r.qty>0?r.curCost/r.qty:0, ucP=r.prevQty>0?r.prevCost/r.prevQty:0,
+        priceDrop=avgPp>0?(avgPc-avgPp)/avgPp:0, costRise=ucP>0?(ucC-ucP)/ucP:0, TH=0.02, pSig=priceDrop<-TH, cSig=costRise>TH, cause;
+      if(pSig&&cSig) cause='售價下降 '+money(avgPp)+'→'+money(avgPc)+'｜成本上升 '+money(ucP)+'→'+money(ucC);
+      else if(pSig||(priceDrop<0&&Math.abs(priceDrop)>=Math.abs(costRise))) cause='主因售價下降 '+money(avgPp)+'→'+money(avgPc);
+      else if(cSig||costRise>0) cause='主因成本上升 '+money(ucP)+'→'+money(ucC);
+      else cause='量或組合變化（售價/成本變動不顯著）';
+      sugg.push({impact:w.impact, html:'<b>'+wor.length+' 項淨利率惡化</b>，影響約 '+money(w.impact)+'<span class="mm-anlz-d">最嚴重 '+esc(r.sku)+'：'+r.prevMarginR.toFixed(1)+'%→'+r.marginR.toFixed(1)+'%（跌 '+w.drop.toFixed(1)+'pt）· '+cause+'</span>'}); }
+  }
+  // 規則4 斷貨（上架清單可賣量 0 且本期仍有銷量）
+  var outs=rows.filter(function(r){ return stockOut[r.sku]&&r.qty>0; });
+  if(outs.length){ var sumO=outs.reduce(function(a,r){return a+r.rev;},0), w4=outs.slice().sort(function(x,y){return y.rev-x.rev;})[0];
+    sugg.push({impact:sumO, html:'<b>'+outs.length+' 項斷貨</b>（可賣量 0 仍有銷量），影響營收 '+money(sumO)+'<span class="mm-anlz-d">最大 '+esc(w4.sku)+'：本期營收 '+money(w4.rev)+'、銷量 '+Math.round(w4.qty).toLocaleString()+'</span>'}); }
+  // 規則5 缺成本
+  if(missN){ sugg.push({impact:missRev, html:'<b>缺成本 '+missN+' 項商品</b>，影響營收 '+money(missRev)+'<span class="mm-anlz-d">補齊即計入加權淨利率</span>'}); }
+  sugg.sort(function(x,y){return y.impact-x.impact;});
+  out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
+  return out;
+}
+function pchomeAnlzCardHTML(anlz, shopT, prevMargin, ptSuppressed, span){
+  var shop=anlz.shop, color=PCHOME_OV_COLOR[shop]||'#888', spanCls=span?' mm-anlz-span':'', esc=_momoEsc;
+  if(!anlz.hasProducts){
+    return '<div class="mm-anlz-card empty'+spanCls+'"><div class="mm-anlz-head"><span class="mm-anlz-dot" style="background:'+color+'"></span><span class="mm-anlz-name muted">'+esc(shop)+'</span></div>'
+      +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">尚無資料，上傳上架商品清單後自動納入</div></div>'
+      +'<button class="mm-anlz-btn" onclick="setPChomeShop(\''+shop+'\')">前往上傳</button></div>'; }
+  var rev=shopT?shopT.rev:0, margin=shopT?shopT.margin:0, ptHtml='';
+  if(ptSuppressed) ptHtml='<span class="mm-anlz-pt muted">—</span>';
+  else if(prevMargin!=null){ var d=margin-prevMargin; ptHtml='<span class="mm-anlz-pt" style="color:'+(d>=0?'#059669':'#dc2626')+'">'+(d>=0?'▲':'▼')+' '+Math.abs(d).toFixed(1)+'pt</span>'; }
+  var mColor=margin>=25?'#059669':margin>=15?'#d97706':'#dc2626';
+  var suggHtml=anlz.noAnomaly?'<div class="mm-anlz-ok">本期無異常項目</div>':anlz.suggestions.map(function(x){ return '<div class="mm-anlz-sg">'+x.html+'</div>'; }).join('');
+  return '<div class="mm-anlz-card'+spanCls+'"><div class="mm-anlz-head"><span class="mm-anlz-dot" style="background:'+color+'"></span><span class="mm-anlz-name">'+esc(shop)+'</span></div>'
+    +'<div class="mm-anlz-metrics">營收 <b>'+pchomeMoney(rev)+'</b> · 淨利率 <b style="color:'+mColor+'">'+(rev>0?pchomePct(margin/100):'—')+'</b> '+ptHtml+'</div>'
+    +'<div class="mm-anlz-sugg">'+suggHtml+'</div>'
+    +'<button class="mm-anlz-btn" onclick="setPChomeShop(\''+shop+'\')">查看 '+esc(shop)+'</button></div>';
+}
+function pchomeRenderOverview(){
+  var el=document.getElementById('pchome-content-總表'); if(!el) return;
+  var months=pchomeAllMonths(), esc=_momoEsc;
+  if(!months.length){ el.innerHTML='<div class="empty" style="padding:48px 20px"><div class="empty-icon">📊</div><div class="empty-hint">尚無資料——先到轉單／寄倉上傳對帳資料或訂單明細。</div></div>'; return; }
+  if(!_pchomeOvPeriod||months.indexOf(_pchomeOvPeriod)<0) _pchomeOvPeriod=months[months.length-1];
+  var m=_pchomeOvPeriod, idx=months.indexOf(m), prevM=idx>0?months[idx-1]:'';
+  var entry=pchomeMonthEntry(m), open=!!(entry&&pchomePeriodOpen(entry.期間)), unrecon=!!(entry&&entry.__fromOrders);
+  var monthOpts=months.slice().reverse().map(function(x){ return '<option value="'+esc(x)+'"'+(x===m?' selected':'')+'>'+esc(x)+' 期</option>'; }).join('');
+  var perShop={}, prevShop={}; PCHOME_OV_SHOPS.forEach(function(sh){ perShop[sh]=pchomeOvShopData(m,sh); prevShop[sh]=prevM?pchomeOvShopData(prevM,sh):null; });
+  var sumT=function(list){ var rev=0,profit=0,qty=0,dxN=0,dxD=0,has=false; list.forEach(function(t){ if(!t) return; has=has||t.has; rev+=t.rev; profit+=t.profit; qty+=t.qty; dxN+=t.dxNum; dxD+=t.dxDen; }); return {rev:rev,profit:profit,qty:qty,dxN:dxN,dxD:dxD,margin:rev>0?profit/rev*100:0,hasData:has}; };
+  var T=sumT(PCHOME_OV_SHOPS.map(function(sh){return perShop[sh];})), prevT=prevM?sumT(PCHOME_OV_SHOPS.map(function(sh){return prevShop[sh];})):{hasData:false,rev:0,profit:0,qty:0,margin:0};
+  var hasPrev=prevT.hasData&&!open, mute={txt:'—',color:'#9ca3af'};
+  var kd=function(cur,prev){ if(!hasPrev||!prev) return mute; var d=(cur-prev)/Math.abs(prev)*100, up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%', color:up?'#059669':'#dc2626'}; };
+  var marginColor=function(v){ return v>=25?'#059669':v>=15?'#d97706':'#dc2626'; };
+  var dMargin=hasPrev?{txt:((T.margin-prevT.margin>=0?'+':'')+(T.margin-prevT.margin).toFixed(1)+'pp'), color:'#9ca3af'}:mute;
+  var cards=[
+    {label:'總營收', val:pchomeMoney(T.rev), d:kd(T.rev,prevT.rev)},
+    {label:'總淨利', val:pchomeMoney(T.profit), valCls:(T.profit<0?'mm-neg':''), d:kd(T.profit,prevT.profit)},
+    {label:'加權淨利率', info:'加權淨利率 ＝ 總淨利 ÷ 總營收（轉單＋寄倉合計，未稅）。淨利＝營收 − 商品成本 − 平台費用（D 手續費＋罰金等）− 自付運費與包材。', val:(T.rev>0?pchomePct(T.margin/100):'—'), valColor:(T.rev>0?marginColor(T.margin):'#9ca3af'), d:dMargin},
+    {label:'總銷量', val:Math.round(T.qty).toLocaleString()+' 件', d:kd(T.qty,prevT.qty)}
+    // 動銷率不放 KPI 卡（兩賣場口徑合計意義不大）；改放「賣場比較」圖、各賣場各自算（同 momo）
+  ];
+  var cardHTML=cards.map(function(c){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+c.label+(c.info?' <span class="mm-info" title="'+esc(c.info)+'">?</span>':'')+'</div><div class="mm-kpi-v'+(c.valCls?' '+c.valCls:'')+'"'+(c.valColor?' style="color:'+c.valColor+'"':'')+'>'+c.val+'</div><div class="mm-kpi-d" style="color:'+c.d.color+'">'+c.d.txt+'<span class="base"> vs '+(prevM?esc(prevM):'上期')+'</span></div></div>'; }).join('');
+  var note=open?'<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 本期帳務週期未完：KPI 為累計至今、<b>未產出成長／衰退結論</b>（無同期間可比）。</div>'
+    :(unrecon?'<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ '+esc(m)+' 尚未對帳：營收／銷量取訂單明細估算、費用為估算（轉單、寄倉皆同）；上傳對帳資料後轉為實際值。</div>':'');
+  // 各賣場分析卡（有資料在前、依影響金額大到小）
+  var items=PCHOME_OV_SHOPS.map(function(sh){
+    var anlz=pchomeShopAnalysis(sh, m, prevM, open), prevMargin=null, ptSuppressed=!!(open||!prevM);
+    if(!ptSuppressed){ var pt=prevShop[sh]; prevMargin=(pt&&pt.has&&pt.rev>0)?pt.margin:null; if(prevMargin==null) ptSuppressed=true; }
+    return {anlz:anlz, shopT:perShop[sh], prevMargin:prevMargin, ptSuppressed:ptSuppressed}; });
+  items.sort(function(a,b){ return ((a.anlz.hasProducts?0:1)-(b.anlz.hasProducts?0:1))||(b.anlz.topImpact-a.anlz.topImpact); });
+  var odd=items.length%2===1, anlzCards=items.map(function(it,i){ return pchomeAnlzCardHTML(it.anlz,it.shopT,it.prevMargin,it.ptSuppressed,odd&&i===items.length-1); }).join('');
+  var totalMissN=items.reduce(function(a,it){return a+(it.anlz.missN||0);},0);
+  var incNote=open?' · ⚠ 本期未完·未產出成長/衰退':'';
+  var anlzSection='<div class="mm-anlz-wrap"><div class="mm-anlz-title">各賣場分析</div><div class="mm-anlz-grid">'+anlzCards+'</div><div class="mm-anlz-foot">依影響金額排序 · 缺成本共 '+totalMissN+' 項'+incNote+'</div></div>';
+  var topShops=PCHOME_OV_SHOPS.filter(function(sh){ return pchomeProductsOfShop(sh).length>0; }), oddT=topShops.length%2===1;
+  var topCards=topShops.map(function(sh,i){ return '<div class="mm-ov-card'+(oddT&&i===topShops.length-1?' mm-anlz-span':'')+'"><div class="mm-ov-h">'+esc(sh)+' 銷量 Top 10（'+esc(m)+' 期）</div><div class="mm-ov-canvas"><canvas id="pchome-ov-top10-'+sh+'"></canvas></div></div>'; }).join('');
+  el.innerHTML='<div class="mm-row" style="margin-bottom:12px;align-items:center"><span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="pchomeOvSetMonth(this.value)">'+monthOpts+'</select></span>'
+      +'<span style="font-size:12px;color:#9ca3af;margin-left:auto">通路總覽 · 轉單＋寄倉（合計）</span></div>'
+    +note+'<div class="mm-kpis" style="margin-bottom:16px">'+cardHTML+'</div>'+anlzSection
+    +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（各帳務月）</div><div class="mm-ov-canvas"><canvas id="pchome-ov-trend"></canvas></div></div>'
+    +'<div class="mm-ov-card"><div class="mm-ov-h">各賣場淨利率（各帳務月）</div><div class="mm-ov-canvas"><canvas id="pchome-ov-margin"></canvas></div></div></div>'
+    +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收佔比（'+esc(m)+' 期）</div><div class="mm-ov-canvas"><canvas id="pchome-ov-pie"></canvas></div></div>'
+    +'<div class="mm-ov-card"><div class="mm-ov-h">賣場比較：淨利率／動銷率</div><div class="mm-ov-canvas"><canvas id="pchome-ov-cmp"></canvas></div></div></div>'
+    +'<div class="mm-anlz-grid">'+topCards+'</div>';
+  pchomeOvBuildCharts(m, perShop);
+}
+function pchomeOvBuildCharts(m, perShop){
+  pchomeOvDestroyCharts();
+  if(typeof Chart==='undefined') return;
+  var months=pchomeAllMonths().filter(function(x){ return x<=m; }), labels=months.map(function(x){ return +x.slice(5)+'月'; });
+  var revArr=[], profitArr=[], marginBy={}; PCHOME_OV_SHOPS.forEach(function(sh){ marginBy[sh]=[]; });
+  months.forEach(function(x){ var rev=0, profit=0; PCHOME_OV_SHOPS.forEach(function(sh){ var t=pchomeOvShopData(x,sh); rev+=t.rev; profit+=t.profit; marginBy[sh].push(t.rev>0?+t.margin.toFixed(1):null); }); revArr.push(Math.round(rev)); profitArr.push(Math.round(profit)); });
+  var mk=function(id,cfg){ var c=document.getElementById(id); if(c) _pchomeOvCharts.push(new Chart(c.getContext('2d'),cfg)); };
+  var baseOpt=function(extra){ return Object.assign({responsive:true,maintainAspectRatio:false},extra); };
+  mk('pchome-ov-trend',{type:'line',data:{labels:labels,datasets:[
+    {label:'營收',data:revArr,borderColor:'#5b5fcf',backgroundColor:'#5b5fcf',tension:.3},
+    {label:'淨利',data:profitArr,borderColor:'#10b981',backgroundColor:'#10b981',tension:.3}]},
+    options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:function(v){return pchomeMoney(v);}}}}})});
+  mk('pchome-ov-margin',{type:'line',data:{labels:labels,datasets:PCHOME_OV_SHOPS.filter(function(sh){ return marginBy[sh].some(function(v){return v!=null;}); }).map(function(sh){ return {label:sh,data:marginBy[sh],borderColor:PCHOME_OV_COLOR[sh],backgroundColor:PCHOME_OV_COLOR[sh],tension:.3,spanGaps:true}; })},
+    options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:function(v){return v+'%';}}}}})});
+  var pieShops=PCHOME_OV_SHOPS.filter(function(sh){ return perShop[sh].rev>0.5; });
+  mk('pchome-ov-pie',{type:'doughnut',data:{labels:pieShops,datasets:[{data:pieShops.map(function(sh){return Math.round(perShop[sh].rev);}),backgroundColor:pieShops.map(function(sh){return PCHOME_OV_COLOR[sh];})}]},
+    options:baseOpt({plugins:{legend:{position:'right'},tooltip:{callbacks:{label:function(c){return c.label+' '+pchomeMoney(c.parsed);}}}}})});
+  var cmp=PCHOME_OV_SHOPS.filter(function(sh){ return perShop[sh].rev>0.5; });
+  mk('pchome-ov-cmp',{type:'bar',data:{labels:cmp,datasets:[
+    {label:'淨利率%',data:cmp.map(function(sh){return +perShop[sh].margin.toFixed(1);}),backgroundColor:'#5b5fcf'},
+    {label:'動銷率%',data:cmp.map(function(sh){ return perShop[sh].dxDen>0?+(perShop[sh].dxNum/perShop[sh].dxDen*100).toFixed(1):0; }),backgroundColor:'#10b981'}]},
+    options:baseOpt({indexAxis:'y',plugins:{legend:{position:'top'}},scales:{x:{ticks:{callback:function(v){return v+'%';}}}}})});
+  PCHOME_OV_SHOPS.filter(function(sh){ return pchomeProductsOfShop(sh).length>0; }).forEach(function(sh){
+    var top=perShop[sh].skus.filter(function(x){return (Number(x.銷量)||0)>0;}).sort(function(a,b){return (b.銷量||0)-(a.銷量||0);}).slice(0,10).map(function(x){ return {name:String(x.商品名||x.料號||'—'), qty:Number(x.銷量)||0}; });
+    mk('pchome-ov-top10-'+sh,{type:'bar',data:{labels:top.map(function(x){ return x.name.length>12?x.name.slice(0,12)+'…':x.name; }),datasets:[{label:'銷量',data:top.map(function(x){return Math.round(x.qty);}),backgroundColor:PCHOME_OV_COLOR[sh]||'#5b5fcf'}]},
+      options:baseOpt({indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{title:function(c){return top[c[0].dataIndex].name;},label:function(c){return Math.round(c.parsed.x).toLocaleString()+' 件';}}}},
+        scales:{y:{afterFit:function(sc){ try{ sc.width=Math.max(sc.width,146); }catch(e){} },ticks:{font:{size:11},autoSkip:false,crossAlign:'far'}},x:{ticks:{precision:0}}}})}); });
 }
 function pchomeRenderShop(shop){
   var el=document.getElementById('pchome-content-'+shop); if(!el) return;
@@ -36790,7 +36947,7 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel, pchomeOnSearch, pchomeRenderProfitBody,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
-  pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomePCInput, pchomePCReset, pchomePCToOptlog, pchomePCSave, pchomePCSaveConfirm, pchomeAddOptlogModal, pchomeDeleteOptlog,
+  pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomeOvSetMonth, pchomePCInput, pchomePCReset, pchomePCToOptlog, pchomePCSave, pchomePCSaveConfirm, pchomeAddOptlogModal, pchomeDeleteOptlog,
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }
