@@ -17563,16 +17563,22 @@ function syncCoupangSummaryFromKpi(){
   // 純利負數＝紅、正數＝深色（A-310，#476；同 .mm-kpi-v.mm-neg 那一套）。
   //   每次填值都要 toggle：切月份只重填值、不重建 HTML，不 toggle 的話紅色會留到下一個月。
   const setNeg=(id,neg)=>{const el=document.getElementById(id);if(el)el.classList.toggle('mm-neg',!!neg);};
+  // ⚠ fmtN 是 Math.abs（全站共用、【不要】改它），所以純利虧損時要自己補負號，
+  //   不然畫面會出現「紅色的正數」。位置照 momoMoney / pchomeMoney / _kvMoney：負號在 NT$ 之前。
+  //   用 U+2212「−」（同蝦皮五格 _kvMoney / _kvWan），不是 ASCII 的 '-'。
+  //   判斷用 v<0，與 setNeg 同一個基準 → 有負號的必定是紅的、紅的必定有負號。
+  //   ⚠ 只給「純利」用：營收、純利率等其他格維持原樣。
+  const sign=v=>(v<0?'−':'');
   setTxt('cup-sum-kpi-orders',total.qty?fmtN(total.qty):'—');
   setTxt('cup-sum-kpi-rev',total.rev?'NT$'+fmtN(Math.round(total.rev)):'—');
-  setTxt('cup-sum-kpi-profit',total.rev||total.pure?'NT$'+fmtN(Math.round(total.pure)):'—');
+  setTxt('cup-sum-kpi-profit',total.rev||total.pure?sign(total.pure)+'NT$'+fmtN(Math.round(total.pure)):'—');
   setTxt('cup-sum-kpi-rate',total.rate!==null?total.rate.toFixed(2)+'%':'—');
   setNeg('cup-sum-kpi-profit',total.pure<0);
 
   const fillCard=(shopLabel,d)=>{
     setTxt(`cup-sum-${shopLabel}-orders`,(d.qty?fmtN(d.qty):'0')+' 筆訂單');
     setTxt(`cup-sum-${shopLabel}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
-    setTxt(`cup-sum-${shopLabel}-profit`,d.rev||d.pure?fmtN(Math.round(d.pure)):'—');
+    setTxt(`cup-sum-${shopLabel}-profit`,d.rev||d.pure?sign(d.pure)+fmtN(Math.round(d.pure)):'—');
     setTxt(`cup-sum-${shopLabel}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
     setNeg(`cup-sum-${shopLabel}-profit`,d.pure<0);
   };
