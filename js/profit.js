@@ -11378,7 +11378,7 @@ const KPI_GROUPS=[
     fillFormula:['tax']},
   // 2026-11-05：業外固定倒數第二（官網前面）、官網固定最後（不論營收、有沒有關站；所有月份）→ 兩段放在 KPI_GROUPS 最後。
   {key:'other',title:'業外',color:'#d63bb0',shops:['業外'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
+    manual:[{k:'qty',l:'訂單數',desc:'來源：手填（業外銷售的訂單筆數）。'},{k:'rev',l:'營收',desc:'來源：手填（業外銷售收入，含稅，照帳）。'},{k:'cost',l:'商品成本',desc:'來源：手填（業外商品的進貨成本）。'},{k:'fee',l:'手續費',desc:'來源：手填（照帳單）。'},{k:'ship',l:'運費',desc:'來源：手填（我方自付運費）。'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
@@ -11387,7 +11387,7 @@ const KPI_GROUPS=[
   // closedFrom（2026-10-15）：官網 2026-05 起關站。這個月（含）以後：計算一律當 0（不讀存的值）、填寫進度算已完成、
   //   填寫模式顯示「已關站」、總覽列顯示「已關站」。之前的月份完全不變。見 _kpiGroupClosed。
   {key:'website',title:'官網',color:'#2f9e5c',shops:['官網'],closedFrom:'2026-05',
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
+    manual:[{k:'qty',l:'訂單數',desc:'來源：手填（官網後台訂單數）；2026-05 起關站，算 0。'},{k:'rev',l:'營收',desc:'來源：手填（官網後台營收，含稅）；2026-05 起關站，算 0。'},{k:'cost',l:'商品成本',desc:'來源：手填（官網訂單商品成本）；2026-05 起關站，算 0。'},{k:'fee',l:'手續費',desc:'來源：手填（金流手續費，照帳單）；2026-05 起關站，算 0。'},{k:'ship',l:'運費',desc:'來源：手填（我方自付運費）；2026-05 起關站，算 0。'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
@@ -12770,7 +12770,7 @@ function _kpiFillHtml(row){
     return `<button class="km-side-item${g.key===group.key?' active':''}" onclick="kpiFillPickGroup('${g.key}')">
       <span class="km-dot" style="background:${g.color}"></span><span class="km-side-name">${g.title}</span>${_kpiFillBadge(fc)}</button>`;
   }).join('');
-  const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價</th>${cols.map(f=>{
+  const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價${_kpiInfoHtml(group.title+' 客單價',[_kpiDesc(group,'aov')||'客單價 = 實際營收 ÷ 訂單數（營收、訂單數取自同列的填寫欄，自動計算）'])}</th>${cols.map(f=>{
     const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
     // 有備註：蝦皮（#332）保留可點的鉛筆＋旁邊「備註」小標（整個 span 都可點）；其他組照舊用 ●。
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)

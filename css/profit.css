@@ -1843,6 +1843,13 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable tr.km-f-sub td{font-size:max(10px,calc(13px*var(--k)));font-variant-numeric:tabular-nums;}
 .km-ftable tr.km-f-sub td.km-n{padding-right:calc(5px*var(--k) + var(--km-r));text-align:right;}
 .km-ftable .km-info{width:calc(15px*var(--k));height:calc(15px*var(--k));margin-left:calc(4px*var(--k));}
+/* 表頭 ⓘ 不佔欄寬（2026-11-16：每一欄都有「資料來源」ⓘ，行內放會把每欄各撐寬 19px、表格變寬變擠）。
+   改成貼在表頭格右上角（absolute，不參與欄寬計算）；有 ⓘ 的表頭只往上多留一點高度（不影響寬度）。氣泡本來就是 position:fixed，不受影響。 */
+.km-ftable thead th{position:relative;}
+.km-ftable thead th:has(.km-info){padding-top:calc(7px*var(--k) + 8px);}
+.km-ftable thead th .km-th>.km-info,
+.km-ftable thead th .km-th>span>.km-info,
+.km-ftable thead th>.km-info{position:absolute;top:calc(2px*var(--k));right:calc(2px*var(--k));margin:0;width:calc(13px*var(--k));height:calc(13px*var(--k));font-size:max(9px,calc(10px*var(--k)));vertical-align:baseline;}
 .km-ftable .km-common-in{max-width:calc(240px*var(--k));}
 /* MOMO 自動帶入（2026-09-30）：按鈕同 .km-dl 外觀、「自動」小標籤、預覽表 */
 .km-au-bar{margin-left:auto;display:inline-flex;align-items:center;gap:8px;}
