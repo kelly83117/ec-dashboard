@@ -2601,7 +2601,7 @@ function _testSaveFailed(k,msg){
 //     否則說明書會叫使用者去等一則不存在的提示。
 const TEST_SHOP_HELP=[
   {q:'① 用法',a:'切到「測試通路」→ 選開始日和結束日 → 上傳檔案 → 產生報表 → 匯出 Excel。\n跟好麻吉完全一樣，只是期間從「月份＋上下半月」變成兩個日期。'},
-  {q:'② 手續費',a:'期間旁邊顯示「手續費 20.5%」。2026/11 起費率依月份自動帶入（跟其他通路同一套），這裡不能改。'},
+  {q:'② 手續費',a:'期間旁邊顯示這段期間的手續費（依開始日的月份，2026/12 起 21%）。費率依月份自動帶入（跟其他通路同一套），這裡不能改。'},
   {q:'③ 報表自動存雲端，不用按同步',a:'跟其他四個通路不一樣。所以在辦公室跑完，回家用筆電選同一組日期就看得到。'},
   {q:'④ 跑過的區間會自動叫出來',a:'選了日期，如果那個區間跑過，會把存的報表叫出來。沒跑過就顯示空白等你上傳。'},
   {q:'⑤ 不做跨期間比較',a:'沒有上期營收／成長比／成長分析／成長調整，那幾欄會是空的。\n要比較兩個區間的話，分別跑、看 Excel。'},
@@ -5710,11 +5710,11 @@ function checkReady(shop){const s=state[shop];const g=document.getElementById('g
 //   純函式 shopRatePct 在 SHOP_RATE_PURE_BEGIN／END 之間（node 測試會擷取）。
 // SHOP_RATE_PURE_BEGIN
 const SHOP_RATE_SCHEDULE=Object.freeze({
-  '好麻吉':{base:20.5},
-  '玩樂':{base:20.5},
-  '森之旅':{base:20.5},
-  '維克':{base:17.5,changes:[{from:'2026-11',rate:20.5}]},   // 2026/11 起蝦皮對維克的收費跟其他三家相同（2026-11-09 會議）
-  [TEST_SHOP_ID]:{base:20.5},
+  '好麻吉':{base:20.5,changes:[{from:'2026-12',rate:21}]},   // 2026/12 起蝦皮手續費調漲，四家都是 21%（#475）
+  '玩樂':{base:20.5,changes:[{from:'2026-12',rate:21}]},
+  '森之旅':{base:20.5,changes:[{from:'2026-12',rate:21}]},
+  '維克':{base:17.5,changes:[{from:'2026-11',rate:20.5},{from:'2026-12',rate:21}]},   // 2026/11 起蝦皮對維克的收費跟其他三家相同（2026-11-09 會議）；2026/12 起 21%（#475）
+  [TEST_SHOP_ID]:{base:20.5,changes:[{from:'2026-12',rate:21}]},
 });
 const SHOP_RATE_FALLBACK=20.5;   // 費率表沒列的通路（同改版前 getPlatformRate 的預設）
 // 'YYYY/MM'、'YYYY-MM'、'YYYY-MM-DD'、'YYYY/MM/DD' → 'YYYY-MM'；其他 → null
@@ -5749,7 +5749,7 @@ function _rateMonthOf(shop){
   return shop===TEST_SHOP_ID?(s.curStart||s.curMonth):s.curMonth;
 }
 // 上傳視窗費率旁的說明小字（白話）
-const SHOP_RATE_NOTE='費率依月份自動帶入；維克 2026/11 起與其他三家相同 20.5%';
+const SHOP_RATE_NOTE='費率依月份自動帶入；2026/12 起四家都是 21%（維克 2026/11 起與其他三家相同）';
 
 // ── 取得對應的「上期」區間 key ──
 function getPrevPeriodKey(shop, month, half) {
@@ -11164,10 +11164,10 @@ const KPI_GROUPS=[
     commonCostPlaceholder:'照帳單填含稅金額',
     commonCostInfo:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通，整組共同費用，只扣在蝦皮小計純利。金額含稅，照帳單填。',
     // 手續費（2026-10-01）：自動預設＝實際營收 × 估算費率；存了值＝手動覆蓋；實際營收空著 → 不補（維持空，純利不變）。舊手填值的整理見 __kpiShopeeFeeMigrate。
-    //   2026-11 起估算費率＝淨利表平台費率（依月份生效，SHOP_RATE_SCHEDULE：好麻吉／玩樂／森之旅 20.5%；維克 2026/10 以前 17.5%、2026/11 起 20.5%）− 5（_kpiShopeeFeeEstRate）：
+    //   2026-11 起估算費率＝淨利表平台費率（依月份生效，SHOP_RATE_SCHEDULE：好麻吉／玩樂／森之旅 20.5%；維克 2026/10 以前 17.5%、2026/11 起 20.5%；2026/12 起四家都是 21%）− 5（_kpiShopeeFeeEstRate；2026/12 起估算 16%）：
     //   對帳單手續費約佔含稅營收 15%，舊的 20.5% 含 5% 營業稅；營業稅現在由「稅金」欄另外扣，不能再算一次。
     autoFill:{
-      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop,month)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop,month),desc:'進帳報表的成交手續費 ＋ 其他服務費 ＋ 金流與系統處理費 ＋ 賣家運費，含稅（無包裝 $1 已含在其他服務費）。還沒帶入的月份先用營收 × 約 15% 估算。'},
+      fee:{shops:['好麻吉','玩樂','維克','森之旅'],calc:(d,shop,month)=>(d.rev==null||d.rev==='')?undefined:(Number(d.rev)||0)*_kpiShopeeFeeEstRate(shop,month),desc:'進帳報表的成交手續費 ＋ 其他服務費 ＋ 金流與系統處理費 ＋ 賣家運費，含稅（無包裝 $1 已含在其他服務費）。還沒帶入的月份先用營收 × 約 15～16%（依月份）估算。'},
     },
     order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','tax','_common','pure','pureRate']},
   // 2026-11-05：商城兩店「從淨利表帶入」（資料在淨利表 → 酷澎 → 訂單明細上傳；KPI 只讀同店同月合計，單向、不讀 KPI 任何格子）。
@@ -16080,7 +16080,7 @@ function _kpiRawForCalc(raw,group,shop,row){
   return Object.keys(patch).length?{...raw,...patch}:raw;
 }
 // KPI 蝦皮手續費估算費率（小數，2026-11）＝淨利表平台費率 − 5 個百分點（最低 0）。
-//   淨利表的 20.5%／17.5% 含 5% 營業稅；KPI 營收改含稅後，營業稅由「稅金」欄另外扣，估算手續費不能再含一次。
+//   淨利表的 20.5%／17.5%（2026/12 起 21%）含 5% 營業稅；KPI 營收改含稅後，營業稅由「稅金」欄另外扣，估算手續費不能再含一次。
 //   對帳單實際：手續費約佔含稅營收 15%（2026-01 好麻吉 15.3%、維克 14.5%）。
 const KPI_SHOPEE_FEE_EST_LESS=5;
 function _kpiShopeeFeeEstRate(shop,month){
@@ -31876,7 +31876,7 @@ function periodRowTestHTML(id){return`
       <span class="tp-lbl tp-lbl-gap">手續費</span>
       <span class="tp-rate tp-rate-ro" id="test-rate-${id}" title="${SHOP_RATE_NOTE}">—</span>
       <span class="tp-lbl">%</span>
-      <button type="button" class="tp-info" onclick="openTestShopHelp()" title="測試通路使用注意事項：期間怎麼選、手續費要自己設、報表只存雲端不存本機">ⓘ 使用說明</button>`;}
+      <button type="button" class="tp-info" onclick="openTestShopHelp()" title="測試通路使用注意事項：期間怎麼選、手續費依開始日的月份自動帶入、報表只存雲端不存本機">ⓘ 使用說明</button>`;}
 function periodRowHTML(id){return id===TEST_SHOP_ID?periodRowTestHTML(id):periodRowShopeeHTML(id);}
 // ── 測試通路「使用注意事項」彈窗（期間列尾端的 ⓘ 點開）──
 //   文字在模組頂層的 TEST_SHOP_HELP（宣告於 testSave 那一區，理由見該處註解）。
