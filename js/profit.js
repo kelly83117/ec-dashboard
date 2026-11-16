@@ -17678,7 +17678,10 @@ function syncCoupangSummaryFromKpi(){
     setTxt(`cup-tbl-${prefix}-ret`,d.ret?fmtN(Math.round(d.ret)):'—');
     setTxt(`cup-tbl-${prefix}-tax`,d.tax?fmtN(Math.round(d.tax)):'—');
     setTxt(`cup-tbl-${prefix}-material`,d.material?fmtN(Math.round(d.material)):'—');
-    setTxt(`cup-tbl-${prefix}-profit`,d.rev||d.pure?fmtN(Math.round(d.pure)):'—');
+    // 表格檢視的純利也要補負號（同上方卡片的 sign；fmtN 是 Math.abs），不然虧損會顯示成正數、跟同列的負純利率對不上。
+    //   先四捨五入再判斷正負：-0.4 這種會變 0 的不要顯示成「−0」（這格沒有紅字，不必跟 setNeg 對齊）。
+    const pureR=Math.round(d.pure);
+    setTxt(`cup-tbl-${prefix}-profit`,d.rev||d.pure?sign(pureR)+fmtN(pureR):'—');
     setTxt(`cup-tbl-${prefix}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
   };
   fillTblRow('mall',mall,'orders');
