@@ -151,3 +151,53 @@ Worker 每次呼叫讀一次 `app/main`（約 1-2 MB）。Firebase 免費方案�
 **Q：API Key 要換怎麼辦？**
 Cloudflare → Worker → Settings → Variables and Secrets → 編輯 `WARROOM_API_KEY` →
 存檔 → Save and deploy。然後把新 key 貼給戰情室。舊 key 立即失效。
+
+---
+
+## v2 候選版 — 逐賣場每日營收 `GET /revenue/daily?date=YYYY-MM-DD`（2026-11-17，尚未部署）
+
+給外部接收端（Victor 的 ChatGPT）按台灣日期查各賣場營收、與看板首頁逐筆對帳。
+**v1 `GET /revenue` 回傳完全不變**，戰情室不用改。部署方式同 Part 1 第 3 步（整檔貼上 → Save and deploy）。
+
+### 新增 / 選填 Secret
+| 名稱 | 類型 | 說明 |
+|---|---|---|
+| `REVENUE_API_KEY` | **Secret**（選填，建議設） | 給 ChatGPT 端用的另一把 key，可以單獨換 / 撤銷，不影響戰情室的 `WARROOM_API_KEY` |
+
+### 呼叫
+```bash
+curl -H "Authorization: Bearer <REVENUE_API_KEY>" \
+  "https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue/daily?date=2026-11-16"
+# 也接受 -H "X-API-Key: <key>"
+```
+
+### 回傳（200）
+```json
+{
+  "date": "2026-11-16", "timezone": "Asia/Taipei", "currency": "TWD", "basis": "gross_before_returns",
+  "sourceUpdatedAt": "2026-11-17T15:30:17+08:00",
+  "stores": [
+    { "date": "2026-11-16", "channelCode": "shopee", "storeCode": "shopee_haomaji", "storeName": "生活好麻吉",
+      "revenue": 100300, "status": "reported", "updatedAt": "2026-11-17T09:32:44+08:00" }
+  ],
+  "summary": { "stores": 10, "reported": 10, "notReported": 0, "revenueReportedTotal": 219267 }
+}
+```
+| 欄位 | 定義 |
+|---|---|
+| `revenue` | NT$ 整數、未扣退貨；有填 0 就是 `0`；沒填是 `null` |
+| `status` | `reported`（看板有填，含 0）／`not_reported`（看板沒填，看板畫面會顯示 0） |
+| `updatedAt` | 看板該格最後存檔時間（台灣時間；營收與廣告費共用同一個時間），舊資料沒有時 `null` |
+| `sourceUpdatedAt` | Firestore `app/main` 整份文件最後更新時間（任何欄位改動都會變） |
+| `channelCode` / `storeCode` | shopee（shopee_haomaji / shopee_wanle / shopee_senzhilu / shopee_weike）、momo（momo / momo_plus）、coupang、pchome、books、friday；資料裡出現清單外的平台會列成 `unknown` |
+
+錯誤：401 `Unauthorized`（沒帶或錯的 key）、400 日期不是合法的 `YYYY-MM-DD`、500 `Internal error`。
+沒有資料的日期回 200、每家 `not_reported`。
+
+### 測試
+- `node scripts/warroom-revenue-worker.test.mjs`：假資料單元測試（不連網）
+- `LIVE=1 NODE_USE_ENV_PROXY=1 node scripts/warroom-revenue-worker.test.mjs 2026-11-16`：讀正式 Firestore（只讀 `ec.platforms`）逐賣場對帳
+
+### ⚠ v1 與看板總額口徑差異（沒改，留給 Kelly 決定）
+v1 `metrics.revenue` 只加 7 個通路，看板首頁「全通路總營收」加 10 個（多 PChome、博客來、Friday）。
+例：2026-11-16 v1 會是 212,075，看板是 219,267。v2 逐賣場列出 10 家，總和與看板相同。

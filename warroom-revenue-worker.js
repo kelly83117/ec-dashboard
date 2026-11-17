@@ -37,11 +37,29 @@
  *   取第一個有任何通路非 0 的日期。全空 → 回 404。
  *   adSpend 以同一個日期回傳；若該日尚未填廣告費 → adSpend = 0。
  *
+ * ---- v2：逐賣場每日營收（2026-11-17 候選版） ----
+ *   GET /revenue/daily?date=YYYY-MM-DD   （台灣日期，必填）
+ *     回指定日期「每個賣場一筆」：日期、通路代碼、賣場代碼、賣場名稱、
+ *     營收（NT$ 整數、未扣退貨）、狀態、資料更新時間。
+ *     - 有填（含填 0）→ status:"reported"、revenue:數字（實際零營收就是 0）
+ *     - 沒填           → status:"not_reported"、revenue:null
+ *     - updatedAt＝看板首頁 dailyBy[日期].at（營收與廣告費共用的署名時間，
+ *       台灣時間 ISO）；舊資料沒有署名時為 null。不輸出署名的人名 / 帳號。
+ *     涵蓋賣場＝STORE_CATALOG（10 家，含 PChome / 博客來 / Friday）；資料裡
+ *     出現不在清單的平台名稱時也照列（channelCode/storeCode 為 "unknown"），
+ *     確保逐筆對帳不漏。
+ *     口徑＝辦公室看板首頁「每日營收」各平台卡片的數字（ec.platforms[].daily）。
+ *   驗證：X-API-Key: <key> 或 Authorization: Bearer <key>，
+ *     key 可為 WARROOM_API_KEY 或（選填）REVENUE_API_KEY。
+ *   v1 的 GET /revenue 回傳完全不變。
+ *
  * ---- 必要 env / secret ----
  *   WARROOM_API_KEY       Secret：戰情室呼叫時要附 X-API-Key 這個密碼
  *   FIREBASE_PROJECT_ID   Plain：yc-dashboard-9aa6c
  *
  * ---- 可選 env ----
+ *   REVENUE_API_KEY       Secret：給外部接收端（例如 ChatGPT）的另一把 key，
+ *                         可單獨更換 / 撤銷，不影響戰情室的 WARROOM_API_KEY
  *   ALLOWED_ORIGIN        Plain：CORS 允許的來源（預設 *）；戰情室的網域
  *                         上線後可改成該網域收窄
  *
@@ -59,6 +77,22 @@ const PLATFORMS_WITH_AD_SPEND = ['生活好麻吉', '玩樂盒子', '森之旅',
 const TW_TZ_OFFSET_MIN = 8 * 60; // Asia/Taipei 恆定 +08:00（台灣無日光節約）
 const MAX_LOOKBACK_DAYS = 7;
 
+// v2 逐賣場：看板 ec.platforms[].name → 對外代碼（順序＝看板首頁順序）
+//   通路代碼對齊 js/app.js PLATFORM_MARKETPLACE；新增賣場要加在這裡。
+const STORE_CATALOG = [
+  { name: '生活好麻吉', channelCode: 'shopee',  storeCode: 'shopee_haomaji' },
+  { name: '玩樂盒子',   channelCode: 'shopee',  storeCode: 'shopee_wanle' },
+  { name: '森之旅',     channelCode: 'shopee',  storeCode: 'shopee_senzhilu' },
+  { name: '維克生活',   channelCode: 'shopee',  storeCode: 'shopee_weike' },
+  { name: 'MOMO',       channelCode: 'momo',    storeCode: 'momo' },
+  { name: 'MO+',        channelCode: 'momo',    storeCode: 'momo_plus' },
+  { name: '酷澎',       channelCode: 'coupang', storeCode: 'coupang' },
+  { name: 'PChome',     channelCode: 'pchome',  storeCode: 'pchome' },
+  { name: '博客來',     channelCode: 'books',   storeCode: 'books' },
+  { name: 'Friday',     channelCode: 'friday',  storeCode: 'friday' },
+];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export default {
   async fetch(request, env) {
     const allowedOrigin = env.ALLOWED_ORIGIN || '*';
@@ -70,12 +104,11 @@ export default {
       return jsonResp({ error: 'Method not allowed' }, 405, allowedOrigin);
     }
 
-    // 驗 X-API-Key
-    const apiKey = request.headers.get('X-API-Key') || '';
+    // 驗 X-API-Key（或 Authorization: Bearer）
     if (!env.WARROOM_API_KEY) {
       return jsonResp({ error: 'Server not configured (WARROOM_API_KEY missing)' }, 500, allowedOrigin);
     }
-    if (apiKey !== env.WARROOM_API_KEY) {
+    if (!isAuthorized(request, env)) {
       return jsonResp({ error: 'Unauthorized' }, 401, allowedOrigin);
     }
     if (!env.FIREBASE_PROJECT_ID) {
@@ -83,6 +116,18 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (url.pathname === '/revenue/daily') {
+      const date = url.searchParams.get('date') || '';
+      if (!isValidYmd(date)) {
+        return jsonResp({ error: 'Invalid date: use Taiwan date YYYY-MM-DD, e.g. ?date=2026-11-16' }, 400, allowedOrigin);
+      }
+      try {
+        return jsonResp(await getDailyRevenueByStore(env, date), 200, allowedOrigin);
+      } catch (e) {
+        console.error('[revenue/daily] failed:', e);
+        return jsonResp({ error: 'Internal error' }, 500, allowedOrigin);
+      }
+    }
     if (url.pathname === '/revenue' || url.pathname === '/') {
       try {
         const result = await getLatestCompleteRevenue(env);
@@ -142,16 +187,110 @@ async function getLatestCompleteRevenue(env) {
   return null;
 }
 
+// =============== v2：指定台灣日期、逐賣場 ================
+async function getDailyRevenueByStore(env, date) {
+  const { fields, updateTime } = await firestoreGetDoc(FIRESTORE_DOC_PATH, env, ['ec.platforms']);
+  const raw = fromFirestoreValue(fields['ec.platforms']);
+  const platforms = Array.isArray(raw) ? raw.filter(p => p && typeof p.name === 'string') : [];
+  const byName = new Map(platforms.map(p => [p.name, p]));
+
+  const rows = [];
+  const pushRow = (name, channelCode, storeCode) => {
+    const p = byName.get(name);
+    const v = p && p.daily ? p.daily[date] : undefined;
+    const num = (v === null || v === undefined || v === '') ? NaN : Number(v);
+    const reported = Number.isFinite(num);
+    const sig = p && p.dailyBy ? p.dailyBy[date] : null;
+    const at = sig && Number.isFinite(Number(sig.at)) ? Number(sig.at) : null;
+    rows.push({
+      date,
+      channelCode,
+      storeCode,
+      storeName: name,
+      revenue: reported ? Math.round(num) : null,
+      status: reported ? 'reported' : 'not_reported',
+      updatedAt: (reported && at) ? twIso(at) : null,
+    });
+  };
+  STORE_CATALOG.forEach(s => pushRow(s.name, s.channelCode, s.storeCode));
+  // 資料裡有、清單沒有的平台照列，避免對帳漏掉
+  platforms.forEach(p => {
+    if (!STORE_CATALOG.some(s => s.name === p.name)) pushRow(p.name, 'unknown', 'unknown');
+  });
+
+  const reportedRows = rows.filter(r => r.status === 'reported');
+  return {
+    date,
+    timezone: 'Asia/Taipei',
+    currency: 'TWD',
+    basis: 'gross_before_returns',
+    sourceUpdatedAt: updateTime ? twIso(Date.parse(updateTime)) : null,
+    stores: rows,
+    summary: {
+      stores: rows.length,
+      reported: reportedRows.length,
+      notReported: rows.length - reportedRows.length,
+      revenueReportedTotal: reportedRows.reduce((s, r) => s + r.revenue, 0),
+    },
+  };
+}
+
+function isValidYmd(s) {
+  if (!DATE_RE.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+// epoch ms → 台灣時間 ISO（+08:00）
+function twIso(ms) {
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms + TW_TZ_OFFSET_MIN * 60 * 1000);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}+08:00`;
+}
+
+// =============== 驗證 ================
+function isAuthorized(request, env) {
+  let key = request.headers.get('X-API-Key') || '';
+  if (!key) {
+    const m = /^Bearer\s+(.+)$/i.exec(request.headers.get('Authorization') || '');
+    if (m) key = m[1].trim();
+  }
+  if (!key) return false;
+  const valid = [env.WARROOM_API_KEY, env.REVENUE_API_KEY].filter(k => typeof k === 'string' && k.length > 0);
+  let ok = false;
+  for (const k of valid) ok = timingSafeEqualStr(key, k) || ok;
+  return ok;
+}
+
+function timingSafeEqualStr(a, b) {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < eb.length; i++) diff |= (ea[i] || 0) ^ eb[i];
+  return diff === 0;
+}
+
 // =============== Firestore REST helpers（匿名讀） ================
-async function firestoreGetFields(docPath, env) {
-  const url = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${docPath}`;
+// fieldPaths：只取這幾個欄位（Firestore mask；含點的字面 key 要用反引號包）
+//   → 不把 ec.users 等其他欄位下載進 Worker。
+async function firestoreGetDoc(docPath, env, fieldPaths) {
+  let url = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${docPath}`;
+  if (fieldPaths && fieldPaths.length) {
+    url += '?' + fieldPaths.map(f => 'mask.fieldPaths=' + encodeURIComponent('`' + f + '`')).join('&');
+  }
   const resp = await fetch(url);
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
     throw new Error(`Firestore GET ${docPath}: ${resp.status} ${txt}`);
   }
   const data = await resp.json();
-  return data.fields || {};
+  return { fields: data.fields || {}, updateTime: data.updateTime || null };
+}
+
+async function firestoreGetFields(docPath, env) {
+  return (await firestoreGetDoc(docPath, env, ['ec.platforms'])).fields;
 }
 
 function fromFirestoreValue(v) {
@@ -193,7 +332,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     'Access-Control-Max-Age': '86400',
     'Cache-Control': 'no-store',
   };
