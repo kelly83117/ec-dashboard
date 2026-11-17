@@ -151,3 +151,100 @@ Worker 每次呼叫讀一次 `app/main`（約 1-2 MB）。Firebase 免費方案�
 **Q：API Key 要換怎麼辦？**
 Cloudflare → Worker → Settings → Variables and Secrets → 編輯 `WARROOM_API_KEY` →
 存檔 → Save and deploy。然後把新 key 貼給戰情室。舊 key 立即失效。
+
+
+---
+
+# v2：逐賣場每日營收 `GET /revenue/daily?date=YYYY-MM-DD`（候選版，尚未部署）
+
+給 Victor 的 ChatGPT（自訂 GPT Action）用。**同一支 Worker、同一把 `WARROOM_API_KEY`、網址不變**；
+v1 的 `GET /revenue` 行為完全不變。部署方式同上方 Part 1 第 3 步（Edit code → 貼整份
+`warroom-revenue-worker.js` → Save and deploy），不用新增任何變數。
+
+## 呼叫
+
+```bash
+curl -H "X-API-Key: <WARROOM_API_KEY>" \
+  "https://yc-warroom-readonly.<你的帳號>.workers.dev/revenue/daily?date=2026-11-16"
+# 也可以用 Authorization: Bearer <WARROOM_API_KEY>
+```
+
+```json
+{
+  "date": "2026-11-16",
+  "currency": "TWD",
+  "basis": "gross_before_returns",
+  "stores": [
+    { "date": "2026-11-16", "channel": "shopee", "storeCode": "shopee_haomaji", "storeName": "生活好麻吉",
+      "revenue": 170000, "status": "reported", "updatedAt": "2026-11-17T10:05:09+08:00" },
+    { "date": "2026-11-16", "channel": "pchome", "storeCode": "pchome", "storeName": "PChome",
+      "revenue": null, "status": "not_reported", "updatedAt": null }
+  ]
+}
+```
+
+## 欄位
+
+| 欄位 | 說明 | 看板來源（app/main `ec.platforms[]`） |
+|---|---|---|
+| `date` | 台灣日期 | 查詢參數 |
+| `channel` | 通路代碼 | `name` → 對照表 |
+| `storeCode` | 賣場代碼 | `name` → 對照表 |
+| `storeName` | 看板上的賣場名稱 | `name` |
+| `revenue` | 新台幣整數、未扣退貨；未填為 `null` | `daily[date]` |
+| `status` | `reported`（有填，含實際 0）／`not_reported`（沒填）／`invalid_value`（存了非數字） | `daily[date]` 是否存在 |
+| `updatedAt` | 這一格最後存檔時間（台灣時間）；營收與廣告費共用；舊資料無紀錄為 `null` | `dailyBy[date].at`（不輸出填寫人） |
+
+看板清空一格＝刪掉那天的 key，所以「沒有 key」＝未填、「值是 0」＝實際零營收。
+
+## 涵蓋的賣場（白名單，看板有這筆資料才會出現）
+
+| storeName | channel | storeCode |
+|---|---|---|
+| 生活好麻吉 | shopee | shopee_haomaji |
+| 玩樂盒子 | shopee | shopee_wanle |
+| 森之旅 | shopee | shopee_senzhilu |
+| 維克生活 | shopee | shopee_weike |
+| MOMO | momo | momo_main |
+| MO+ | momo | momo_plus |
+| 酷澎 | coupang | coupang |
+| PChome | pchome | pchome |
+| 博客來 | books | books |
+| Friday | friday | friday |
+
+看板新增賣場要加到 Worker 的 `STORE_MAP`，否則 API 不會出現（不猜代碼）。
+
+## 錯誤
+
+| 狀態 | 情況 |
+|---|---|
+| 400 | 缺 `date`、不是 `YYYY-MM-DD`、不存在的日期、晚於台灣今天 |
+| 401 | 沒帶或錯誤的憑證 |
+| 500 | Worker 或 Firestore 異常（不回內部細節） |
+| 200 | 沒資料的日期：每個賣場 `status = not_reported` |
+
+## 資料更新頻率
+
+API 沒有快取，每次呼叫即時讀 Firestore（只取 `ec.platforms` 一個欄位）。數字何時更新＝行銷在看板填寫的時間（通常次日上午補前一天）；
+PChome／博客來／Friday 不參與看板「資料截止日」判斷，常比蝦皮晚填。
+
+## ChatGPT Action 設定
+
+- Schema：`docs/warroom-revenue-openapi.json`（把 `servers.url` 換成實際 Worker 網址）
+- Authentication：API Key → Custom header，名稱 `X-API-Key`（或選 Bearer）
+- 外部呼叫限制：Worker 是公開網址，只靠金鑰；Cloudflare 免費方案 10 萬次／日。CORS 預設 `*`（伺服器端呼叫不受 CORS 影響）。
+
+## 對帳（部署後，在看板分頁的 F12 Console 跑，只讀）
+
+```js
+// 登入看板、首頁載入完再跑。把 URL、KEY、DATE 換掉；KEY 跑完記得清掉 Console。
+const URL = 'https://yc-warroom-readonly.<你的帳號>.workers.dev', KEY = '<WARROOM_API_KEY>', DATE = '2026-11-16';
+const api = await fetch(`${URL}/revenue/daily?date=${DATE}`, { headers: { 'X-API-Key': KEY } }).then(r => r.json());
+const board = Store.get(Store.KEYS.platforms, []);
+console.table(api.stores.map(s => {
+  const p = board.find(x => x.name === s.storeName) || {};
+  const b = (p.daily || {})[DATE];
+  return { 賣場: s.storeName, API: s.revenue, 看板: b ?? '(未填)', 一致: (b == null ? s.revenue === null : Math.round(+b) === s.revenue) ? '✓' : '✗' };
+}));
+console.log('看板有、API 沒有：', board.map(p => p.name).filter(n => !api.stores.some(s => s.storeName === n)));
+```

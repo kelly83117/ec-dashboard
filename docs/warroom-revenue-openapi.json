@@ -1,0 +1,74 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "元創數位 每日營收（唯讀）",
+    "version": "2.0.0",
+    "description": "查詢元創數位辦公室看板各賣場的每日營收。新台幣整數、未扣退貨。只讀，不能寫入。"
+  },
+  "servers": [
+    { "url": "https://yc-warroom-readonly.<CLOUDFLARE_ACCOUNT_SUBDOMAIN>.workers.dev" }
+  ],
+  "paths": {
+    "/revenue/daily": {
+      "get": {
+        "operationId": "getDailyRevenueByStore",
+        "summary": "指定台灣日期的逐賣場營收",
+        "description": "回傳該日每個賣場一筆。status=reported 表示有填（revenue 可為 0，代表實際零營收）；not_reported 表示當天還沒填（revenue 為 null，不可當成 0）；invalid_value 表示看板存了非數字。",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "description": "台灣日期 YYYY-MM-DD，不可晚於台灣今天",
+            "schema": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DailyRevenue" }
+              }
+            }
+          },
+          "400": { "description": "缺日期、格式錯誤、不存在的日期或未來日期", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "沒帶或錯誤的憑證", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "伺服器異常", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyHeader": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+    },
+    "schemas": {
+      "DailyRevenue": {
+        "type": "object",
+        "required": ["date", "currency", "basis", "stores"],
+        "properties": {
+          "date": { "type": "string", "description": "查詢的台灣日期" },
+          "currency": { "type": "string", "const": "TWD" },
+          "basis": { "type": "string", "const": "gross_before_returns", "description": "未扣退貨的營收毛額" },
+          "stores": { "type": "array", "items": { "$ref": "#/components/schemas/StoreRevenue" } }
+        }
+      },
+      "StoreRevenue": {
+        "type": "object",
+        "required": ["date", "channel", "storeCode", "storeName", "revenue", "status", "updatedAt"],
+        "properties": {
+          "date": { "type": "string" },
+          "channel": { "type": "string", "enum": ["shopee", "momo", "coupang", "pchome", "books", "friday"] },
+          "storeCode": { "type": "string", "enum": ["shopee_haomaji", "shopee_wanle", "shopee_senzhilu", "shopee_weike", "momo_main", "momo_plus", "coupang", "pchome", "books", "friday"] },
+          "storeName": { "type": "string", "description": "看板上的賣場名稱" },
+          "revenue": { "type": ["integer", "null"], "description": "新台幣整數、未扣退貨；未填時為 null" },
+          "status": { "type": "string", "enum": ["reported", "not_reported", "invalid_value"] },
+          "updatedAt": { "type": ["string", "null"], "description": "這一格最後存檔時間（台灣時間 ISO 8601）；舊資料沒有紀錄時為 null" }
+        }
+      },
+      "Error": { "type": "object", "properties": { "error": { "type": "string" } } }
+    }
+  },
+  "security": [ { "ApiKeyHeader": [] } ]
+}
