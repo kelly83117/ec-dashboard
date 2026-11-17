@@ -442,6 +442,8 @@ const _pendingSyncKeys = new Set();
 // 在這一次同步的進度顯示（「同步中 i/N」）中途引爆、把進度蓋掉。
 let _syncBtnRepaintTimer = null;
 function _markPending(key){
+  // PR-C1：酷澎商品主檔（ec_coupang_products|）在 C1 是純本機，絕不進待同步（C2 接雲端時才拿掉這行）
+  if(typeof key==='string' && key.indexOf('ec_coupang_products|')===0){ try{ console.error('[待同步] 拒收純本機 key：'+key); }catch(e){} return; }
   _pendingSyncKeys.add(key);
   _showSyncBtn();
 }
@@ -2765,6 +2767,7 @@ function _sweepAllLocalReportsIntoPending(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
+      if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // PR-C1：酷澎商品主檔是純本機，不撿進待推（C2 才接雲端）
       // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
       //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
       if(k&&k.startsWith('ec_momo_products|')){
@@ -30435,10 +30438,13 @@ function _cupShopIdSets(shop){ const disp=new Set(), code=new Set();
   cupAvailableMonths(shop).forEach(m=>{ const d=cupLoadReport(shop,m); ((d&&d.rows)||[]).forEach(r=>{ if(!r) return; if(r.code) code.add(String(r.code)); _cupSplitIds(r.dispId).forEach(x=>disp.add(x)); }); });
   return {disp, code}; }
 function _cupShopOverlap(shop, parsed){
-  const other=CUP_OVERLAP_SHOPS.find(s=>s!==shop); if(CUP_OVERLAP_SHOPS.indexOf(shop)<0||!other) return null;
   const fDisp=new Set(), fCode=new Set();
   Object.values((parsed&&parsed.orders)||{}).forEach(o=>(o.items||[]).forEach(it=>{ if(it.code) fCode.add(String(it.code)); _cupSplitIds(it.dispId).forEach(x=>fDisp.add(x)); }));
-  const mine=_cupShopIdSets(shop), oth=_cupShopIdSets(other);
+  return _cupOverlapCore(shop, fDisp, fCode, _cupShopIdSets); }
+// 比對核心（訂單檔與商品主檔共用）：idSets(shop) 回 {disp,code}。訂單檔用 _cupShopIdSets（只看報表），商品主檔另外併入本機主檔的 Product ID。
+function _cupOverlapCore(shop, fDisp, fCode, idSets){
+  const other=CUP_OVERLAP_SHOPS.find(s=>s!==shop); if(CUP_OVERLAP_SHOPS.indexOf(shop)<0||!other) return null;
+  const mine=idSets(shop), oth=idSets(other);
   const key=(fDisp.size&&mine.disp.size)?'disp':'code';
   const F=key==='disp'?fDisp:fCode, M=key==='disp'?mine.disp:mine.code, O=key==='disp'?oth.disp:oth.code;
   const out={shop, other, key, fileN:F.size, base:M.size, otherBase:O.size, hit:0, otherHit:0, pct:0, otherPct:null, skip:false, low:false};
@@ -30461,6 +30467,189 @@ function _cupOverlapHtml(shop, S){
       ${exists?`繼續寫入會把「${nm} ${ym}」的報表整份換成這份檔。`:`繼續寫入會把這份檔存成「${nm} ${ym}」的報表。`}請先確認上方的通路沒有選錯。
       <label style="display:block;margin-top:6px;color:#7f1d1d;cursor:pointer"><input type="checkbox" id="cup-ovl-sure-${esc(shop)}"> 我確定這份是「${nm}」的訂單檔</label>
     </div>${byCode}`; }
+
+// ══ PR-C1：酷澎商品主檔（price_inventory → 每通路一份、一筆＝一個選項 ID）══
+//   🔴 C1 是【純本機】：只存這台電腦的 localStorage（ec_coupang_products|<通路>，LZ1 壓縮）＋本模組記憶體快取。
+//     不經 Store.set（會即時推雲）、不放 Store._mem／_profitMem、不 _markPending（_markPending 也明確拒收這把 key）。
+//     所以 sweep／待同步數／同步預覽／syncToCloud／刪除守衛都碰不到它；C2 才接雲端（coupang_products）。
+//   純函式在 CUP-PM-PURE-BEGIN/END（cupPiToProducts／cupProductsMerge／cupProductsListed／cupSellThroughCalc）。
+function cupIsProductsKey(k){ return typeof k==='string' && k.startsWith('ec_coupang_products|') && k.split('|').length===2; }
+function cupProductsKey(shop){ return 'ec_coupang_products|'+shop; }
+const _cupProdMem={};   // shop → doc（null＝讀過、沒有；undefined＝還沒讀）
+const _cupProdBad={};   // shop → true＝本機那份解不開（不覆蓋、不使用）
+function cupLoadProducts(shop){
+  if(_cupProdMem[shop]!==undefined) return _cupProdMem[shop];
+  let doc=null;
+  try{
+    const raw=localStorage.getItem(cupProductsKey(shop));
+    const u=_lz1Unwrap(raw);
+    if(u.kind==='json'||u.kind==='lz'){ const d=JSON.parse(u.json); if(d&&Array.isArray(d.items)) doc=d; else _cupProdBad[shop]=true; }
+    else if(u.kind==='bad') _cupProdBad[shop]=true;
+  }catch(e){ _cupProdBad[shop]=true; }
+  if(_cupProdBad[shop]){ try{ console.error('[酷澎商品主檔] 本機那份讀不到（可能損毀）：'+cupProductsKey(shop)+'，這次不使用、也不會覆蓋'); }catch(e){} }
+  _cupProdMem[shop]=doc;
+  return doc;
+}
+// 寫本機：LZ1 → setItem → 讀回比對；壓不了改寫 JSON；都不行回 false（記憶體不改）。
+function cupSaveProductsLocal(shop, doc){
+  const k=cupProductsKey(shop);
+  let json; try{ json=JSON.stringify(doc); }catch(e){ return false; }
+  const tryWrite=v=>{ try{ localStorage.setItem(k,v); const back=_lz1Unwrap(localStorage.getItem(k)); return (back.kind==='json'||back.kind==='lz') && back.json===json; }catch(e){ return false; } };
+  const enc=_lz1Encode(json);
+  const ok=(enc!==null && tryWrite(enc)) || tryWrite(json);
+  if(!ok) return false;
+  _cupProdMem[shop]=doc; delete _cupProdBad[shop];
+  return true;
+}
+// 通路防呆的既有清單：報表的 dispId／code ∪ 本機主檔的 Product ID／code
+function _cupProductsIdSets(shop){ const s=_cupShopIdSets(shop); const d=cupLoadProducts(shop);
+  ((d&&d.items)||[]).forEach(p=>{ if(p.pid) s.disp.add(String(p.pid)); if(p.code) s.code.add(String(p.code)); }); return s; }
+// 商品主檔的通路防呆＝PR-D 同一套規則，再多一條：所選通路資料太少（不比）但這份檔跟「另一通路」重疊 ≥ 50% ⇒ 也擋。
+//   第一次建主檔正是最容易選錯的時候（露營館還沒有報表、也還沒有主檔，PR-D 原規則會直接略過）。訂單檔的防呆不受影響。
+function _cupProductsOverlap(shop, fDisp, fCode){
+  const ov=_cupOverlapCore(shop, fDisp, fCode, _cupProductsIdSets); if(!ov||!ov.skip||!ov.fileN) return ov;
+  const oth=_cupProductsIdSets(ov.other); const O=fDisp.size&&oth.disp.size?oth.disp:oth.code, F=(O===oth.disp)?fDisp:fCode;
+  if(O.size<CUP_OVERLAP_MIN_BASE||!F.size) return ov;
+  let hit=0; F.forEach(x=>{ if(O.has(x)) hit++; }); const p=hit/F.size;
+  if(p>=CUP_OVERLAP_LOW) return Object.assign(ov,{skip:false, low:true, key:(O===oth.disp?'disp':'code'), fileN:F.size, hit:0, pct:0, otherHit:hit, otherPct:p, otherBase:O.size, viaOther:true});
+  return ov; }
+const _cupPmStage={};   // shop → 預覽暫存 {fileName, exportTime, parsed, merge, overlap, older, prevLatest}
+function onCupPiMasterFile(e){
+  const shop=_cupShop; const file=e&&e.target&&e.target.files&&e.target.files[0]; if(!file||!shop) return;
+  const box=document.getElementById('cup-pm-preview-'+shop);
+  if(box) box.innerHTML='<div style="color:#6b7280;font-size:13px;margin-top:10px">解析中…</div>';
+  file.arrayBuffer().then(async ab=>{
+    const exportTime=coupangZipEntryTime(ab);
+    const xml=await coupangUnzipSheetXml(ab);
+    const pi=coupangParsePriceInventoryXML(xml);
+    const parsed=cupPiToProducts(pi);
+    if(!parsed.items.length) throw new Error('檔案裡沒有任何有選項 ID 的商品（是不是選錯檔？要的是「價格／庫存／銷售狀態」那份 price_inventory）');
+    const prev=cupLoadProducts(shop);
+    if(_cupProdBad[shop]) throw new Error('這台電腦的'+cupShopDisplay(shop)+'商品主檔讀不到（可能損毀），為了不覆蓋，這次不套用。請通知 Keani');
+    const prevLatest=(prev&&prev.latestExport)||'';
+    const merge=cupProductsMerge(prev, parsed.items, exportTime);
+    const fDisp=new Set(parsed.items.map(p=>p.pid).filter(Boolean)), fCode=new Set(parsed.items.map(p=>p.code).filter(Boolean));
+    const overlap=_cupProductsOverlap(shop, fDisp, fCode);
+    _cupPmStage[shop]={ fileName:file.name, exportTime, parsed, merge, overlap, prevLatest, older:!!(exportTime && prevLatest && exportTime<prevLatest), noTime:!exportTime };
+    cupRenderProductsPreview(shop);
+  }).catch(err=>{ console.error('[酷澎商品主檔] 解析失敗',err);
+    if(box) box.innerHTML=`<div class="mm-banner mm-banner-err" style="margin-top:12px"><b>解析失敗（未套用）</b>：${_momoEsc((err&&err.message)||String(err))}</div>`; });
+}
+function _cupFmtExport(t){ return t?String(t).slice(0,16):'—'; }
+function cupRenderProductsPreview(shop){
+  const box=document.getElementById('cup-pm-preview-'+shop); if(!box) return;
+  const S=_cupPmStage[shop]; if(!S){ box.innerHTML=''; return; }
+  const esc=_momoEsc, nm=esc(cupShopDisplay(shop)), P=S.parsed, st=S.merge.stats;
+  const pages=new Set(P.items.map(p=>p.pid).filter(Boolean)).size;
+  const cnt={on:0,off:0,unk:0}; P.items.forEach(p=>{ if(p.status==='판매중') cnt.on++; else if(p.status==='판매중지') cnt.off++; else cnt.unk++; });
+  const redBox=(html,id,label)=>`<div style="margin-bottom:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;color:#b91c1c;font-size:12px;line-height:1.7">${html}
+      <label style="display:block;margin-top:6px;color:#7f1d1d;cursor:pointer"><input type="checkbox" id="${id}"> ${label}</label></div>`;
+  const gray=t=>`<div style="color:#9ca3af;font-size:12px;margin-bottom:8px">${t}</div>`;
+  // 通路防呆（PR-D 同規則，用 Product ID 比）
+  let ovHtml=''; const ov=S.overlap, pc=p=>Math.floor(p*100)+'%';
+  if(ov){
+    if(ov.skip) ovHtml=ov.fileN?gray(`${nm}目前只有 ${ov.base} 個商品頁紀錄，太少，這次不做通路比對`):'';
+    else{
+      if(ov.key==='code') ovHtml+=gray('以商品代碼比對（既有資料沒有酷澎商品頁 ID）');
+      if(ov.low){ const otherLine=ov.otherPct!=null?`；跟「${esc(cupShopDisplay(ov.other))}」重疊 <b>${pc(ov.otherPct)}</b>`:'';
+        ovHtml=redBox(`⚠ <b>這份檔可能選錯通路</b>：這份清單的商品頁，跟目前通路「<b>${nm}</b>」既有的只重疊 <b>${pc(ov.pct)}</b>（檔案 ${ov.fileN} 個，對到 ${ov.hit} 個）${otherLine}。<br>繼續套用會把這份清單併進「${nm}」的商品主檔。請先確認上方的通路沒有選錯。`,
+          'cup-pm-ovl-sure-'+esc(shop), `我確定這份是「${nm}」的商品清單`)+ovHtml; }
+    }
+  }
+  // 匯出時間：比本機主檔舊 ⇒ 擋
+  let timeHtml='';
+  if(S.older) timeHtml=redBox(`⚠ <b>這份檔比這台電腦的商品主檔舊</b>：這份檔的匯出時間 <b>${esc(_cupFmtExport(S.exportTime))}</b>，主檔目前是 <b>${esc(_cupFmtExport(S.prevLatest))}</b>。<br>套用的話，主檔裡比較新的那幾筆會保留原樣（不會倒退），只補進這份檔才有的選項；「上架中」仍以 ${esc(_cupFmtExport(S.prevLatest))} 那份清單為準。`,
+      'cup-pm-old-sure-'+esc(shop), '我確定要套用這份比較舊的檔');
+  else if(S.noTime) timeHtml=`<div style="color:#d97706;font-size:12px;margin-bottom:8px">讀不到這份檔的匯出時間，無法判斷它比主檔新或舊。</div>`;
+  const unk=Object.entries(P.unknownStatus);
+  const rej=P.rejected?`<span style="color:#d97706">${P.rejected} 筆沒有選項 ID（${esc(Object.entries(P.rejectedByApproval).map(([k,v])=>k+' '+v).join('、'))}），不進主檔</span>`:'沒有被退件／審核中的列';
+  box.innerHTML=`
+    <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px;margin-top:12px">
+      ${ovHtml}${timeHtml}
+      <div style="font-weight:700;margin-bottom:8px">解析結果 · ${nm} · ${esc(S.fileName)}（預覽，尚未套用）</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:8px">
+        <div>匯出時間 <b>${esc(_cupFmtExport(S.exportTime))}</b> <span class="mm-info" title="取自 xlsx 檔案內部的時間（不是檔名），只用來比先後">?</span></div>
+        <div>選項 <b>${P.items.length.toLocaleString()}</b> 個 · 商品頁 <b>${pages.toLocaleString()}</b> 個</div>
+        <div>銷售中 <b>${cnt.on.toLocaleString()}</b> · 停售 <b>${cnt.off.toLocaleString()}</b>${cnt.unk?` · <b style="color:#dc2626">其他 ${cnt.unk}</b>`:''}</div>
+      </div>
+      <div style="font-size:12.5px;line-height:2">
+        <div>${rej}</div>
+        ${unk.length?`<div style="color:#dc2626">不認得的銷售狀態（照原文存）：${unk.map(([k,v])=>'<b>'+esc(k)+'</b> '+v+' 筆').join('、')}</div>`:''}
+        ${P.dupSku?`<div style="color:#d97706">同一個選項 ID 重複 ${P.dupSku} 列，只取第一列</div>`:''}
+        <div>跟這台電腦的主檔比：新增 <b>${st.added}</b> · 有變動 <b>${st.updated}</b> · 沒變 <b>${st.unchanged}</b>${S.prevLatest?` · 原本在清單、這份沒有 <b>${st.leftLatest}</b>（會變成不在架）`:''}${st.olderKept?` · <span style="color:#d97706">主檔較新、保留原樣 ${st.olderKept}</span>`:''}</div>
+        <div style="color:#6b7280">商品主檔目前只存在這台電腦，不會同步雲端（換電腦、其他人看不到）。</div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="mm-btn-primary" onclick="cupApplyProductsMaster('${esc(shop)}')">✓ 套用到這台電腦的商品主檔</button>
+        <button onclick="cupCancelProductsMaster('${esc(shop)}')" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:12px;cursor:pointer">取消</button>
+      </div>
+    </div>`;
+}
+function cupApplyProductsMaster(shop){
+  shop=shop||_cupShop; const S=_cupPmStage[shop];
+  if(!S){ if(typeof showToast==='function') showToast('請先選 price_inventory 檔','warn'); return; }
+  const need=(id,msg)=>{ const c=document.getElementById(id); if(!c||!c.checked){ if(typeof showToast==='function') showToast(msg,'warn'); return false; } return true; };
+  if(S.overlap && S.overlap.low && !need('cup-pm-ovl-sure-'+shop,'這份檔可能選錯通路，請先勾「我確定這份是「'+cupShopDisplay(shop)+'」的商品清單」')) return;
+  if(S.older && !need('cup-pm-old-sure-'+shop,'這份檔比主檔舊，請先勾「我確定要套用這份比較舊的檔」')) return;
+  // 套用前重算一次（預覽之後本機主檔可能被別的分頁改過）
+  const prev=cupLoadProducts(shop);
+  if(_cupProdBad[shop]){ if(typeof showToast==='function') showToast('這台電腦的商品主檔讀不到，這次不套用','error'); return; }
+  const m=cupProductsMerge(prev, S.parsed.items, S.exportTime);
+  const doc=Object.assign(m.doc, { shop, rejected:S.parsed.rejected, file:{ name:S.fileName, exportTime:S.exportTime||'', appliedAt:Date.now(), by:(window.App&&App.currentUser&&App.currentUser.username)||'' } });
+  if(!cupSaveProductsLocal(shop, doc)){
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔沒有存',message:'這台電腦的瀏覽器空間不夠，商品主檔沒有存進去。可以先用左下角「釋出空間」再試一次。',kind:'error'});
+    return; }
+  _cupPmStage[shop]=null;
+  if(typeof showToast==='function') showToast('已存到這台電腦的商品主檔（'+doc.items.length+' 個選項）。目前不會同步雲端。','success');
+  cupRenderShop(shop);
+}
+function cupCancelProductsMaster(shop){ _cupPmStage[shop]=null; cupRenderShop(shop); }
+// 「商品同步」分頁（C1：只有本機主檔）
+function cupRenderProductsTab(shop){
+  const esc=_momoEsc, nm=esc(cupShopDisplay(shop)), d=cupLoadProducts(shop);
+  let cur;
+  if(_cupProdBad[shop]) cur=`<div style="color:#dc2626">這台電腦的${nm}商品主檔讀不到（可能損毀），請通知 Keani。</div>`;
+  else if(!d) cur=`<div style="color:#6b7280">這台電腦還沒有${nm}的商品主檔。</div>`;
+  else{
+    const L=cupProductsListed(d), f=d.file||{};
+    const at=f.appliedAt?new Date(f.appliedAt):null, z=x=>String(x).padStart(2,'0');
+    const atTxt=at?(at.getFullYear()+'-'+z(at.getMonth()+1)+'-'+z(at.getDate())+' '+z(at.getHours())+':'+z(at.getMinutes())):'—';
+    cur=`<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px">
+        <div>最新清單匯出時間 <b>${esc(_cupFmtExport(d.latestExport))}</b></div>
+        <div>選項 <b>${d.items.length.toLocaleString()}</b> 個</div>
+        <div>上架中商品頁 <b>${L.listed.size.toLocaleString()}</b> · 整頁停售 <b>${L.stopped.size.toLocaleString()}</b> · 不在最新清單 <b>${(L.all.size-L.listed.size-L.stopped.size).toLocaleString()}</b></div>
+      </div>
+      <div style="color:#9ca3af;font-size:12px;margin-top:4px">上次套用：${esc(atTxt)}${f.name?' · '+esc(f.name):''}</div>`;
+  }
+  return `<div style="max-width:760px">
+    <div class="mm-note" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#92400e">
+      上傳 Wing「商品管理 → 管理商品 → 在 Excel 中大量編輯 → 下載」的 <b>price_inventory</b>（價格／庫存／銷售狀態），建立${nm}的商品主檔，給總表算動銷率。<br>
+      <b>目前只存在這台電腦</b>，不會同步雲端；換電腦或其他人要看，得在那台電腦也上傳一次。
+    </div>
+    <div style="border:1px solid #eef0f2;border-radius:10px;padding:12px 16px;margin-bottom:14px">${cur}</div>
+    <div class="mm-uprow"><div class="mm-uplbl">price_inventory <span class="mm-code">商品清單</span><div class="mm-hint">選檔後先預覽，確認才套用</div></div>
+      <div class="mm-upctl"><input type="file" id="cup-pm-input" accept=".xlsx" onchange="onCupPiMasterFile(event)"></div></div>
+    <div id="cup-pm-preview-${shop}"></div>
+  </div>`;
+}
+// 總表動銷率卡（商品頁口徑）。沒有本機主檔 ⇒ 維持「待商品同步」佔位。
+function cupRenderSellThrough(shop, rows, hasReport){
+  const v=document.getElementById('cup-kv-st-'+shop), dEl=document.getElementById('cup-kv-st-d-'+shop), tip=document.getElementById('cup-kv-st-tip-'+shop);
+  if(!v||!dEl) return;
+  const d=cupLoadProducts(shop);
+  if(!d||_cupProdBad[shop]){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='待商品同步'; dEl.style.color='#9ca3af';
+    if(tip) tip.title='動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。'; return; }
+  const L=cupProductsListed(d);
+  if(!hasReport){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='這個月沒有訂單報表'; dEl.style.color='#9ca3af';
+    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 頁（清單 '+_cupFmtExport(L.latest)+'）。\n⚠ 商品主檔目前只存在上傳的這台電腦，換電腦看不到。'; return; }
+  const r=cupSellThroughCalc(rows, L.listed);
+  v.textContent=r.pct!=null?r.pct.toFixed(1)+'%':'—'; v.style.color='';
+  dEl.textContent=r.num.toLocaleString()+' / '+r.den.toLocaleString()+' 頁 · 清單 '+_cupFmtExport(L.latest).slice(5,10).replace('-','/'); dEl.style.color='#6b7280';
+  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 頁。\n分母＝目前上架 '+r.listedN+' 頁 ∪ 本月有賣出 ⇒ '+r.den+' 頁（其中 '+r.soldNotListed+' 頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n⚠ 商品主檔目前只存在上傳的這台電腦，換電腦看不到。';
+}
+// Console 只讀：本機主檔狀態（不回傳內容）
+window.__cupProductsState=function(){ const out={}; ['麻吉','露營館'].forEach(s=>{ const d=cupLoadProducts(s); let chars=0; try{ chars=(localStorage.getItem(cupProductsKey(s))||'').length; }catch(e){}
+  const L=d?cupProductsListed(d):null; out[s]={ has:!!d, bad:!!_cupProdBad[s], items:d?d.items.length:0, latestExport:d?d.latestExport:'', listed:L?L.listed.size:0, stopped:L?L.stopped.size:0, lsChars:chars }; }); return out; };
 function cupGeneratePreview(){
   const btn=document.getElementById('cup-gen-btn');
   if(btn){btn.disabled=true;btn.textContent='解析中…';}
@@ -30648,7 +30837,7 @@ function cupRenderShop(shop){
   const el=document.getElementById('coupang-content-'+shop); if(!el) return;
   _cupShop=shop;   // generateCoupang 靠此得知目前賣場
   if(!_cupSub[shop]) _cupSub[shop]='profit';
-  const pills=CUP_SUBTABS.map(([label,id])=>{ const on=_cupSub[shop]===id, dis=(id==='sync');
+  const pills=CUP_SUBTABS.map(([label,id])=>{ const on=_cupSub[shop]===id, dis=false;   // PR-C1：「商品同步」開放（本機商品主檔）
     return `<button ${dis?'disabled title="接商品庫存／上架資料後開放"':`onclick="cupSetSub('${shop}','${id}')"`} style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:${dis?'not-allowed':'pointer'};border:1px solid ${on?'#0ea5e9':'#e5e7eb'};background:${on?'#0ea5e9':'#fff'};color:${on?'#fff':(dis?'#cbd5e1':'#6b7280')}">${label}${dis?'（尚未開放）':''}</button>`;
   }).join('');
   el.innerHTML=`
@@ -30665,7 +30854,7 @@ function cupRenderSub(shop){
   const c=document.getElementById('cup-sub-content-'+shop); if(!c) return;
   const sub=_cupSub[shop]||'profit';
   if(sub==='upload'){ c.innerHTML=cupRenderUploadTab(shop); return; }
-  if(sub==='sync'){ c.innerHTML='<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「商品同步」尚未開放（待接入商品庫存與上架資料）</div></div>'; return; }
+  if(sub==='sync'){ c.innerHTML=cupRenderProductsTab(shop); cupRenderProductsPreview(shop); return; }
   c.innerHTML=cupProfitTabHTML(shop);
   cupRenderProfitBody(shop);
 }
@@ -30683,7 +30872,7 @@ function cupProfitTabHTML(shop){
       <div class="mm-kpi"><div class="mm-kpi-l">本期淨利</div><div class="mm-kpi-v" id="cup-kv-net-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-net-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">加權淨利率 <span class="mm-info" title="${_momoEsc(cmpTip)}">?</span></div><div class="mm-kpi-v" id="cup-kv-rate-${shop}" style="color:#6366f1">—</div><div class="mm-kpi-d" id="cup-kv-rate-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">總銷量</div><div class="mm-kpi-v" id="cup-kv-qty-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-qty-cmp-${shop}"></div></div>
-      <div class="mm-kpi"><div class="mm-kpi-l">動銷率 <span class="mm-info" title="動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。">?</span></div><div class="mm-kpi-v" id="cup-kv-st-${shop}" style="color:#9ca3af">—</div><div class="mm-kpi-d" style="color:#9ca3af">待商品同步</div></div>
+      <div class="mm-kpi"><div class="mm-kpi-l">動銷率 <span class="mm-info" id="cup-kv-st-tip-${shop}" title="動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。">?</span></div><div class="mm-kpi-v" id="cup-kv-st-${shop}" style="color:#9ca3af">—</div><div class="mm-kpi-d" id="cup-kv-st-d-${shop}" style="color:#9ca3af">待商品同步</div></div>
     </div>
     <div id="cup-fee-rule-${shop}" style="font-size:11px;color:#9ca3af;margin-bottom:8px;line-height:1.6"></div>
     <div id="cup-freshwarn-${shop}"></div>
@@ -30715,6 +30904,7 @@ function cupRenderProfitBody(shop){
   { const _netEl=document.getElementById('cup-kv-net-'+shop); if(_netEl) _netEl.classList.toggle('mm-neg', Number(kpi.net)<0); }
   set('cup-kv-rate-'+shop,(kpi.rate!=null?kpi.rate.toFixed(1)+'%':'—'));
   set('cup-kv-qty-'+shop,Math.round(kpi.qty||0).toLocaleString());
+  try{ cupRenderSellThrough(shop, rows, !!saved); }catch(e){ console.warn('[酷澎動銷率] 計算失敗',e); }   // PR-C1：本機商品主檔 → 動銷率（沒有主檔維持佔位）
   // 較上期
   const prevM=month?cupPrevMonth(month):null; const prev=prevM?cupLoadReport(shop,prevM):null;
   const cmpTxt=(cur,pv)=>{ const d=cur-pv, pct=pv?(d/Math.abs(pv)*100):null; return '較 '+(+prevM.slice(5,7))+'月 '+(d>=0?'▲':'▼')+(pct!=null?Math.abs(pct).toFixed(1)+'%':'')+' ('+(d>=0?'+':'')+Math.round(d).toLocaleString()+')'; };
@@ -31747,11 +31937,37 @@ function coupangParsePriceInventoryXML(sheetXml){
     rows.push(arr);
   }
   // 前 3 列＝說明/區塊標題/欄位表頭 → 資料從第 4 列(index 3)起；至少要有 供應商商品代碼 或 供應商商品ID 才算資料列
+  //   PR-C1 起多回傳 sid(A 供應商商品ID)／pid(B Product ID＝報表 dispId)／price(J)／base(K 折扣率基準價)／approval(O)，舊欄位不變。
+  const numOrNull=v=>(String(v==null?'':v).trim()!==''&&!isNaN(+v))?+v:null;
   return rows.slice(3).filter(r=>r && (String(r[5]||'').trim() || String(r[0]||'').trim())).map(r=>({
-    code:_cupTrimCode(r[5]), stock:(String(r[12]||'').trim()!==''&&!isNaN(+r[12]))?+r[12]:null,
-    salesQty:(String(r[13]||'').trim()!==''&&!isNaN(+r[13]))?+r[13]:null, status:String(r[11]||'').trim(),
-    barcode:String(r[4]||'').trim(), optionId:String(r[2]||'').trim()
+    code:_cupTrimCode(r[5]), stock:numOrNull(r[12]),
+    salesQty:numOrNull(r[13]), status:String(r[11]||'').trim(),
+    barcode:String(r[4]||'').trim(), optionId:String(r[2]||'').trim(),
+    sid:String(r[0]||'').trim(), pid:String(r[1]||'').trim(), price:numOrNull(r[9]), base:numOrNull(r[10]), approval:String(r[14]||'').trim()
   }));
+}
+// ZIP 中央目錄裡工作表那一項的修改時間（DOS 時間）→ 'YYYY-MM-DD HH:mm:ss'；找不到回 null。
+//   price_inventory 是 Wing 匯出當下產生的 ZIP，這個時間＝匯出時間（實測比本機檔案時間多 1 小時，應是韓國時間；只拿來比先後、不換算時區）。
+//   不用檔名（只有日期、可能被改名），也不用 docProps（是範本的時間）。
+function coupangZipEntryTime(arrayBuffer, nameRe){
+  try{
+    const buf=new Uint8Array(arrayBuffer), dv=new DataView(arrayBuffer);
+    const u16=o=>dv.getUint16(o,true), u32=o=>dv.getUint32(o,true), td=new TextDecoder('utf-8');
+    let eocd=-1; for(let i=buf.length-22;i>=0;i--){ if(u32(i)===0x06054b50){ eocd=i; break; } }
+    if(eocd<0) return null;
+    let p=u32(eocd+16); const cnt=u16(eocd+10);
+    for(let n=0;n<cnt && u32(p)===0x02014b50;n++){
+      const t=u16(p+12), d=u16(p+14), nameLen=u16(p+28), extraLen=u16(p+30), cmtLen=u16(p+32);
+      const name=td.decode(buf.subarray(p+46,p+46+nameLen));
+      if((nameRe||/worksheets\/sheet1\.xml$/i).test(name)){
+        const z=x=>String(x).padStart(2,'0'), y=(d>>9)+1980, mo=(d>>5)&15, da=d&31;
+        if(!mo||!da) return null;
+        return y+'-'+z(mo)+'-'+z(da)+' '+z(t>>11)+':'+z((t>>5)&63)+':'+z((t&31)*2);
+      }
+      p=p+46+nameLen+extraLen+cmtLen;
+    }
+  }catch(e){}
+  return null;
 }
 // ④ PR-3b：瀏覽器端解壓 price_inventory 壓縮 xlsx → 工作表 XML（deflate-raw）。
 //   ⚠ 該檔 local file header 的大小欄=0（data descriptor 串流式）→ 一律讀【中央目錄】的 compSize/offset（真值）。
@@ -31776,16 +31992,79 @@ async function coupangUnzipSheetXml(arrayBuffer, nameRe){
   const stream=new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw')));   // deflate
   return td.decode(new Uint8Array(await stream.arrayBuffer()));
 }
-// price_inventory File → 解壓+解析 → {byCode:{code:{stock}}, byBar:{barcode:{stock}}, rowN, codeN}。庫存＝同 code／barcode 各列剩餘量【加總】（多選項合併）。
+// price_inventory File → 解壓+解析 → {byCode:{code:{stock}}, byBar:{barcode:{stock}}, rowN, codeN}。
+//   庫存＝cupPiStockMaps：同一商品頁內同代碼各列相加，同代碼掛在多個商品頁時取【最大值】、不相加（PR-C1；舊版相加，例 F428-01 132＋132＝264）。
 async function cupReadPriceInventory(file){
   const xml=await coupangUnzipSheetXml(await file.arrayBuffer());
-  const pi=coupangParsePriceInventoryXML(xml), byCode={}, byBar={};
-  pi.forEach(x=>{ if(x.stock==null) return;
-    if(x.code){ (byCode[x.code]=byCode[x.code]||{stock:0}).stock+=x.stock; }
-    if(x.barcode){ (byBar[x.barcode]=byBar[x.barcode]||{stock:0}).stock+=x.stock; }
-  });
-  return { byCode, byBar, rowN:pi.length, codeN:Object.keys(byCode).length };
+  const pi=coupangParsePriceInventoryXML(xml);
+  const m=cupPiStockMaps(pi);
+  return { byCode:m.byCode, byBar:m.byBar, rowN:pi.length, codeN:Object.keys(m.byCode).length };
 }
+/* ═══ CUP-PM-PURE-BEGIN：酷澎商品主檔（PR-C1）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage ═══ */
+// 庫存對照：key（代碼／條碼）→ 商品頁(pid) → 該頁內各列相加；再對各頁取最大值。沒有 pid 的列（舊格式）視為同一頁。
+function cupPiStockMaps(pi){
+  const acc=(map,key,pid,v)=>{ const byPid=map[key]=map[key]||{}; const p=pid||'_'; byPid[p]=(byPid[p]||0)+v; };
+  const codeAcc={}, barAcc={};
+  (pi||[]).forEach(x=>{ if(!x||x.stock==null) return;
+    if(x.code) acc(codeAcc, x.code, x.pid, x.stock);
+    if(x.barcode) acc(barAcc, x.barcode, x.pid, x.stock);
+  });
+  const fold=src=>{ const out={}; Object.keys(src).forEach(k=>{ out[k]={stock:Math.max.apply(null,Object.values(src[k]))}; }); return out; };
+  return { byCode:fold(codeAcc), byBar:fold(barAcc) };
+}
+const CUP_PI_STATUS_LABEL={ '판매중':'銷售中', '판매중지':'停售' };
+function cupPiStatusLabel(s){ return Object.prototype.hasOwnProperty.call(CUP_PI_STATUS_LABEL,s) ? CUP_PI_STATUS_LABEL[s] : (s||'—'); }
+// price_inventory 解析列 → 主檔候選。沒有選項 ID 的列（審核退回／審核中）不進主檔，只計數。
+//   回 { items:[{sku,pid,sid,code,price,base,status,stock}], rejected, rejectedByApproval:{核准狀態:n}, unknownStatus:{原文:n}, dupSku }
+function cupPiToProducts(pi){
+  const items=[], seen=new Set(); let rejected=0, dupSku=0; const rejectedByApproval={}, unknownStatus={};
+  (pi||[]).forEach(x=>{ if(!x) return;
+    const sku=String(x.optionId||'').trim();
+    if(!sku){ rejected++; const a=x.approval||'（空白）'; rejectedByApproval[a]=(rejectedByApproval[a]||0)+1; return; }
+    if(seen.has(sku)){ dupSku++; return; }   // 同一份檔不該重複；重複就留第一列
+    seen.add(sku);
+    const status=String(x.status||'');
+    if(!Object.prototype.hasOwnProperty.call(CUP_PI_STATUS_LABEL,status)){ const k=status||'（空白）'; unknownStatus[k]=(unknownStatus[k]||0)+1; }
+    items.push({ sku, pid:String(x.pid||''), sid:String(x.sid||''), code:String(x.code||''), price:(x.price!=null?x.price:null), base:(x.base!=null?x.base:null), status, stock:(x.stock!=null?x.stock:null) });
+  });
+  return { items, rejected, rejectedByApproval, unknownStatus, dupSku };
+}
+// 合併（照 PChome lastSeenExport）：清單有 → 更新欄位＋lastSeen＝這份的匯出時間；本機有、清單沒有 → 原樣保留（推導為不在最新清單）；新的 → firstSeen＝lastSeen＝匯出時間。
+//   某一筆本機的 lastSeen 比這份檔新（套用了較舊的檔）→ 那一筆保留本機的，不倒退。latestExport＝兩者較新的。
+//   回 { doc, stats:{added,updated,unchanged,kept,olderKept,leftLatest} }；leftLatest＝原本在最新清單、這份檔沒有的（只在這份檔不比本機舊時才算）
+function cupProductsMerge(prev, fileItems, exportTime){
+  const prevItems=(prev&&Array.isArray(prev.items))?prev.items:[];
+  const prevLatest=(prev&&prev.latestExport)||'';
+  const map=new Map(); prevItems.forEach(p=>{ if(p&&p.sku) map.set(String(p.sku),p); });
+  const inFile=new Set(); let added=0, updated=0, unchanged=0, olderKept=0;
+  const same=(a,b)=>['pid','sid','code','price','base','status','stock'].every(k=>(a[k]==null?null:a[k])===(b[k]==null?null:b[k]));
+  (fileItems||[]).forEach(f=>{ const sku=String(f.sku); inFile.add(sku); const old=map.get(sku);
+    if(old && old.lastSeen && exportTime && old.lastSeen>exportTime){ olderKept++; return; }
+    const rec={ sku, pid:f.pid, sid:f.sid, code:f.code, price:f.price, base:f.base, status:f.status, stock:f.stock, firstSeen:(old&&old.firstSeen)||exportTime||'', lastSeen:exportTime||'' };
+    if(!old) added++; else if(same(old,rec)) unchanged++; else updated++;
+    map.set(sku, rec);
+  });
+  let kept=0, leftLatest=0;
+  map.forEach((p,sku)=>{ if(inFile.has(sku)) return; kept++; if(prevLatest && p.lastSeen===prevLatest && !(exportTime && exportTime<prevLatest)) leftLatest++; });
+  const latestExport=(exportTime && exportTime>prevLatest)?exportTime:prevLatest;
+  return { doc:{ schema:1, latestExport, items:[...map.values()] }, stats:{added,updated,unchanged,kept,olderKept,leftLatest} };
+}
+// 上架中的商品頁：選項出現在最新一次清單（lastSeen＝latestExport）而且不是停售（판매중지）。同一頁任一選項上架＝這頁上架。
+function cupProductsListed(doc){
+  const listed=new Set(), stopped=new Set(), all=new Set(); const latest=(doc&&doc.latestExport)||'';
+  ((doc&&doc.items)||[]).forEach(p=>{ if(!p||!p.pid) return; all.add(p.pid); if(!latest||p.lastSeen!==latest) return;
+    if(p.status==='판매중지') stopped.add(p.pid); else listed.add(p.pid); });
+  stopped.forEach(pid=>{ if(listed.has(pid)) stopped.delete(pid); });   // 同頁有選項在賣 ⇒ 這頁算上架
+  return { listed, stopped, all, latest };
+}
+// 動銷率（商品頁）：分子＝報表 qty>0 的 dispId（"/" 拆開）；分母＝上架中 ∪ 分子。
+function cupSellThroughCalc(rows, listedSet){
+  const sold=new Set();
+  (rows||[]).forEach(r=>{ if(!r||!(Number(r.qty)>0)) return; String(r.dispId||'').split('/').map(x=>x.trim()).filter(Boolean).forEach(x=>sold.add(x)); });
+  const den=new Set(listedSet||[]); let soldNotListed=0; sold.forEach(x=>{ if(!den.has(x)){ den.add(x); soldNotListed++; } });
+  return { num:sold.size, den:den.size, listedN:(listedSet?listedSet.size:0), soldNotListed, pct:(den.size>0?sold.size/den.size*100:null) };
+}
+/* ═══ CUP-PM-PURE-END ═══ */
 
 // ④ MSF（VAT History Report 分頁，含表頭）→ per-order ＋ 按銷售確認月的銷售/退貨淨額（退貨率用）。
 //    cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11(賣家券銷售=7)/退貨12-18(賣家券退貨=14)
@@ -33307,7 +33586,7 @@ Object.assign(window, {
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCupPiMasterFile,cupApplyProductsMaster,cupCancelProductsMaster,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
