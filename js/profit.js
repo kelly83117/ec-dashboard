@@ -30425,6 +30425,42 @@ const COUPANG_IDLIST_SHEET={'麻吉':'商品清單【好】','露營館':'商品
 // ══ 上傳流程（比照 MO+：上傳 → 產生預覽（不寫入）→ 確認寫入）══
 //   cupGeneratePreview＝純解析+統計進 _cupUpStage、渲染預覽框；generateCoupang＝確認寫入（名字保留＝唯讀 UI regex 已涵蓋）。
 const _cupUpStage={};   // shop → {month, rows, res, hasMsf, hasPi, stats}（預覽暫存；確認寫入前不落地）
+// ══ 通路防呆（PR-D）：上傳的訂單檔跟「所選通路既有報表」比重疊率，防止好麻吉／露營館選錯互相覆蓋 ══
+//   比對鍵：dispId（酷澎站內商品頁 ID，各帳號獨立；"/" 分隔拆開）。這份檔或所選通路既有報表沒有 dispId ⇒ 退回公司商品代碼 code。
+//   分母＝這份檔裡的商品數；既有清單＝所選通路所有已存月份報表 rows。只讀記憶體／localStorage，不寫任何東西。
+//   規則：所選通路既有 < CUP_OVERLAP_MIN_BASE ⇒ 不比（skip）；另一通路既有 0 ⇒ 重疊 < 50% 就擋；兩邊都有 ⇒ < 50% 且另一通路更高才擋。
+const CUP_OVERLAP_SHOPS=['麻吉','露營館'], CUP_OVERLAP_MIN_BASE=30, CUP_OVERLAP_LOW=0.5;
+function _cupSplitIds(s){ return String(s||'').split('/').map(x=>x.trim()).filter(Boolean); }
+function _cupShopIdSets(shop){ const disp=new Set(), code=new Set();
+  cupAvailableMonths(shop).forEach(m=>{ const d=cupLoadReport(shop,m); ((d&&d.rows)||[]).forEach(r=>{ if(!r) return; if(r.code) code.add(String(r.code)); _cupSplitIds(r.dispId).forEach(x=>disp.add(x)); }); });
+  return {disp, code}; }
+function _cupShopOverlap(shop, parsed){
+  const other=CUP_OVERLAP_SHOPS.find(s=>s!==shop); if(CUP_OVERLAP_SHOPS.indexOf(shop)<0||!other) return null;
+  const fDisp=new Set(), fCode=new Set();
+  Object.values((parsed&&parsed.orders)||{}).forEach(o=>(o.items||[]).forEach(it=>{ if(it.code) fCode.add(String(it.code)); _cupSplitIds(it.dispId).forEach(x=>fDisp.add(x)); }));
+  const mine=_cupShopIdSets(shop), oth=_cupShopIdSets(other);
+  const key=(fDisp.size&&mine.disp.size)?'disp':'code';
+  const F=key==='disp'?fDisp:fCode, M=key==='disp'?mine.disp:mine.code, O=key==='disp'?oth.disp:oth.code;
+  const out={shop, other, key, fileN:F.size, base:M.size, otherBase:O.size, hit:0, otherHit:0, pct:0, otherPct:null, skip:false, low:false};
+  if(!F.size||M.size<CUP_OVERLAP_MIN_BASE){ out.skip=true; return out; }
+  F.forEach(x=>{ if(M.has(x)) out.hit++; if(O.has(x)) out.otherHit++; });
+  out.pct=out.hit/F.size; out.otherPct=O.size?out.otherHit/F.size:null;
+  out.low=out.pct<CUP_OVERLAP_LOW && (out.otherPct==null || out.otherPct>out.pct);
+  return out; }
+function _cupOverlapHtml(shop, S){
+  const ov=S&&S.overlap; if(!ov) return '';
+  const esc=_momoEsc, nm=esc(cupShopDisplay(shop)), pc=p=>Math.floor(p*100)+'%';
+  const gray=t=>`<div style="color:#9ca3af;font-size:12px;margin-bottom:8px">${t}</div>`;
+  if(ov.skip) return ov.fileN ? gray(`${nm}目前只有 ${ov.base} 個商品紀錄，太少，這次不做通路比對`) : '';
+  const byCode=ov.key==='code'?gray('以商品代碼比對（這份檔或既有報表沒有酷澎商品編號）'):'';
+  if(!ov.low) return byCode;
+  const ym=cupNormMonth(S.month), exists=!!cupLoadReport(shop, S.month);
+  const otherLine=ov.otherPct!=null?`；跟「${esc(cupShopDisplay(ov.other))}」重疊 <b>${pc(ov.otherPct)}</b>`:'';
+  return `<div style="margin-bottom:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;color:#b91c1c;font-size:12px;line-height:1.7">
+      ⚠ <b>這份檔可能選錯通路</b>：這份訂單檔的商品，跟目前通路「<b>${nm}</b>」既有的商品只重疊 <b>${pc(ov.pct)}</b>（檔案 ${ov.fileN} 個商品，對到 ${ov.hit} 個）${otherLine}。<br>
+      ${exists?`繼續寫入會把「${nm} ${ym}」的報表整份換成這份檔。`:`繼續寫入會把這份檔存成「${nm} ${ym}」的報表。`}請先確認上方的通路沒有選錯。
+      <label style="display:block;margin-top:6px;color:#7f1d1d;cursor:pointer"><input type="checkbox" id="cup-ovl-sure-${esc(shop)}"> 我確定這份是「${nm}」的訂單檔</label>
+    </div>${byCode}`; }
 function cupGeneratePreview(){
   const btn=document.getElementById('cup-gen-btn');
   if(btn){btn.disabled=true;btn.textContent='解析中…';}
@@ -30468,7 +30504,7 @@ function cupGeneratePreview(){
     rows.forEach(r=>{ const has=(costMap[r.code]!=null&&!isNaN(+costMap[r.code])); if(has)st.costOk++; else if(/^\d+$/.test(r.code))st.costBar++; else st.costMiss++; });
     const sysHasMsf=cupListMsfDocs(shop).length>0;   // 系統既有 MSF doc（本次未帶時，總表仍會用既有 MSF 計退貨）→ 文案要區分
     const piStat = piMaps ? { rowN:piMaps.rowN, codeN:piMaps.codeN, covered:rows.filter(r=>r.stock!=null).length, total:rows.length } : null;   // PR-3b：庫存涵蓋率（本月幾個商品對到庫存）
-    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st};   // hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 以 hasMsf&&msfRaw 為守衛）
+    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st, overlap:_cupShopOverlap(shop, parsed)};   // overlap＝PR-D 通路防呆（只讀）；hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 以 hasMsf&&msfRaw 為守衛）
     cupRenderUploadPreview(shop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生預覽';}
   }).catch(err=>{ console.error(err); fail((err&&err.message)||err); });
@@ -30497,6 +30533,7 @@ function cupRenderUploadPreview(shop){
   else{ piHtml=`<div style="color:#6b7280">庫存：<span style="color:#d97706">未上傳 price_inventory，庫存欄顯示「—」</span></div>`; }
   box.innerHTML=`
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px;margin-top:12px">
+      ${_cupOverlapHtml(shop, S)}
       <div style="font-weight:700;margin-bottom:8px">解析結果 · ${esc(cupShopDisplay(shop))} · ${esc(cupNormMonth(S.month))}（預覽，尚未寫入）</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:8px">
         <div>訂單 <b>${st.orderN}</b> 筆（明細 ${st.rowN} 列）</div>
@@ -30522,6 +30559,8 @@ function generateCoupang(shop){
   shop=shop||_cupShop;
   const S=_cupUpStage[shop];
   if(!S){ alert('請先按「▶ 產生預覽」'); return; }
+  if(S.overlap && S.overlap.low){ const chk=document.getElementById('cup-ovl-sure-'+shop);   // PR-D：可能選錯通路 ⇒ 沒勾「我確定」什麼都不寫
+    if(!chk||!chk.checked){ if(typeof showToast==='function') showToast('這份檔可能選錯通路，請先勾「我確定這份是「'+cupShopDisplay(shop)+'」的訂單檔」','warn'); return; } }
   cupSaveReport(shop, S.month, S.rows, S.orderNos);                 // 報表 rows+orderNos → ec_coupang|<shop>|<month>（+ _markPending）
   if(S.hasMsf && S.msfRaw) cupSaveReturns(shop, S.msfMonth, S.msfRaw);   // MSF（byOrder + byConfirmMonth）→ ec_coupang_msf|<shop>|<MSF自身月>（同檔重傳＝覆蓋同 doc、不累加）；只供退貨率
   _cupSelMonth[shop]=cupNormMonth(S.month);
