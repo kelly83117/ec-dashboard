@@ -1,10 +1,26 @@
 /**
- * 元創數位 AI 戰情室 — 唯讀營收 / 廣告費 API（v1.1）
+ * 元創數位 AI 戰情室 — 唯讀營收 / 廣告費 API（v2.0）
  *
- * 部署到 Cloudflare Workers，提供戰情室一支端點：
- *   GET /revenue
+ * 部署到 Cloudflare Workers，提供兩支端點：
+ *   GET /revenue                       （v1，行為不變）
  *     查詢台灣時間「最近一個完整營業日」的 行銷營收 + 廣告費（NT$）。
  *     回傳 { asOf, metrics: { revenue, adSpend } } — 金額為數字、NT$ 元。
+ *   GET /revenue/daily?date=YYYY-MM-DD （v2 新增，逐賣場每日營收）
+ *     date＝台灣日期。回傳 { date, currency, basis, stores:[…] }，
+ *     每個賣場一筆：date / channel / storeCode / storeName / revenue / status / updatedAt。
+ *     revenue：新台幣整數、未扣退貨；status：
+ *       reported      ＝有填（含實際 0 營收，revenue = 0）
+ *       not_reported  ＝這天沒填（revenue = null）
+ *       invalid_value ＝有值但不是數字（revenue = null，看板會當 0 加總）
+ *     updatedAt：看板「署名」dailyBy[日期].at 轉台灣時間；營收與廣告費共用同一筆，
+ *     所以是「這一格（營收或廣告費）最後一次存檔的時間」。舊資料沒有署名 → null。
+ *     不輸出填寫人姓名 / 帳號。
+ *
+ * ---- 驗證 ----
+ *   兩種擇一（值相同）：
+ *     X-API-Key: <key>
+ *     Authorization: Bearer <key>
+ *   以固定時間比對，錯誤或沒帶一律 401。
  *
  * ---- 資料範圍（有意的收窄） ----
  *   此 API 只回傳「行銷類」指標：
@@ -37,6 +53,12 @@
  *   取第一個有任何通路非 0 的日期。全空 → 回 404。
  *   adSpend 以同一個日期回傳；若該日尚未填廣告費 → adSpend = 0。
  *
+ * ---- /revenue/daily 錯誤碼 ----
+ *   400 缺 date、格式不是 YYYY-MM-DD、不存在的日期、晚於台灣今天
+ *   401 沒帶或錯誤的憑證
+ *   500 Worker / Firestore 異常（不回傳內部細節）
+ *   沒有資料的日期回 200，每個賣場 status = not_reported。
+ *
  * ---- 必要 env / secret ----
  *   WARROOM_API_KEY       Secret：戰情室呼叫時要附 X-API-Key 這個密碼
  *   FIREBASE_PROJECT_ID   Plain：yc-dashboard-9aa6c
@@ -59,6 +81,22 @@ const PLATFORMS_WITH_AD_SPEND = ['生活好麻吉', '玩樂盒子', '森之旅',
 const TW_TZ_OFFSET_MIN = 8 * 60; // Asia/Taipei 恆定 +08:00（台灣無日光節約）
 const MAX_LOOKBACK_DAYS = 7;
 
+// v2 逐賣場：看板 ec.platforms 的 name → 對外代碼。只輸出這張表內的賣場（白名單）；
+// 看板新增賣場時要加在這裡，否則 API 不會出現（不會猜代碼）。
+// 口徑同 js/app.js PLATFORM_MARKETPLACE。
+const STORE_MAP = {
+  '生活好麻吉': { channel: 'shopee',  storeCode: 'shopee_haomaji' },
+  '玩樂盒子':   { channel: 'shopee',  storeCode: 'shopee_wanle' },
+  '森之旅':     { channel: 'shopee',  storeCode: 'shopee_senzhilu' },
+  '維克生活':   { channel: 'shopee',  storeCode: 'shopee_weike' },
+  'MOMO':       { channel: 'momo',    storeCode: 'momo_main' },
+  'MO+':        { channel: 'momo',    storeCode: 'momo_plus' },
+  '酷澎':       { channel: 'coupang', storeCode: 'coupang' },
+  'PChome':     { channel: 'pchome',  storeCode: 'pchome' },
+  '博客來':     { channel: 'books',   storeCode: 'books' },
+  'Friday':     { channel: 'friday',  storeCode: 'friday' },
+};
+
 export default {
   async fetch(request, env) {
     const allowedOrigin = env.ALLOWED_ORIGIN || '*';
@@ -70,20 +108,32 @@ export default {
       return jsonResp({ error: 'Method not allowed' }, 405, allowedOrigin);
     }
 
-    // 驗 X-API-Key
-    const apiKey = request.headers.get('X-API-Key') || '';
+    // 驗憑證：X-API-Key 或 Authorization: Bearer（固定時間比對）
     if (!env.WARROOM_API_KEY) {
-      return jsonResp({ error: 'Server not configured (WARROOM_API_KEY missing)' }, 500, allowedOrigin);
+      return jsonResp({ error: 'Server not configured' }, 500, allowedOrigin);
     }
-    if (apiKey !== env.WARROOM_API_KEY) {
+    if (!timingSafeEqualStr(presentedKey(request), env.WARROOM_API_KEY)) {
       return jsonResp({ error: 'Unauthorized' }, 401, allowedOrigin);
     }
     if (!env.FIREBASE_PROJECT_ID) {
-      return jsonResp({ error: 'Server not configured (FIREBASE_PROJECT_ID missing)' }, 500, allowedOrigin);
+      return jsonResp({ error: 'Server not configured' }, 500, allowedOrigin);
     }
 
     const url = new URL(request.url);
-    if (url.pathname === '/revenue' || url.pathname === '/') {
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/revenue/daily') {
+      const date = url.searchParams.get('date');
+      const bad = validateTwDate(date);
+      if (bad) return jsonResp({ error: bad }, 400, allowedOrigin);
+      try {
+        const result = await getDailyByStore(env, date);
+        return jsonResp(result, 200, allowedOrigin);
+      } catch (e) {
+        console.error('[revenue/daily] failed:', e);
+        return jsonResp({ error: 'Internal error' }, 500, allowedOrigin);
+      }
+    }
+    if (path === '/revenue' || path === '/') {
       try {
         const result = await getLatestCompleteRevenue(env);
         if (!result) {
@@ -92,7 +142,7 @@ export default {
         return jsonResp(result, 200, allowedOrigin);
       } catch (e) {
         console.error('[revenue] failed:', e);
-        return jsonResp({ error: 'Internal error', detail: String((e && e.message) || e) }, 500, allowedOrigin);
+        return jsonResp({ error: 'Internal error' }, 500, allowedOrigin);
       }
     }
 
@@ -142,13 +192,89 @@ async function getLatestCompleteRevenue(env) {
   return null;
 }
 
+// =============== v2：逐賣場每日營收 ================
+// 只讀 ec.platforms 裡白名單賣場的 daily[date] 與 dailyBy[date].at；不讀、不回傳其他欄位。
+async function getDailyByStore(env, date) {
+  const docFields = await firestoreGetFields(FIRESTORE_DOC_PATH, env, ['ec.platforms']);
+  const platforms = fromFirestoreValue(docFields['ec.platforms']) || [];
+  return buildDailyByStore(Array.isArray(platforms) ? platforms : [], date);
+}
+
+function buildDailyByStore(platforms, date) {
+  const stores = [];
+  const seen = new Set();
+  for (const p of platforms) {
+    if (!p || typeof p.name !== 'string') continue;
+    const meta = STORE_MAP[p.name];
+    if (!meta || seen.has(p.name)) continue;
+    seen.add(p.name);
+    const daily = (p.daily && typeof p.daily === 'object') ? p.daily : {};
+    const raw = Object.prototype.hasOwnProperty.call(daily, date) ? daily[date] : undefined;
+    let revenue = null;
+    let status = 'not_reported';
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const n = Number(raw);
+      if (Number.isFinite(n)) { revenue = Math.round(n); status = 'reported'; }
+      else status = 'invalid_value';
+    }
+    const sig = p.dailyBy && p.dailyBy[date];
+    const at = sig && Number(sig.at);
+    stores.push({
+      date,
+      channel: meta.channel,
+      storeCode: meta.storeCode,
+      storeName: p.name,
+      revenue,
+      status,
+      updatedAt: Number.isFinite(at) && at > 0 ? msToTwIso(at) : null,
+    });
+  }
+  return { date, currency: 'TWD', basis: 'gross_before_returns', stores };
+}
+
+function validateTwDate(s) {
+  if (!s) return 'Missing date (YYYY-MM-DD, Taiwan date)';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'Invalid date format (expected YYYY-MM-DD)';
+  if (addDaysStr(s, 0) !== s) return 'Invalid date';
+  if (s > twTodayStr()) return 'Date is in the future (Taiwan time)';
+  return null;
+}
+
+function presentedKey(request) {
+  const x = request.headers.get('X-API-Key');
+  if (x) return x;
+  const auth = request.headers.get('Authorization') || '';
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  return m ? m[1].trim() : '';
+}
+
+// 固定時間比對（長度不同也跑完整個迴圈）
+function timingSafeEqualStr(a, b) {
+  const ea = new TextEncoder().encode(String(a || ''));
+  const eb = new TextEncoder().encode(String(b || ''));
+  const len = Math.max(ea.length, eb.length);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < len; i++) diff |= (ea[i] || 0) ^ (eb[i] || 0);
+  return diff === 0 && eb.length > 0;
+}
+
+function msToTwIso(ms) {
+  const d = new Date(ms + TW_TZ_OFFSET_MIN * 60 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}+08:00`;
+}
+
 // =============== Firestore REST helpers（匿名讀） ================
-async function firestoreGetFields(docPath, env) {
-  const url = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${docPath}`;
+// fields：只取這些欄位（Firestore mask；含點的字面 key 要用反引號包起來）。不給＝整份。
+async function firestoreGetFields(docPath, env, fields) {
+  let url = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${docPath}`;
+  if (Array.isArray(fields) && fields.length) {
+    url += '?' + fields.map(f => 'mask.fieldPaths=' + encodeURIComponent('`' + f + '`')).join('&');
+  }
   const resp = await fetch(url);
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
-    throw new Error(`Firestore GET ${docPath}: ${resp.status} ${txt}`);
+    throw new Error(`Firestore GET ${docPath}: ${resp.status} ${txt.slice(0, 200)}`);
   }
   const data = await resp.json();
   return data.fields || {};
@@ -193,7 +319,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     'Access-Control-Max-Age': '86400',
     'Cache-Control': 'no-store',
   };
@@ -205,3 +331,6 @@ function jsonResp(obj, status, origin) {
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders(origin) },
   });
 }
+
+// node 測試用（Cloudflare 只看 default export）
+export const __test = { buildDailyByStore, validateTwDate, timingSafeEqualStr, msToTwIso, STORE_MAP };
