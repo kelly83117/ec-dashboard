@@ -34072,7 +34072,8 @@ function pchomeBillingCycleDays(month){
 //   1. 固定費（系統服務費/活動贊助費/獎勵金合約/產品責任險）＝近 N 期已對帳月固定費平均 × 已過天數比例（按天數計入、不整筆壓上）
 //   2. 簡訊費＝訂單明細出貨列數 ×1 元（精算）＋退貨物流筆數（訂單明細沒有退貨資料 → 用近 3 期已對帳月「退貨物流筆數÷出貨列數」的比率 × 本期出貨列數估算、四捨五入；沒有已對帳基準月＝0）
 //   3. 行銷推廣費＝近期已對帳月「行銷推廣費 ÷ 貨款(營收未稅)」比率 × 本期營收
-//   4. 退貨物流費、罰金＝同上比率；無基準月 → 0（橫幅註明未估）
+//   4. 退貨物流費＝同上比率；無基準月 → 0（橫幅註明未估）
+//   5. 罰金＝0，不估算（2026-11-17）：罰金是個別訂單事故，用過去比率會把一次性大額罰金（2026-10 的 7,630）攤進之後每個未對帳月；只在對帳後照對帳單計入（橫幅註明）
 //   對帳資料一上傳即走已對帳路徑、整月切回實際（本函式只在 synth entry 走）。
 function pchomeEstimateUnreconFees(month, shop){
   var recon=pchomeLoadRecon(), ob=pchomeOrdersByBillingMonth(), orders=ob[month]||[];
@@ -34081,15 +34082,15 @@ function pchomeEstimateUnreconFees(month, shop){
   var sms含稅=smsShip;   // 下面算完近期已對帳月的退貨物流比率後，再加上估算的退貨物流筆數（每筆 1 元含稅）
   // 近 3 期已對帳月（有上傳對帳單 D）；排除本月；新→舊
   var rm=Object.keys(recon).filter(function(m){ return m!==month && recon[m] && recon[m].對帳單 && recon[m].對帳單.D!=null; }).sort().reverse().slice(0,3);
-  var fixList=[], mktR=[], retR=[], penR=[], smsRetN=0, smsLineN=0;
+  var fixList=[], mktR=[], retR=[], smsRetN=0, smsLineN=0;
   rm.forEach(function(m){
     var c=pchomeProfitCalc(recon[m], shop);   // 已對帳路徑（有 D）→ 不遞迴進本估算
     var _se=c.簡訊費推算||{}; smsRetN+=(Number(_se.退貨物流筆數)||0); smsLineN+=(Number(_se.列數)||0);   // 簡訊費退貨物流筆數的歷史比率（退貨物流筆數 ÷ 出貨列數）
     var fx=((c.費用池&&c.費用池.固定費)||0)+((c.費用池&&c.費用池.責任險)||0);   // 含稅
     fixList.push(fx);
     var rev=(c.合計&&c.合計.營收)||0;
-    if(rev>0.5){ var mkt=0,ret=0,pen=0; (c.skus||[]).forEach(function(x){ var d=x.費用明細||{}; mkt+=(d.行銷推廣費||0); ret+=(d.退貨物流費||0); pen+=(d.罰金||0); });
-      mktR.push(mkt/rev); retR.push(ret/rev); penR.push(pen/rev); }
+    if(rev>0.5){ var mkt=0,ret=0; (c.skus||[]).forEach(function(x){ var d=x.費用明細||{}; mkt+=(d.行銷推廣費||0); ret+=(d.退貨物流費||0); });
+      mktR.push(mkt/rev); retR.push(ret/rev); }
   });
   var avg=function(a){ return a.length?a.reduce(function(s,x){return s+x;},0)/a.length:0; };
   var smsRet=(smsLineN>0)?Math.round(smsRetN/smsLineN*smsShip):0;   // 估算的退貨物流筆數（整數；沒基準月＝0）
@@ -34097,10 +34098,10 @@ function pchomeEstimateUnreconFees(month, shop){
   var cyc=pchomeBillingCycleDays(month);
   var fixMonthly=avg(fixList);
   var fixProrated=cyc.total>0?fixMonthly*cyc.elapsed/cyc.total:fixMonthly;
-  var mkt=avg(mktR)*revThis, ret=avg(retR)*revThis, pen=avg(penR)*revThis;
+  var mkt=avg(mktR)*revThis, ret=avg(retR)*revThis, pen=0;   // 罰金不估（見上方第 5 點）
   var D=fixProrated+sms含稅+mkt+ret+pen;   // 含稅整戶估算
   return { D:D, 明細:{ D5:{v:sms含稅} }, __est:true,
-    breakdown:{ 固定費月:fixMonthly, 固定費計入:fixProrated, elapsed:cyc.elapsed, total:cyc.total, 簡訊:sms含稅, 簡訊筆數:smsShip, 簡訊退貨筆數:smsRet, 行銷:mkt, 退物:ret, 罰金:pen, 基準月數:rm.length, hasRecon:rm.length>0, hasRet:retR.length>0&&avg(retR)>0, hasPen:penR.length>0&&avg(penR)>0 } };
+    breakdown:{ 固定費月:fixMonthly, 固定費計入:fixProrated, elapsed:cyc.elapsed, total:cyc.total, 簡訊:sms含稅, 簡訊筆數:smsShip, 簡訊退貨筆數:smsRet, 行銷:mkt, 退物:ret, 罰金:pen, 基準月數:rm.length, hasRecon:rm.length>0, hasRet:retR.length>0&&avg(retR)>0, hasPen:false } };
 }
 
 // ── 賣場層＝轉單/寄倉（比照 momo 甲配/乙配：在平台群組的 shop 子列，各自 pchome-content-<shop>）。
@@ -34654,7 +34655,7 @@ function pchomeRenderBatch(shop){
 function pchomeBatchSetMode(shop,m){ _pchomeBatchMode[shop]=m; pchomeRenderBatch(shop); }
 // PChome 供貨商口徑即時淨利率＝(供貨價÷1.05 − 成本) ÷ (供貨價÷1.05)。只隨成本/供貨價變動；售價（PChome 網路價）不進計算。
 function pchomeCalcMargin(cost, 供貨價){ var net=(Number(供貨價)||0)/1.05; if(!(net>0)) return null; return (net-(Number(cost)||0))/net; }
-// 估計費率＝最近一個已對帳月的（費用未稅÷營收未稅），供批次維護「估計淨利率」預覽用（照 momo 用單一費率估淨利；PChome 無抽成費率、用綜合費率）。
+// 估計費率＝最近一個已對帳月的（（費用未稅 − 本賣場罰金未稅）÷營收未稅），供批次維護「估計淨利率」預覽用（照 momo 用單一費率估淨利；PChome 無抽成費率、用綜合費率）。
 //   回 {rate, month}；無已對帳月→{rate:null}。render 時算一次快取 _pchomeEstFeeRateCache[shop]，recalc(oninput) 讀快取不重算 pchomeProfitCalc。
 var _pchomeEstFeeRateCache={};
 function pchomeEstFeeRate(shop){
@@ -34667,8 +34668,11 @@ function pchomeEstFeeRate(shop){
     var z=c.宅配通||{}, qty=Number(z.出貨件數)||0, sptot=(Number(z.運費)||0)+(Number(z.包材)||0);
     var sp=(qty>0)?(sptot/qty):null;
     if(sp!=null && !(sp>=PCHOME_ITEM_SHIP_PACK_MIN && sp<=PCHOME_ITEM_SHIP_PACK_MAX)) sp=null;
-    var rate=(rev>0.5)?(fee/rev):null;
-    return {rate:rate, month:m, shipPack:sp, shipQty:qty, shipTot:sptot}; }catch(e){}
+    // 罰金不進估計費率（2026-11-17）：罰金是個別訂單的出貨延遲事故，不是上架新品的經常成本；
+    //   2026-10 罰金 7,630 曾把費率從約 35% 拉到 53.8%，所有商品都被判「不建議上架」。分子扣本賣場罰金，兩邊都未稅。
+    var penHK=Number(c.罰金本賣場含稅)||0;
+    var rate=(rev>0.5)?((fee-penHK/1.05)/rev):null;
+    return {rate:rate, month:m, shipPack:sp, shipQty:qty, shipTot:sptot, penaltyHK:penHK}; }catch(e){}
   return {rate:null, month:m, shipPack:null};
 }
 // 批次維護「運費+包材」動態預設值＋來源文案（從 est 快取拿每件平均；無則退回 PCHOME_DEFAULT_SHIP_PACK=87）。
@@ -34718,7 +34722,7 @@ function pchomeBatchPreviewHTML(cost, supply, est, shipPack){
     var col=estNet>=0.15?'#10b981':(estNet>=0?'#d97706':'#ef4444');
     var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。運費包材 '+sp+'（每件一份，未稅）；預設＝當期平均每件（運費包材總額÷出貨件數），此為平均值——總是單獨一箱寄出的商品會被低估、常與其他商品併箱的會被高估。';
     return '估計淨利率 <b style="color:'+col+';font-size:18px" title="'+esc(tip)+'">'+pchomePct(estNet)+'</b>　'+badge(estNet)
-      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳）與運費包材 '+sp+'。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
+      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳'+((Math.round(Number(est.penaltyHK)||0)>0)?'，已排除罰金 $'+Math.round(Number(est.penaltyHK)).toLocaleString('en-US'):'')+'）與運費包材 '+sp+'。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
   }
   // 無已對帳月 → 無法估平台費用，只顯毛利率
   return '毛利率 <b style="color:'+(gross>=0.30?'#10b981':'#f97316')+';font-size:18px">'+pchomePct(gross)+'</b>　'+badge(gross)
@@ -35902,11 +35906,12 @@ function pchomeProfitCalc(entry, shop){
   var 逐筆ByShop={'轉單':0,'寄倉':0};   // 各賣場逐筆費用（含稅）：罰金+行銷推廣+退貨物流+簡訊；供整戶待分攤與跨賣場守恆
   // 罰金（段9）逐筆 → 訂單賣場。掛本賣場 SKU；他賣場只計 逐筆ByShop、不進本賣場；不屬任一賣場→本賣場未歸屬。
   var penSeg=null; segs.forEach(function(s){ if(String(s.對帳項目||'').trim()==='罰金') penSeg=s; });   // 以名稱找，不靠段序
-  var penaltyAttributed=0, penaltyUnattributed=0;
+  var penaltyAttributed=0, penaltyUnattributed=0, penCsvByShop={'轉單':0,'寄倉':0}, penCsvNone=0;   // penCsv*：CSV 罰金逐筆按訂單賣場（含稅），供下方「本賣場罰金」
   if(penSeg&&penSeg.rows){ penSeg.rows.forEach(function(r){
     var amt=Number(r['罰款'])||0; if(!amt) return;
     var pn=String(r['商品編號']||'').trim(), code=String(r['廠商料號']||'').trim()||pnToCode[pn]||pnToCodeP[pn]||'';
     var fs=_feeShop(pn,code);
+    if(fs) penCsvByShop[fs]+=amt; else penCsvNone+=amt;
     if(fs){ 逐筆ByShop[fs]+=amt; if(fs===shop){ if(code&&bySku[code]){ bySku[code].罰金+=amt; penaltyAttributed+=amt; } else penaltyUnattributed+=amt; } }
     else penaltyUnattributed+=amt;   // 不屬任一賣場（罕見）→ 本賣場未歸屬（下方併入整戶）
   }); }
@@ -35971,6 +35976,12 @@ function pchomeProfitCalc(entry, shop){
   var ratio=(revDenom>0.5)?(Math.max(thisRev,0)/revDenom):((shop==='寄倉')?0:1);   // 邊界：兩賣場皆無營收 → 整戶全歸轉單、寄倉 0（不除以 0）
   var 攤提池=整戶ToSplit*ratio;                 // 本賣場分到的整戶費用（含稅）
   var dTotal=逐筆ByShop[shop]+攤提池;           // 本賣場費用總額（含稅）＝本賣場逐筆 + 本賣場整戶份
+  // 本賣場罰金（含稅；只給 pchomeEstFeeRate 的「估計平台費率」排除罰金用，不進任何淨利／費用計算）：
+  //   ＝本賣場 CSV 罰金逐筆 ＋（罰金整戶 − 兩賣場逐筆）× 本賣場營收比例（跟 (D) 整戶分帳同規則；兩賣場相加＝罰金整戶）。
+  //   罰金整戶：已對帳＝對帳單 (D2)（權威、跟 (D) 同一套）；沒有 D2／即時＝CSV 罰金段加總；估算月＝0（估算不估罰金）。
+  var _d2=(feeState==='已對帳'&&af&&af.明細&&af.明細.D2&&af.明細.D2.v!=null&&isFinite(Number(af.明細.D2.v)))?Number(af.明細.D2.v):null;
+  var penWhole=(feeState==='估算')?0:(_d2!=null?_d2:(penCsvByShop['轉單']+penCsvByShop['寄倉']+penCsvNone));
+  var 罰金本賣場含稅=(feeState==='估算')?0:(penCsvByShop[shop]+(penWhole-penCsvByShop['轉單']-penCsvByShop['寄倉'])*ratio);
   // 跨賣場守恆（assert）：轉單費用 + 寄倉費用 === D 整戶（整戶按比例分、逐筆各歸各；恆等、當防護）。
   var _rT=(revDenom>0.5)?(Math.max(revTurn,0)/revDenom):1, _rC=(revDenom>0.5)?(Math.max(revCons,0)/revDenom):0;
   var _dTurn=逐筆ByShop['轉單']+整戶ToSplit*_rT, _dCons=逐筆ByShop['寄倉']+整戶ToSplit*_rC;
@@ -36069,7 +36080,7 @@ function pchomeProfitCalc(entry, shop){
   var knownRev=known.reduce(function(s,x){return s+x.營收;},0);
   // 加權淨利率＝總淨利 ÷ 總營收（完全照 momo momoPeriodTotals 的 margin＝profit/rev；含未分攤費用、與總淨利卡同基準、兩卡對得起來）。
   //   ⚠ 口徑變更（2026-09）：舊版用 knownProfit/knownRev（缺成本不進分母），已改為 momo 公式 → 缺成本>0 時營收計入、成本未計 → 加權會偏高，由 missBanner 警示「可能高估」（不再說「不進分母」）。
-  return { skus:skus, 未分攤:unalloc, 未分攤未稅:unalloc/1.05, dTotal:dTotal, dSource:dSource, feeState:feeState, penaltyUnattributed:penaltyUnattributed,
+  return { skus:skus, 未分攤:unalloc, 未分攤未稅:unalloc/1.05, dTotal:dTotal, dSource:dSource, feeState:feeState, penaltyUnattributed:penaltyUnattributed, 罰金本賣場含稅:罰金本賣場含稅,
     合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,費用合計:費用合計Total,運費:totFreight,包材:totPack,淨利:totProfit},
     加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
     bizCount:biz.length, soldBases:soldBases, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
@@ -36866,7 +36877,7 @@ function pchomeProfitTabHTML(shop){
   var feeChip=(calc.feeState==='已對帳')
     ? '<span class="mm-status ok" title="'+esc('費用以上傳的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／逐筆推算 '+e.推算+' 筆（出貨列 '+e.列數+'＋退貨物流 '+e.退貨物流筆數+'）'+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
     : (calc.feeState==='估算'
-      ? '<span class="mm-status no" title="對帳單未上傳；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳上傳對帳單 .htm 轉權威值">未對帳</span>'
+      ? '<span class="mm-status no" title="對帳單未上傳；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流近期比率；罰金不估算、對帳後才計入）→ 到月對帳上傳對帳單 .htm 轉權威值">未對帳</span>'
       : '<span class="mm-status no" title="對帳單未上傳；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳上傳對帳單 .htm 轉權威">未對帳</span>');   // 比照 momo 已對帳/未對帳
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'+modeToggle
@@ -36905,7 +36916,7 @@ function pchomeProfitTabHTML(shop){
         +(bd
           ? '<br><span style="font-weight:400">'
             +(bd.hasRecon
-              ? '費用估算含：固定費（<b>按已過天數計入</b>）、簡訊費（出貨 '+bd.簡訊筆數+' 筆'+(bd.簡訊退貨筆數>0?'＋退貨物流估 '+bd.簡訊退貨筆數+' 筆':'')+'，各 ×1 元）、行銷推廣費'+(bd.hasRet?'、退貨物流':'')+(bd.hasPen?'、罰金':'')+'。'
+              ? '費用估算含：固定費（<b>按已過天數計入</b>）、簡訊費（出貨 '+bd.簡訊筆數+' 筆'+(bd.簡訊退貨筆數>0?'＋退貨物流估 '+bd.簡訊退貨筆數+' 筆':'')+'，各 ×1 元）、行銷推廣費'+(bd.hasRet?'、退貨物流':'')+'。罰金不估算，只在對帳後照對帳單計入。'
               : '<b>尚無已對帳基準月 → 僅簡訊費精算、其餘費用估為 0。</b>')
             +'到「月對帳」上傳對帳資料即轉<b>權威值</b>。</span>'
           : '<br><span style="font-weight:400">費用估算資料不足。到「月對帳」上傳對帳資料即轉權威值。</span>')
