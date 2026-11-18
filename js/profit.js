@@ -32065,6 +32065,77 @@ function cupSellThroughCalc(rows, listedSet){
   return { num:sold.size, den:den.size, listedN:(listedSet?listedSet.size:0), soldNotListed, pct:(den.size>0?sold.size/den.size*100:null) };
 }
 /* ═══ CUP-PM-PURE-END ═══ */
+/* ═══ CUP-PS-PURE-BEGIN：酷澎商品主檔雲端分片與合併（PR-C2 第 1 塊）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage／Firestore ═══ */
+//   雲端形狀：coupang_products/{maji|luying}_{0..3}，每份 { schema:1, shop, shard, shards:4, items:[…], latestExport, updatedAt }。
+//   items 每筆＝C1 本機主檔同一形狀 { sku, pid, sid, code, price, base, status(韓文原文), stock, firstSeen, lastSeen }，不存商品名稱。
+//   依賴（profit.js 其他地方定義，node 測試一起抽）：momoProductsPlanMerge、_momoProductsBuildSig、_momoStableStr、_momoDelGuardLevel、MOMO_DEL_GUARD_*。
+const CUP_PRODUCTS_SHARDS=4;
+const CUP_PRODUCTS_SHARD_WARN_KB=700;   // 任一片超過 ⇒ 紅字警告（同 MOMO_DOC_WARN_KB；Firestore 單份上限 1 MB）
+// Product ID 是純數字 ⇒ BigInt(pid) % 4；空白或不是純數字 ⇒ 第 0 片（呼叫端用 cupProductsPidOk 計數）。
+//   用 BigInt：Product ID 可能超過 2^53，Number 取餘數會錯。同一商品頁的所有選項 pid 相同 ⇒ 一定同一片。
+function cupProductsPidOk(pid){ return /^[0-9]+$/.test(String(pid==null?'':pid).trim()); }
+function cupProductsShardOf(pid){
+  if(!cupProductsPidOk(pid)) return 0;
+  return Number(BigInt(String(pid).trim()) % BigInt(CUP_PRODUCTS_SHARDS));
+}
+// items → { shards:[[…],[…],[…],[…]], badPid }（badPid＝pid 空白或不是純數字、被歸到第 0 片的選項數）。各片內維持原本順序。
+function cupProductsSplitShards(items){
+  const shards=[]; for(let i=0;i<CUP_PRODUCTS_SHARDS;i++) shards.push([]);
+  let badPid=0;
+  (Array.isArray(items)?items:[]).forEach(p=>{ if(!p) return; if(!cupProductsPidOk(p.pid)) badPid++; shards[cupProductsShardOf(p.pid)].push(p); });
+  return { shards, badPid };
+}
+// 一片的 Firestore 大小估算（位元組）。算法照 Firestore 文件：字串＝UTF-8 位元組＋1、數字 8、布林／null 1、
+//   map＝Σ(欄位名 UTF-8＋1 ＋ 值)、陣列＝Σ值、文件額外 32＋文件名稱（collection／doc id 各 UTF-8＋1、再＋16）。
+//   meta（選填）{ shop, latestExport, docId } 只用來把頂層欄位算進去；沒給就用最長的通路名與 19 字的時間估。
+function cupProductsShardBytes(shardItems, meta){
+  const enc=(typeof TextEncoder!=='undefined')?new TextEncoder():null;
+  const u8=s=>enc?enc.encode(String(s)).length:unescape(encodeURIComponent(String(s))).length;
+  const val=v=>{
+    if(v===null||v===undefined||typeof v==='boolean') return 1;
+    if(typeof v==='number') return 8;
+    if(typeof v==='string') return u8(v)+1;
+    if(Array.isArray(v)) return v.reduce((s,x)=>s+val(x),0);
+    if(typeof v==='object') return Object.keys(v).reduce((s,k)=>s+u8(k)+1+val(v[k]),0);
+    return 8;
+  };
+  const m=meta||{};
+  const docName=u8('coupang_products')+1+u8(m.docId||'luying_0')+1+16;
+  const top={ schema:1, shop:(m.shop!=null?m.shop:'露營館'), shard:0, shards:CUP_PRODUCTS_SHARDS, latestExport:(m.latestExport!=null?m.latestExport:'0000-00-00 00:00:00') };
+  return 32+docName+val(top)+(u8('updatedAt')+1+8)+(u8('items')+1)+val(Array.isArray(shardItems)?shardItems:[]);
+}
+// 雲端合併（整個通路層級：4 片串起來的 cloudItems）。
+//   1) 逐筆比資料自己的時間：同一個選項雲端 lastSeen 比本機新 ⇒ 用雲端那筆（記進 keptCloud），否則用本機那筆；
+//      兩邊都有時 firstSeen 取兩邊非空值裡較早的。不比雲端 updatedAt。
+//   2) 再交給 momoProductsPlanMerge（last-pushed 模型）：lastpushed＝null ⇒ bootstrap，以雲端為基準、不刪任何雲端選項；
+//      有 lastpushed ⇒ 只推跟上次推的不一樣的；本機沒有、上次推過的才刪；雲端獨有的原封保留。
+//   3) latestExport＝雲端與本機較大的；guardLevel＝_momoDelGuardLevel（N＝雲端現在還有的要刪筆數）。
+//   回 { mode, merged, pushSkus, deleteSkus, keptCloud, latestExport, guardLevel, changed, added, preserveCount, conflictSkus, cloudCount, mergedCount, wholeOverwritePush, cloudOnly }
+function cupProductsCloudMerge(cloudItems, cloudLatest, localDoc, lastpushed){
+  const cloud=Array.isArray(cloudItems)?cloudItems:[];
+  const localItems=(localDoc&&Array.isArray(localDoc.items))?localDoc.items:[];
+  const cloudMap=new Map(); cloud.forEach(p=>{ if(p&&p.sku!=null) cloudMap.set(String(p.sku),p); });
+  const earlier=(a,b)=>{ a=a||''; b=b||''; if(!a) return b; if(!b) return a; return a<b?a:b; };
+  const keptCloud=[];
+  const eff=localItems.map(lp=>{
+    if(!lp||lp.sku==null) return lp;
+    const cp=cloudMap.get(String(lp.sku));
+    if(!cp) return lp;
+    const cloudNewer=String(cp.lastSeen||'')>String(lp.lastSeen||'');   // CUP-PS-KEEP-NEWER（node 反向測試會把這行改掉）
+    const pick=cloudNewer?cp:lp;
+    if(cloudNewer) keptCloud.push(String(lp.sku));
+    const fsn=earlier(lp.firstSeen, cp.firstSeen);
+    return (fsn===(pick.firstSeen||''))?pick:Object.assign({}, pick, { firstSeen:fsn });
+  });
+  const plan=momoProductsPlanMerge(null, cloud, eff, (lastpushed&&typeof lastpushed==='object'&&!Array.isArray(lastpushed))?lastpushed:null);
+  const lA=String(cloudLatest||''), lB=String((localDoc&&localDoc.latestExport)||'');
+  const latestExport=lA>lB?lA:lB;
+  const guardLevel=_momoDelGuardLevel(plan, cloud);
+  return { mode:plan.mode, merged:plan.merged, pushSkus:plan.pushSkus, deleteSkus:plan.deleteSkus, keptCloud, latestExport, guardLevel,
+    changed:plan.changed, added:plan.added, preserveCount:plan.preserveCount, conflictSkus:plan.conflictSkus,
+    cloudCount:plan.cloudCount, mergedCount:plan.mergedCount, wholeOverwritePush:plan.wholeOverwritePush, cloudOnly:plan.cloudOnly };
+}
+/* ═══ CUP-PS-PURE-END ═══ */
 
 // ④ MSF（VAT History Report 分頁，含表頭）→ per-order ＋ 按銷售確認月的銷售/退貨淨額（退貨率用）。
 //    cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11(賣家券銷售=7)/退貨12-18(賣家券退貨=14)
