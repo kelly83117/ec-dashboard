@@ -42,7 +42,7 @@ const PS_BLOCK = between(src, '/* ═══ CUP-PS-PURE-BEGIN', 'CUP-PS-PURE-END
 const DEPS = consts(src, 'MOMO_DEL_GUARD_') + fnMulti(src, '_momoStableStr') + fnLine(src, '_momoProductsBuildSig')
   + fnMulti(src, 'momoProductsPlanMerge') + fnMulti(src, '_momoDelGuardLevel');
 const NAMES = ['CUP_PRODUCTS_SHARDS', 'CUP_PRODUCTS_SHARD_WARN_KB', 'cupProductsPidOk', 'cupProductsShardOf', 'cupProductsSplitShards',
-  'cupProductsShardBytes', 'cupProductsCloudMerge', 'momoProductsPlanMerge', '_momoDelGuardLevel'];
+  'cupProductsShardBytes', 'cupProductsCloudMerge', 'cupProductsWriteConfirmed', 'momoProductsPlanMerge', '_momoDelGuardLevel'];
 function load(block) { return new Function(DEPS + block + '\nreturn {' + NAMES.join(',') + '};')(); }
 
 // ── 假資料 ──
@@ -174,6 +174,25 @@ const stableStr = new Function(fnMulti(src, '_momoStableStr') + '\nreturn _momoS
 console.log('── 1. 正常版 ──');
 const P = load(PS_BLOCK);
 suite(P);
+
+// ── 1b. 寫入確認條件（C2-3：enforce 只有全部成立才動本機／lastpushed／dirty）──
+console.log('── 1b. 寫入確認條件 ──');
+{
+  const C = P.cupProductsWriteConfirmed;
+  const back = (ns, le, ex) => ({ exists: true, items: [], latestExport: le, perShard: ns.map((n, i) => ({ exists: ex ? ex[i] : true, n, latestExport: le })) });
+  const cnt = [3, 1, 2, 0], L = T2;
+  eq(C({ ok: true }, back(cnt, L), cnt, 6, L).ok, true, '確認：全部對上 ⇒ ok');
+  eq(C(undefined, back(cnt, L), cnt, 6, L).ok, false, '確認：setShop 回 undefined（被防護擋下）⇒ 不算');
+  eq(C({ ok: true, extra: 1 }, back(cnt, L), cnt, 6, L).ok, false, '確認：回傳不是嚴格 {ok:true} ⇒ 不算');
+  eq(C({ ok: 'true' }, back(cnt, L), cnt, 6, L).ok, false, '確認：ok 是字串 ⇒ 不算');
+  eq(C(true, back(cnt, L), cnt, 6, L).ok, false, '確認：回 true ⇒ 不算');
+  eq(C({ ok: true }, null, cnt, 6, L).ok, false, '確認：讀回失敗 ⇒ 不算');
+  eq(C({ ok: true }, back([3, 1, 2, 1], L), cnt, 6, L).ok, false, '確認：某片筆數不同 ⇒ 不算');
+  eq(C({ ok: true }, back(cnt, L, [true, true, true, false]), cnt, 6, L).ok, false, '確認：某片不存在（就算 0 筆）⇒ 不算');
+  eq(C({ ok: true }, back(cnt, L), cnt, 7, L).ok, false, '確認：合計跟合併筆數不同 ⇒ 不算');
+  eq(C({ ok: true }, back(cnt, T1), cnt, 6, L).ok, false, '確認：latestExport 不同 ⇒ 不算');
+  eq(C({ ok: true }, back([3, 1, 2], L), [3, 1, 2], 6, L).ok, false, '確認：不是 4 片 ⇒ 不算');
+}
 
 // ── 2. 合成 3,724 筆（仿好麻吉：1,408 頁、多數 1～3 個選項、少數頁很多選項）切 4 片 ──
 console.log('── 2. 合成 3,724 筆切 4 片 ──');

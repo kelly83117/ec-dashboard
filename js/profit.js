@@ -442,8 +442,6 @@ const _pendingSyncKeys = new Set();
 // 在這一次同步的進度顯示（「同步中 i/N」）中途引爆、把進度蓋掉。
 let _syncBtnRepaintTimer = null;
 function _markPending(key){
-  // PR-C1：酷澎商品主檔（ec_coupang_products|）在 C1 是純本機，絕不進待同步（C2 接雲端時才拿掉這行）
-  if(typeof key==='string' && key.indexOf('ec_coupang_products|')===0){ try{ console.error('[待同步] 拒收純本機 key：'+key); }catch(e){} return; }
   _pendingSyncKeys.add(key);
   _showSyncBtn();
 }
@@ -2624,7 +2622,7 @@ function _pendingKeyOwner(k){
   if(k.startsWith('__shop__|') || k==='_summary_v1') return 'marker';        // 不是資料、不計
   if(k.startsWith('ec_pchome_')) return 'pchome';
   if(k.startsWith('ec_momo_')) return 'momo';
-  if(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)) return 'coupang';
+  if(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)||cupIsProductsKey(k)) return 'coupang';
   if(k.startsWith('ec|') || k.startsWith('ec_notes|') || k.startsWith('ec_edits|') || k.startsWith('ec_split|') || k==='_kpi_v1') return 'shopee';
   return 'unknown';
 }
@@ -2767,7 +2765,10 @@ function _sweepAllLocalReportsIntoPending(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // PR-C1：酷澎商品主檔是純本機，不撿進待推（C2 才接雲端）
+      // PR-C2：酷澎商品主檔 ec_coupang_products|<通路>（→ coupang_products 4 片）。只在「dirty（存過、還沒確認推上去）」或「本機有主檔、沒有 lastpushed」時才撿（_cupProductsNeedsPush）。
+      //   不補水 Store._mem：主檔只放 localStorage＋profit.js 模組快取（C1 設計），推送與預覽一律走 cupPendingProducts（每次重讀 localStorage）→ 看到的＝推的。
+      if(k&&cupIsProductsKey(k)){ if(_cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); continue; }
+      if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // 段數不對的怪 key：不撿
       // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
       //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
       if(k&&k.startsWith('ec_momo_products|')){
@@ -2961,12 +2962,12 @@ async function _momoFullPushDeleteGuard(taskKeys){
   const skip=new Map();
   const keys=[...taskKeys];
   // app/profit 欄位一次讀齊（optlog/freight/rent/f1102/notes/edits/其他設定都是它的欄位）
-  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && !cupIsNoteKey(k) && k!=='ec_momo_cost_by_origin';
+  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && !cupIsNoteKey(k) && !cupIsProductsKey(k) && k!=='ec_momo_cost_by_origin';
   let appProfit=null;
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
     if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
-       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k) || k.startsWith('ec_momo_f1102|')) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議；f1102 乙配寄倉＝單一寫者、每次全快照覆蓋（今天匯出取代 08/18 舊快照），willDelete 又遞迴葉節點(每品號10欄)把「差5品號」灌成「刪50」假警告 → 比照 products/coupang 排除
+       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k) || cupIsProductsKey(k) || k.startsWith('ec_momo_f1102|')) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議；f1102 乙配寄倉＝單一寫者、每次全快照覆蓋（今天匯出取代 08/18 舊快照），willDelete 又遞迴葉節點(每品號10欄)把「差5品號」灌成「刪50」假警告 → 比照 products/coupang 排除
     //   🔴 2026-09-03 起 ec_notes【整類】排除（判準統一走 _notesUsesMerge），不再只排除 _growth。
     //     為什麼廣告調整也必須排除（不是順手）：本守衛算 willDelete 用的是 momoCloudDeleteCount，
     //     它遞迴到 adjustments 陣列、用 _momoStableStr（整個物件序列化）當元素身分 →
@@ -3228,6 +3229,17 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'E001 未結算銷量讀不到，或雲端層未就緒'}); }
         return;
       }
+      if(cupIsProductsKey(pk)){   // PR-C2：酷澎商品主檔 → coupang_products（4 片，writeBatch）。逐選項 merge：只推改過的、雲端較新的逐筆保留、bootstrap 不刪雲端
+        const cShop=pk.split('|')[1];
+        if(allowKeys instanceof Set && !allowKeys.has(pk)) return;   // 這次同步沒選它（例如 MOMO／酷澎預覽只勾了別的）→ 不跑、不列問題
+        if(!window.__cloudCoupangProducts){ skippedProblem.push({key:pk,label:'未就緒',reason:'酷澎商品主檔雲端層未就緒'}); return; }
+        const rd=_cupProductsReadLs(cShop);
+        if(rd.state==='bad'){ skippedProblem.push({key:pk,label:'本機讀不到',reason:'本機酷澎商品主檔解不開，這次不推；請通知 Keani'}); return; }
+        if(rd.state==='absent'){ skippedProblem.push({key:pk,label:'本機讀不到',reason:'這台電腦沒有'+cupShopDisplay(cShop)+'的酷澎商品主檔，這次不推'}); return; }
+        if(window.__CUP_PRODUCTS_ENFORCE===true){ tasks.push({key:pk,run:()=>_cupProductsTaskRun(cShop)}); }
+        else{ cupSyncProductsMerge(cShop,{shadow:true}).catch(()=>{}); skippedProblem.push({key:pk,label:'試跑中',reason:'酷澎商品主檔：試跑中，未寫入（Console 有 [cup products merge SHADOW] 的數字）'}); }   // 閘門沒開：只算、只 log、絕不寫
+        return;
+      }
       if(cupIsReportKey(pk)){   // 酷澎報表 → coupang_reports collection（每賣場每月一 doc）
         const parts=pk.split('|');   // ['ec_coupang', shop, 'YYYY-MM']
         const cShop=parts[1], cMonth=parts[2];
@@ -3356,6 +3368,21 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       const approved=new Set(g.skus);
       t.run=()=>momoSyncProductsMerge(gShop,{approvedDeletes:approved});
     }
+    // 🛡 PR-C2：酷澎商品主檔同一套刪除防線預檢（只有閘門打開、真的有 task 時才會走到）。讀不到雲端 → 不擋，交給 task 自己中止（task 讀不到雲端一定不寫）。
+    for(const t of tasks.filter(x=>cupIsProductsKey(x.key))){
+      const gShop=t.key.split('|')[1];
+      let g=null;
+      try{ g=await _cupDelGuardPreflight(gShop); }catch(e){ g=null; console.warn('[syncToCloud] 酷澎商品主檔刪除防線預檢失敗（交給推送本身處理）：',t.key,e); }
+      if(!g||g.level==='ok') continue;
+      const drop=()=>{ const i=tasks.indexOf(t); if(i>=0) tasks.splice(i,1); };
+      if(g.level==='abort'){ drop(); skippedProblem.push({key:t.key,label:'已停止',reason:_momoDelGuardAbortMsg(g)}); console.error('[syncToCloud] 酷澎商品主檔刪除防線中止：',t.key,g.n+'/'+g.m); continue; }
+      if(btn) btn.textContent='等待確認刪除…';
+      const ok=await _momoDelGuardConfirm({shop:cupShopDisplay(gShop), n:g.n, m:g.m, skus:g.skus});
+      if(btn) btn.textContent='同步中…';
+      if(!ok){ drop(); skippedProblem.push({key:t.key,label:'已取消',reason:'要從雲端刪除 '+g.n+' 個選項，你按了取消，這個通路這次沒有推'}); continue; }
+      const approved=new Set(g.skus);
+      t.run=()=>_cupProductsTaskRun(gShop, approved);
+    }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
     // ── E-0a 第三塊：dirty 登記失敗的快照 ──
     //   problems / modal / __lastSyncReport 全部吃這份快照，而清除（_dirtyFailClear，鍵在 ok 上）
@@ -3453,6 +3480,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} try{ _momoLsCompressSoon(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護。清掉 dirty 後才排延後壓縮（第 2 塊：dirty 的商品主檔不壓）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} try{ momoOriginsShadowPushed(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
+    // 酷澎商品主檔（PR-C2）：dirty／lastpushed／本機主檔只在 cupSyncProductsMerge 讀回確認後才更新（task 沒確認就 throw → 進 failed、不會出現在 ok），這裡刻意不再清一次。
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
     ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
@@ -21286,6 +21314,7 @@ function _momoCollectPending(shop){
     //   ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件。
     if(_notesSyncDisposition(pk)!=='push'){ console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：',pk); return; }
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
+    if(cupIsProductsKey(pk)) return;                     // PR-C2：酷澎商品主檔的預覽 C2-4 才接（kind／雲端值／顯示）；在那之前不列，syncToCloud 也只在 allowKeys 有它（或全推）時才試跑
     if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
     let val=null;
     if(pk.startsWith('ec_momo_products|')){ val=momoPendingProducts(pk); }   // 與同步推送同源（_mem→localStorage），保證預覽比對的==推的
@@ -28084,7 +28113,7 @@ function cupSaveReport(shop, month, rows, orderNos){ const k=cupReportKey(shop,m
 function _cupPendingKeys(shop){   // 待同步集合中屬酷澎的 key；給 shop 時只取該賣場（key 第 2 段）
   const out=[];
   try{ _pendingSyncKeys.forEach(k=>{
-    if(!(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k))) return;
+    if(!(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)||cupIsProductsKey(k))) return;
     if(shop && String(k).split('|')[1]!==shop) return;
     out.push(k);
   }); }catch(e){}
@@ -30491,7 +30520,7 @@ function cupLoadProducts(shop){
   return doc;
 }
 // 寫本機：LZ1 → setItem → 讀回比對；壓不了改寫 JSON；都不行回 false（記憶體不改）。
-function cupSaveProductsLocal(shop, doc){
+function cupSaveProductsLocal(shop, doc, opts){   // opts.fromSync＝同步確認後寫回（不標 dirty、不進待同步）
   const k=cupProductsKey(shop);
   let json; try{ json=JSON.stringify(doc); }catch(e){ return false; }
   const tryWrite=v=>{ try{ localStorage.setItem(k,v); const back=_lz1Unwrap(localStorage.getItem(k)); return (back.kind==='json'||back.kind==='lz') && back.json===json; }catch(e){ return false; } };
@@ -30499,8 +30528,115 @@ function cupSaveProductsLocal(shop, doc){
   const ok=(enc!==null && tryWrite(enc)) || tryWrite(json);
   if(!ok) return false;
   _cupProdMem[shop]=doc; delete _cupProdBad[shop];
+  if(!(opts&&opts.fromSync)){ _cupPDirtyAdd(k); _markPending(k); try{ cupRefreshSyncBtn(shop); }catch(e){} }   // PR-C2：使用者套用 ⇒ 待同步（試跑期間按同步只算不寫）
   return true;
 }
+// ══ PR-C2 第 3 塊：酷澎商品主檔同步（lastpushed／dirty／待推值／merge 推送），閘門 window.__CUP_PRODUCTS_ENFORCE（預設 false＝試跑）══
+//   key 都不以 ec_momo_ 開頭（否則 _pendingKeyOwner 會判給 MOMO）：
+//     ec_coupang_products_lastpushed|<通路>＝上次「確認推上去」的簽名 {選項ID: 整筆序列化}（純 JSON）；不存在＝bootstrap（不刪雲端）
+//     ec_coupang_products_dirty＝JSON 陣列，存過還沒確認推上去的主檔 key（跨重整）
+//   🔴 只有 cupSyncProductsMerge 在 setShop 回 {ok:true}、讀回 4 片筆數與 latestExport 都對上之後，才寫回本機（合併結果）＋lastpushed＋清 dirty。
+const _CUP_PDIRTY_LS='ec_coupang_products_dirty';
+const _CUP_PLP_LS='ec_coupang_products_lastpushed';
+function cupProductsLastPushedKey(shop){ return _CUP_PLP_LS+'|'+shop; }
+// dirty 註冊表：損毀（不是陣列／解析失敗）⇒ 一律當 dirty（寧可多撿進待同步，試跑期間不會寫）
+function _cupPDirtyRaw(){ let raw=null; try{ raw=localStorage.getItem(_CUP_PDIRTY_LS); }catch(e){ return { corrupt:true, list:[] }; } if(raw===null) return { corrupt:false, list:[] };
+  try{ const a=JSON.parse(raw); return Array.isArray(a)?{ corrupt:false, list:a }:{ corrupt:true, list:[] }; }catch(e){ return { corrupt:true, list:[] }; } }
+function _cupPDirtyHas(k){ const r=_cupPDirtyRaw(); return r.corrupt || r.list.includes(k); }
+function _cupPDirtyAdd(k){ const r=_cupPDirtyRaw(); if(r.corrupt){ try{ console.warn('[酷澎商品主檔] dirty 註冊表損毀，重建'); }catch(e){} } if(r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.concat([k]))); }catch(e){ try{ console.error('[酷澎商品主檔] dirty 註冊表寫不進去：'+k); }catch(_){} } }
+function _cupPDirtyDel(k){ const r=_cupPDirtyRaw(); if(r.corrupt||!r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.filter(x=>x!==k))); }catch(e){} }
+function _cupProductsLastPushedGet(shop){   // {選項ID:簽名} 或 null（不存在／損毀 ⇒ bootstrap）
+  try{ const raw=localStorage.getItem(cupProductsLastPushedKey(shop)); if(raw===null) return null; const m=JSON.parse(raw); return (m&&typeof m==='object'&&!Array.isArray(m))?m:null; }catch(e){ return null; } }
+function _cupProductsLastPushedSet(shop, items){
+  try{ localStorage.setItem(cupProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); return true; }catch(e){ try{ console.error('[酷澎商品主檔] lastpushed 寫不進去：',shop,e); }catch(_){} return false; } }
+// 每次重讀 localStorage（不經、也不改模組快取 _cupProdMem）：{ state:'ok'|'absent'|'bad', doc }
+function _cupProductsReadLs(shop){
+  let raw=null; try{ raw=localStorage.getItem(cupProductsKey(shop)); }catch(e){ return { state:'bad', doc:null }; }
+  if(raw===null) return { state:'absent', doc:null };
+  try{ const u=_lz1Unwrap(raw); if(u.kind==='json'||u.kind==='lz'){ const d=JSON.parse(u.json); if(d&&Array.isArray(d.items)) return { state:'ok', doc:d }; } }catch(e){}
+  return { state:'bad', doc:null };
+}
+// 同步要推的本機值（預覽與推送共用）：主檔 key → doc 或 null（讀不到／沒有）
+function cupPendingProducts(key){ if(!cupIsProductsKey(key)) return null; const r=_cupProductsReadLs(key.split('|')[1]); return r.state==='ok'?r.doc:null; }
+// sweep 判準（E）：dirty，或本機有主檔（含讀不到的，讓分派列成問題）而且沒有 lastpushed
+function _cupProductsNeedsPush(k){
+  if(!cupIsProductsKey(k)) return false;
+  if(_cupPDirtyHas(k)) return true;
+  let has=false, lp=null; try{ has=localStorage.getItem(k)!==null; lp=localStorage.getItem(cupProductsLastPushedKey(k.split('|')[1])); }catch(e){ return false; }
+  return has && lp===null;
+}
+async function _cupDelGuardPreflight(shop){
+  const rd=_cupProductsReadLs(shop); if(rd.state!=='ok') return null;
+  const cloud=await window.__cloudCoupangProducts.getDoc(shop,'server'); if(!cloud||!Array.isArray(cloud.items)) return null;
+  return cupProductsCloudMerge(cloud.items, cloud.latestExport, rd.doc, _cupProductsLastPushedGet(shop)).guardLevel;
+}
+// syncToCloud 的 task：沒確認就 throw（進 failed、key 留在待同步）
+function _cupProductsTaskRun(shop, approved){
+  return cupSyncProductsMerge(shop, approved instanceof Set?{approvedDeletes:approved}:undefined).then(r=>{ if(!r||r.ok!==true) throw new Error((r&&r.why)||'酷澎商品主檔寫入未確認'); return r; });
+}
+window.__CUP_PRODUCTS_ENFORCE=false;   // 🟡 試跑：酷澎商品主檔同步只算合併計畫、只印 log、不寫雲端。切 true 的條件見 CLAUDE.md（C3）
+// 推送（opts.shadow＝只算不寫；opts.approvedDeletes＝syncToCloud 預檢已確認的刪除清單）。
+//   回 { ok:true, shadow, shop, plan } 或 { ok:false, shadow, shop, why, plan?, unconfirmed?, written? }；不丟錯（讀雲端失敗也回 ok:false）。
+async function cupSyncProductsMerge(shop, opts){
+  const shadow=!!(opts&&opts.shadow===true);
+  const k=cupProductsKey(shop);
+  const head='[cup products merge '+(shadow?'SHADOW':'ENFORCE')+'] '+shop;
+  const stop=(why,extra)=>{ try{ console.error('%c'+head+'：'+why,'color:#dc2626;font-weight:700'); }catch(e){} return Object.assign({ ok:false, shadow, shop, why }, extra||{}); };
+  if(!window.__cloudCoupangProducts) return stop('雲端層未就緒，這次不做');
+  const rd=_cupProductsReadLs(shop);
+  if(rd.state==='bad') return stop('本機商品主檔讀不到（解不開），這次不做；請通知 Keani');
+  if(rd.state==='absent') return stop('這台電腦沒有商品主檔，這次不做');
+  let cloud;
+  try{ cloud=await window.__cloudCoupangProducts.getDoc(shop,'server'); }
+  catch(e){ return stop('讀不到雲端（'+((e&&e.message)||e)+'），這次不做（讀不到不等於雲端是空的）'); }
+  if(!cloud||!Array.isArray(cloud.items)) return stop('雲端回傳的格式不對，這次不做');
+  const localItems=rd.doc.items;
+  if(localItems.length===0 && cloud.items.length>0) return stop('本機主檔是空的、雲端有 '+cloud.items.length+' 筆，這次不做（避免清空雲端）');
+  const lp=_cupProductsLastPushedGet(shop);
+  const plan=cupProductsCloudMerge(cloud.items, cloud.latestExport, rd.doc, lp);
+  const sp=cupProductsSplitShards(plan.merged);
+  const kb=sp.shards.map(a=>Math.round(cupProductsShardBytes(a,{shop, latestExport:plan.latestExport})/1024*10)/10);
+  const g=plan.guardLevel;
+  const sum={ shop, at:Date.now(), shadow, mode:plan.mode, lastpushed:!!lp, localCount:localItems.length, cloudCount:plan.cloudCount, mergedCount:plan.mergedCount,
+    push:plan.pushSkus.length, delete:plan.deleteSkus.length, keptCloud:plan.keptCloud.length, guardLevel:g.level, guardN:g.n, guardM:g.m,
+    latestExport:plan.latestExport, localLatestExport:rd.doc.latestExport||'', cloudLatestExport:cloud.latestExport||'',
+    shardCounts:sp.shards.map(a=>a.length), shardKB:kb, badPid:sp.badPid,
+    deleteSample:plan.deleteSkus.slice(0,20), keptCloudSample:plan.keptCloud.slice(0,20) };
+  try{ window.__cupLastMergePlan=sum; }catch(e){}
+  try{ console.log('%c'+head+'（mode='+sum.mode+'）'
+    +'\n   本機 '+sum.localCount+'｜雲端 '+sum.cloudCount+'｜合併後 '+sum.mergedCount
+    +'\n   推 '+sum.push+'、刪 '+sum.delete+'、雲端較新保留 '+sum.keptCloud
+    +'\n   刪除防線 '+sum.guardLevel+'（'+sum.guardN+'/'+sum.guardM+'）｜latestExport '+(sum.latestExport||'—')+'（本機 '+(sum.localLatestExport||'—')+'、雲端 '+(sum.cloudLatestExport||'—')+'）'
+    +'\n   四片筆數 '+sum.shardCounts.join(' / ')+'｜KB '+kb.join(' / ')+'｜badPid '+sum.badPid,
+    'color:'+(shadow?'#2563eb':'#16a34a')+';font-weight:700'); }catch(e){}
+  if(kb.some(x=>x>300)){ try{ console.warn('%c'+head+'：有分片超過 300 KB（'+kb.join(' / ')+' KB）','color:#b45309;font-weight:700'); }catch(e){} }
+  if(kb.some(x=>x>CUP_PRODUCTS_SHARD_WARN_KB)) return stop('有分片超過 '+CUP_PRODUCTS_SHARD_WARN_KB+' KB（'+kb.join(' / ')+' KB），這次不做',{plan:sum});
+  if(g.level==='abort') return stop(_momoDelGuardAbortMsg(g),{plan:sum});
+  if(shadow) return { ok:true, shadow:true, shop, plan:sum };
+  if(g.level==='confirm'){
+    const ap=opts&&opts.approvedDeletes;
+    if(ap instanceof Set){ if(!g.skus.every(x=>ap.has(x))) return stop('確認後雲端內容變了（要刪的跟你確認的不一樣），這次沒推，請重按同步',{plan:sum}); }
+    else{ const yes=await _momoDelGuardConfirm({shop:cupShopDisplay(shop), n:g.n, m:g.m, skus:g.skus}); if(!yes) return stop('要從雲端刪除 '+g.n+' 個選項，你按了取消，這次沒推',{plan:sum}); }
+  }
+  const payload=sp.shards.map(items=>({ items:momoFsSanitizeDeep(items), latestExport:plan.latestExport }));
+  let ret;
+  try{ ret=await window.__cloudCoupangProducts.setShop(shop, payload); }
+  catch(e){ return stop('寫入失敗（'+((e&&e.message)||e)+'）。本機、lastpushed、dirty 都沒動',{plan:sum}); }
+  let back=null; try{ back=await window.__cloudCoupangProducts.getDoc(shop,'server'); }catch(e){ back=null; }
+  const cf=cupProductsWriteConfirmed(ret, back, sum.shardCounts, sum.mergedCount, plan.latestExport);
+  if(!cf.ok) return stop('寫入未確認：'+cf.why+'。本機、lastpushed、dirty 都沒動',{plan:sum, unconfirmed:true});
+  const newDoc=Object.assign({}, rd.doc, { schema:1, latestExport:plan.latestExport, items:plan.merged });
+  if(!cupSaveProductsLocal(shop, newDoc, {fromSync:true})) return stop('雲端已寫入並確認，但本機主檔存不進去（空間不足？）；lastpushed、dirty 都沒動，請先釋出空間再同步一次',{plan:sum, written:true});
+  if(!_cupProductsLastPushedSet(shop, plan.merged)) return stop('雲端與本機都已更新，但 lastpushed 寫不進去；dirty 沒清，下次同步會再比一次（不會刪雲端）',{plan:sum, written:true});
+  _cupPDirtyDel(k);
+  try{ _pendingSyncKeys.delete(k); }catch(e){}
+  try{ cupRefreshSyncBtn(shop); }catch(e){}
+  try{ console.log('%c'+head+'：已寫入並確認（4 片合計 '+sum.mergedCount+' 筆）','color:#16a34a;font-weight:700'); }catch(e){}
+  return { ok:true, shadow:false, shop, plan:sum };
+}
+// Console：單通路試跑／真寫（不看閘門）。真寫只在要驗收時用；本機防護碼下會被攔、回「寫入未確認」。
+window.__cupProductsMergeShadow=function(shop){ return cupSyncProductsMerge(shop,{shadow:true}); };
+window.__cupProductsMergeEnforce=function(shop){ return cupSyncProductsMerge(shop); };
 // 通路防呆的既有清單：報表的 dispId／code ∪ 本機主檔的 Product ID／code
 function _cupProductsIdSets(shop){ const s=_cupShopIdSets(shop); const d=cupLoadProducts(shop);
   ((d&&d.items)||[]).forEach(p=>{ if(p.pid) s.disp.add(String(p.pid)); if(p.code) s.code.add(String(p.code)); }); return s; }
@@ -30600,7 +30736,7 @@ function cupApplyProductsMaster(shop){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔沒有存',message:'這台電腦的瀏覽器空間不夠，商品主檔沒有存進去。可以先用左下角「釋出空間」再試一次。',kind:'error'});
     return; }
   _cupPmStage[shop]=null;
-  if(typeof showToast==='function') showToast('已存到這台電腦的商品主檔（'+doc.items.length+' 個選項）。目前不會同步雲端。','success');
+  if(typeof showToast==='function') showToast('已存本機（'+doc.items.length+' 個選項），按「☁ 同步雲端」上傳（目前為試跑，不會真的寫入）','success');
   cupRenderShop(shop);
 }
 function cupCancelProductsMaster(shop){ _cupPmStage[shop]=null; cupRenderShop(shop); }
@@ -32134,6 +32270,23 @@ function cupProductsCloudMerge(cloudItems, cloudLatest, localDoc, lastpushed){
   return { mode:plan.mode, merged:plan.merged, pushSkus:plan.pushSkus, deleteSkus:plan.deleteSkus, keptCloud, latestExport, guardLevel,
     changed:plan.changed, added:plan.added, preserveCount:plan.preserveCount, conflictSkus:plan.conflictSkus,
     cloudCount:plan.cloudCount, mergedCount:plan.mergedCount, wholeOverwritePush:plan.wholeOverwritePush, cloudOnly:plan.cloudOnly };
+}
+// 寫入確認（PR-C2 第 3 塊）：enforce 只有全部成立才動本機／lastpushed／dirty。
+//   ret＝setShop 回傳值，必須「嚴格」是 { ok:true }（被唯讀／本機防護擋下會是 undefined）；back＝寫完再 getDoc(shop,'server') 的結果；
+//   shardCounts＝這次寫的 4 片筆數；mergedCount＝合併後總筆數；latestExport＝這次寫的。回 { ok, why }。
+function cupProductsWriteConfirmed(ret, back, shardCounts, mergedCount, latestExport){
+  if(!(ret && typeof ret==='object' && !Array.isArray(ret) && ret.ok===true && Object.keys(ret).length===1)) return { ok:false, why:'寫入沒有回傳 {ok:true}（被防護擋下，或寫入失敗）' };
+  if(!back || typeof back!=='object') return { ok:false, why:'寫完讀不到雲端，無法確認' };
+  const ps=back.perShard, cnt=Array.isArray(shardCounts)?shardCounts:[];
+  if(!Array.isArray(ps) || ps.length!==cnt.length || cnt.length!==CUP_PRODUCTS_SHARDS) return { ok:false, why:'讀回的分片數不對' };
+  for(let i=0;i<cnt.length;i++){
+    if(!ps[i] || ps[i].exists!==true) return { ok:false, why:'讀回第 '+i+' 片不存在' };
+    if(ps[i].n!==cnt[i]) return { ok:false, why:'讀回第 '+i+' 片 '+ps[i].n+' 筆，寫的是 '+cnt[i]+' 筆' };
+  }
+  const total=ps.reduce((a,x)=>a+x.n,0);
+  if(total!==mergedCount) return { ok:false, why:'讀回合計 '+total+' 筆，合併結果是 '+mergedCount+' 筆' };
+  if(String(back.latestExport||'')!==String(latestExport||'')) return { ok:false, why:'讀回的 latestExport（'+back.latestExport+'）跟寫的（'+latestExport+'）不同' };
+  return { ok:true, why:'' };
 }
 /* ═══ CUP-PS-PURE-END ═══ */
 
