@@ -442,8 +442,6 @@ const _pendingSyncKeys = new Set();
 // 在這一次同步的進度顯示（「同步中 i/N」）中途引爆、把進度蓋掉。
 let _syncBtnRepaintTimer = null;
 function _markPending(key){
-  // PR-C1：酷澎商品主檔（ec_coupang_products|）在 C1 是純本機，絕不進待同步（C2 接雲端時才拿掉這行）
-  if(typeof key==='string' && key.indexOf('ec_coupang_products|')===0){ try{ console.error('[待同步] 拒收純本機 key：'+key); }catch(e){} return; }
   _pendingSyncKeys.add(key);
   _showSyncBtn();
 }
@@ -2624,7 +2622,7 @@ function _pendingKeyOwner(k){
   if(k.startsWith('__shop__|') || k==='_summary_v1') return 'marker';        // 不是資料、不計
   if(k.startsWith('ec_pchome_')) return 'pchome';
   if(k.startsWith('ec_momo_')) return 'momo';
-  if(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)) return 'coupang';
+  if(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)||cupIsProductsKey(k)) return 'coupang';
   if(k.startsWith('ec|') || k.startsWith('ec_notes|') || k.startsWith('ec_edits|') || k.startsWith('ec_split|') || k==='_kpi_v1') return 'shopee';
   return 'unknown';
 }
@@ -2767,7 +2765,10 @@ function _sweepAllLocalReportsIntoPending(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // PR-C1：酷澎商品主檔是純本機，不撿進待推（C2 才接雲端）
+      // PR-C2：酷澎商品主檔 ec_coupang_products|<通路>（→ coupang_products 4 片）。只在「dirty（存過、還沒確認推上去）」或「本機有主檔、沒有 lastpushed」時才撿（_cupProductsNeedsPush）。
+      //   不補水 Store._mem：主檔只放 localStorage＋profit.js 模組快取（C1 設計），推送與預覽一律走 cupPendingProducts（每次重讀 localStorage）→ 看到的＝推的。
+      if(k&&cupIsProductsKey(k)){ if(_cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); continue; }
+      if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // 段數不對的怪 key：不撿
       // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
       //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
       if(k&&k.startsWith('ec_momo_products|')){
@@ -2961,12 +2962,12 @@ async function _momoFullPushDeleteGuard(taskKeys){
   const skip=new Map();
   const keys=[...taskKeys];
   // app/profit 欄位一次讀齊（optlog/freight/rent/f1102/notes/edits/其他設定都是它的欄位）
-  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && !cupIsNoteKey(k) && k!=='ec_momo_cost_by_origin';
+  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && !cupIsNoteKey(k) && !cupIsProductsKey(k) && k!=='ec_momo_cost_by_origin';
   let appProfit=null;
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
     if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
-       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k) || k.startsWith('ec_momo_f1102|')) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議；f1102 乙配寄倉＝單一寫者、每次全快照覆蓋（今天匯出取代 08/18 舊快照），willDelete 又遞迴葉節點(每品號10欄)把「差5品號」灌成「刪50」假警告 → 比照 products/coupang 排除
+       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k) || cupIsProductsKey(k) || k.startsWith('ec_momo_f1102|')) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議；f1102 乙配寄倉＝單一寫者、每次全快照覆蓋（今天匯出取代 08/18 舊快照），willDelete 又遞迴葉節點(每品號10欄)把「差5品號」灌成「刪50」假警告 → 比照 products/coupang 排除
     //   🔴 2026-09-03 起 ec_notes【整類】排除（判準統一走 _notesUsesMerge），不再只排除 _growth。
     //     為什麼廣告調整也必須排除（不是順手）：本守衛算 willDelete 用的是 momoCloudDeleteCount，
     //     它遞迴到 adjustments 陣列、用 _momoStableStr（整個物件序列化）當元素身分 →
@@ -3228,6 +3229,21 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'E001 未結算銷量讀不到，或雲端層未就緒'}); }
         return;
       }
+      if(cupIsProductsKey(pk)){   // PR-C2：酷澎商品主檔 → coupang_products（4 片，writeBatch）。逐選項 merge：只推改過的、雲端較新的逐筆保留、bootstrap 不刪雲端
+        const cShop=pk.split('|')[1];
+        if(allowKeys instanceof Set && !allowKeys.has(pk)) return;   // 這次同步沒選它（例如 MOMO／酷澎預覽只勾了別的）→ 不跑、不列問題
+        if(!window.__cloudCoupangProducts){ skippedProblem.push({key:pk,label:'未就緒',reason:'酷澎商品主檔雲端層未就緒'}); return; }
+        const rd=_cupProductsReadLs(cShop);
+        if(rd.state==='bad'){ skippedProblem.push({key:pk,label:'本機讀不到',reason:'本機酷澎商品主檔解不開，這次不推；請通知 Keani'}); return; }
+        if(rd.state==='absent'){ skippedProblem.push({key:pk,label:'本機讀不到',reason:'這台電腦沒有'+cupShopDisplay(cShop)+'的酷澎商品主檔，這次不推'}); return; }
+        if(window.__CUP_PRODUCTS_ENFORCE===true){ tasks.push({key:pk,run:()=>_cupProductsTaskRun(cShop)}); }
+        else{   // 閘門沒開：只算、只 log、絕不寫
+          cupSyncProductsMerge(cShop,{shadow:true}).catch(()=>{});
+          if(allowKeys instanceof Set) skippedProblem.push({key:pk,label:'試跑中',reason:'酷澎商品主檔：試跑中，未寫入（Console 有 [cup products merge SHADOW] 的數字）'});   // 酷澎同步鈕（有勾選清單、勾了主檔）才列
+          else console.log('[syncToCloud] 酷澎商品主檔試跑中（全推不列問題，只在酷澎同步鈕列出）：'+pk);   // 蝦皮全域鈕全推：不跳「同步未完成」
+        }
+        return;
+      }
       if(cupIsReportKey(pk)){   // 酷澎報表 → coupang_reports collection（每賣場每月一 doc）
         const parts=pk.split('|');   // ['ec_coupang', shop, 'YYYY-MM']
         const cShop=parts[1], cMonth=parts[2];
@@ -3356,6 +3372,21 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       const approved=new Set(g.skus);
       t.run=()=>momoSyncProductsMerge(gShop,{approvedDeletes:approved});
     }
+    // 🛡 PR-C2：酷澎商品主檔同一套刪除防線預檢（只有閘門打開、真的有 task 時才會走到）。讀不到雲端 → 不擋，交給 task 自己中止（task 讀不到雲端一定不寫）。
+    for(const t of tasks.filter(x=>cupIsProductsKey(x.key))){
+      const gShop=t.key.split('|')[1];
+      let g=null;
+      try{ g=await _cupDelGuardPreflight(gShop); }catch(e){ g=null; console.warn('[syncToCloud] 酷澎商品主檔刪除防線預檢失敗（交給推送本身處理）：',t.key,e); }
+      if(!g||g.level==='ok') continue;
+      const drop=()=>{ const i=tasks.indexOf(t); if(i>=0) tasks.splice(i,1); };
+      if(g.level==='abort'){ drop(); skippedProblem.push({key:t.key,label:'已停止',reason:_momoDelGuardAbortMsg(g)}); console.error('[syncToCloud] 酷澎商品主檔刪除防線中止：',t.key,g.n+'/'+g.m); continue; }
+      if(btn) btn.textContent='等待確認刪除…';
+      const ok=await _momoDelGuardConfirm({shop:cupShopDisplay(gShop), n:g.n, m:g.m, skus:g.skus});
+      if(btn) btn.textContent='同步中…';
+      if(!ok){ drop(); skippedProblem.push({key:t.key,label:'已取消',reason:'要從雲端刪除 '+g.n+' 個選項，你按了取消，這個通路這次沒有推'}); continue; }
+      const approved=new Set(g.skus);
+      t.run=()=>_cupProductsTaskRun(gShop, approved);
+    }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
     // ── E-0a 第三塊：dirty 登記失敗的快照 ──
     //   problems / modal / __lastSyncReport 全部吃這份快照，而清除（_dirtyFailClear，鍵在 ok 上）
@@ -3453,6 +3484,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} try{ _momoLsCompressSoon(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護。清掉 dirty 後才排延後壓縮（第 2 塊：dirty 的商品主檔不壓）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} try{ momoOriginsShadowPushed(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
+    // 酷澎商品主檔（PR-C2）：dirty／lastpushed／本機主檔只在 cupSyncProductsMerge 讀回確認後才更新（task 沒確認就 throw → 進 failed、不會出現在 ok），這裡刻意不再清一次。
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
     ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
@@ -21286,6 +21318,7 @@ function _momoCollectPending(shop){
     //   ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件。
     if(_notesSyncDisposition(pk)!=='push'){ console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：',pk); return; }
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
+    if(cupIsProductsKey(pk)){ const _v=cupPendingProducts(pk); add(pk,'酷澎商品主檔',_v,{count:(_v&&Array.isArray(_v.items))?_v.items.length:0}); return; }   // PR-C2：與推送（cupSyncProductsMerge）同源，每次重讀 localStorage；讀不到＝null（預覽標紅、推送列問題）
     if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
     let val=null;
     if(pk.startsWith('ec_momo_products|')){ val=momoPendingProducts(pk); }   // 與同步推送同源（_mem→localStorage），保證預覽比對的==推的
@@ -21322,8 +21355,9 @@ async function momoOpenSyncPreview(shop, opts){
   //   不傳 opts（MOMO/蝦皮全域鈕）＝原況：列全部 pending，零影響。
   if(opts && opts.scope==='coupang'){
     const only=opts.shop;
-    items=items.filter(it=>(it.kind==='酷澎報表'||it.kind==='酷澎退貨'||it.kind==='酷澎備註') && (!only || String(it.key).split('|')[1]===only));
+    items=items.filter(it=>(it.kind==='酷澎報表'||it.kind==='酷澎退貨'||it.kind==='酷澎備註'||it.kind==='酷澎商品主檔') && (!only || String(it.key).split('|')[1]===only));
   }
+  else items=items.filter(it=>it.kind!=='酷澎商品主檔');   // PR-C2：酷澎商品主檔只在酷澎同步鈕的預覽出現（MOMO／蝦皮預覽沒勾到 ⇒ syncToCloud 也不會跑它）
   let cloud={};
   try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
   catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
@@ -21433,6 +21467,15 @@ async function momoOpenSyncPreview(shop, opts){
       catch(e){ cupNoteCloud[it.key]={__error:true}; }
     }));
   }
+  // PR-C2：酷澎商品主檔讀 coupang_products（4 片），一律讀伺服器（與 cupSyncProductsMerge 同一支 _cupCloudGetDoc）
+  const cupProdCloud={};   // 'ec_coupang_products|<shop>' → {exists,items,latestExport,perShard} 或 {__error:true}
+  const cupProdItems=items.filter(it=>it.kind==='酷澎商品主檔');
+  if(cupProdItems.length && window.__cloudCoupangProducts){
+    await Promise.all(cupProdItems.map(async it=>{
+      try{ cupProdCloud[it.key]=await _cupCloudGetDoc(it.key.split('|')[1],'server'); }
+      catch(e){ cupProdCloud[it.key]={__error:true}; }
+    }));
+  }
   // 🔴 成本表讀 momo_cost_by_origin collection（帳號級單一 doc）——與寫入 __cloudCostByOrigin.set 同源；比對 doc.costMap（非整 doc）。
   let costCloud=null;   // {costMap,meta}|undefined 或 {__error:true}
   const costItem=items.find(it=>it.kind==='MOMO成本表');
@@ -21496,6 +21539,17 @@ async function momoOpenSyncPreview(shop, opts){
       it.status=_eq(it.localVal,ec)?'same':'diff';
       return;
     }
+    if(it.kind==='酷澎商品主檔'){
+      const pc=cupProdCloud[it.key];
+      if(!it.localVal){ it._cupLocalBad=true; it.status='diff'; it.cloudCount=(pc&&!pc.__error&&Array.isArray(pc.items))?pc.items.length:null; return; }   // 本機讀不到：推送會列問題、不寫
+      if(!pc || pc.__error || !Array.isArray(pc.items)){ it.status='readfail'; it.cloudCount=null; return; }
+      const sh=it.key.split('|')[1];
+      const plan=cupProductsCloudMerge(pc.items, pc.latestExport, it.localVal, _cupProductsLastPushedGet(sh));
+      it._cloudVal=pc.items; it.cloudCount=pc.items.length;
+      it._cupPlan={ mode:plan.mode, cloudEmpty:!pc.exists, push:plan.pushSkus.length, del:plan.deleteSkus.length, kept:plan.keptCloud.length, guard:plan.guardLevel.level };
+      it.status=(plan.pushSkus.length>0||plan.deleteSkus.length>0)?'diff':'same';
+      return;
+    }
     if(it.kind==='酷澎報表'){
       const cc=cupCloud[it.key];
       if(cc&&cc.__error){ it.status='readfail'; it.cloudCount=null; return; }
@@ -21539,9 +21593,9 @@ async function momoOpenSyncPreview(shop, opts){
   });
   // P3(1) 通用防呆：顯示「雲端 0 / 新增」但本機筆數 > 500 → 很可能是雲端讀取失敗（不是真的新增），標可疑、預設不勾。
   //   防的是未來又有 key 搬走、預覽讀取端沒跟上（第 5 次）→ 整包覆蓋 + 雲端誤判 0 = 靜默資料損失。cost_by_origin 已是 localonly、不套此規則。
-  items.forEach(it=>{ if(it.status==='new' && (it.localCount||0)>500) it.suspicious=true; });
+  items.forEach(it=>{ if(it.status==='new' && (it.localCount||0)>500 && it.kind!=='酷澎商品主檔') it.suspicious=true; });
   // 差異明細掛到每筆 diff item（modal 顯示 + 報告都用）
-  items.forEach(it=>{ if(it.status==='diff'){ try{ it.diff=momoDiffDetail(it.localVal, it._cloudVal); }catch(e){ it.diffErr=String(e&&e.message||e); } } });
+  items.forEach(it=>{ if(it.status==='diff' && it.kind!=='酷澎商品主檔'){ try{ it.diff=momoDiffDetail(it.localVal, it._cloudVal); }catch(e){ it.diffErr=String(e&&e.message||e); } } });
   // 臨時止血：算「這次推會從雲端刪掉幾筆」（雲端有本機無）。>0 → 預設不勾＋紅字警告。
   //   products/原廠成本（商品主檔/MO+逐列成本）不套：它們有自己的 updatedAt 版本比對（conflict），行為不變。
   items.forEach(it=>{ it.willDelete=0; it.willMerge=0;
@@ -21568,7 +21622,7 @@ async function momoOpenSyncPreview(shop, opts){
             it.willMerge=Object.keys(_c).filter(c=>!_s.has(String(c)) && !Object.prototype.hasOwnProperty.call(_l,c)).length; }
         }catch(e){}
       }
-      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨' && it.kind!=='MOMO寄倉庫存'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎報表/退貨整份覆蓋＋雲端 updatedAt 本機無→假陽性排除；MOMO寄倉庫存(f1102)＝單一寫者全快照覆蓋、momoCloudDeleteCount 遞迴葉節點(每品號10欄)灌水成假警告 → 排除（比照全推 guard 1543）
+      else if(it.kind!=='MOMO商品主檔' && it.kind!=='酷澎商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨' && it.kind!=='MOMO寄倉庫存'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎報表/退貨整份覆蓋＋雲端 updatedAt 本機無→假陽性排除；MOMO寄倉庫存(f1102)＝單一寫者全快照覆蓋、momoCloudDeleteCount 遞迴葉節點(每品號10欄)灌水成假警告 → 排除（比照全推 guard 1543）
 
     }
   });
@@ -21583,7 +21637,7 @@ function momoRenderSyncPreviewModal(shop, items, opts){
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=e=>{ if(e.target===ov) momoCloseSyncPreview(); };
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const typeColor={'MOMO商品主檔':'#5b5fcf','蝦皮報表':'#e4007f','酷澎報表':'#0ea5e9','酷澎退貨':'#0284c7','其他設定':'#9ca3af'};
+  const typeColor={'MOMO商品主檔':'#5b5fcf','蝦皮報表':'#e4007f','酷澎報表':'#0ea5e9','酷澎退貨':'#0284c7','酷澎商品主檔':'var(--info)','其他設定':'#9ca3af'};
   const statusCell=it=>{
     // 🔴🔴【已知，未修】走 merge 的 key 在預覽會顯示成「新增」，cloudCount 與實推結果不一致 🔴🔴
     //   成因：status 的判定在 momoOpenSyncPreview 的泛用分支（本檔搜 `const cv=cloud[it.key]`），
@@ -21601,6 +21655,7 @@ function momoRenderSyncPreviewModal(shop, items, opts){
     //   ⇒ 2026-09-03 這一輪【刻意不修】：要修得在預覽端引入「這把 key 走 merge 時 cloudCount
     //     該怎麼算」的新語意（至少要讓 status 分出 new / merge-new 兩種），範圍超出本次。
     //     修的時候記得：改這裡的同時也要改 momoOpenSyncPreview 的 status 判定，兩處是一組。
+    if(it.kind==='酷澎商品主檔') return _cupProductsPreviewCell(it);   // PR-C2：有自己的合併計畫（推／刪／雲端較新保留），不套下面整包覆蓋的文案
     if(it.status==='new'){
       if(it.suspicious) return `<span style="color:#dc2626;font-weight:700" title="本機 ${it.localCount} 筆、但雲端讀到 0——筆數這麼多卻雲端全空，很可能是雲端讀取失敗、不是真的新增。整包推上去會清空雲端 → 確認前請勿推送（已預設不勾）。">⚠ 雲端讀取可疑，預設不推</span>`;
       return `<span style="color:#10b981;font-weight:600">新增</span>`;
@@ -21616,7 +21671,7 @@ function momoRenderSyncPreviewModal(shop, items, opts){
     if(it.willDelete>0) return `<span style="color:#dc2626;font-weight:700" title="整包覆蓋：雲端有、本機沒有的 ${it.willDelete} 筆會被刪掉（可能是同事今天做的、你本機還沒載到）。展開看是哪幾筆。${cnt}">⚠ 這會刪掉雲端 ${it.willDelete} 筆（可能是同事的更新），預設不推</span>`;   // 臨時止血：整包覆蓋會刪雲端資料
     return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
   };
-  const anyDiff=items.some(it=>it.status==='diff');
+  const anyDiff=items.some(it=>it.status==='diff' && it.kind!=='酷澎商品主檔');   // 酷澎商品主檔沒有「展開看差異」，狀態格自己寫推／刪／保留筆數
   const anyConflict=items.some(it=>it.conflict);   // 【2】：有「雲端較新」衝突項
   const anyWillDelete=items.some(it=>it.willDelete>0);   // 臨時止血：有「整包覆蓋會刪雲端」項
   // 差異明細（diff item）：預設收合，摘要一行「N 筆不同 · 展開」；明細講變化(陣列講筆數)不倒 JSON；全值在 title tooltip
@@ -21694,7 +21749,8 @@ function momoConfirmSync(shop){
   const keys=checkedEls.map(c=>c.getAttribute('data-key'));
   momoCloseSyncPreview();
   if(!keys.length){ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); return; }
-  Promise.resolve(syncToCloud(shop, new Set(keys))).then(()=>{ momoRefreshSyncBtn(shop); momoUpdateDailyProgress({pushToCloud:true}); }).catch(()=>momoRefreshSyncBtn(shop));   // 只推選中的 key；同步成功後把工作日誌 momo-summary 一起推給老闆
+  const _onlyCupProducts=keys.every(k=>cupIsProductsKey(k));   // PR-C2：只勾了酷澎商品主檔（試跑不寫、也不影響工作日誌）⇒ 不推工作日誌
+  Promise.resolve(syncToCloud(shop, new Set(keys))).then(()=>{ momoRefreshSyncBtn(shop); if(!_onlyCupProducts) momoUpdateDailyProgress({pushToCloud:true}); }).catch(()=>momoRefreshSyncBtn(shop));   // 只推選中的 key；同步成功後把工作日誌 momo-summary 一起推給老闆
 }
 
 // ── 畫面一：商品獲利總表（甲配/乙配共用）──
@@ -28084,7 +28140,7 @@ function cupSaveReport(shop, month, rows, orderNos){ const k=cupReportKey(shop,m
 function _cupPendingKeys(shop){   // 待同步集合中屬酷澎的 key；給 shop 時只取該賣場（key 第 2 段）
   const out=[];
   try{ _pendingSyncKeys.forEach(k=>{
-    if(!(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k))) return;
+    if(!(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k)||cupIsProductsKey(k))) return;
     if(shop && String(k).split('|')[1]!==shop) return;
     out.push(k);
   }); }catch(e){}
@@ -30402,7 +30458,7 @@ function setReconTab(id,btn){
 }
 
 let _cupShop='';
-const _cupFiles={order:null, pi:null, msf:null};   // PR-3：訂單(必要)/price_inventory(先收檔不解析)/MSF(退貨·選填)
+const _cupFiles={order:null, pi:null, msf:null};   // PR-3：訂單(必要)/price_inventory(選填·只填這份報表的庫存欄；商品主檔在「商品同步」分頁)/MSF(退貨·選填)
 const _cupReportDoc={};   // shop → 最近一次產出的報表 doc（coupangBuildReportDoc）
 // 顯示名（沿用 MOMO_SHOP_DISPLAY 那一套：內部 key 不變、顯示層單一對照）。麻吉→好麻吉；露營館/總表不變。
 const CUP_SHOP_DISPLAY={ '麻吉':'好麻吉' };
@@ -30491,7 +30547,7 @@ function cupLoadProducts(shop){
   return doc;
 }
 // 寫本機：LZ1 → setItem → 讀回比對；壓不了改寫 JSON；都不行回 false（記憶體不改）。
-function cupSaveProductsLocal(shop, doc){
+function cupSaveProductsLocal(shop, doc, opts){   // opts.fromSync＝同步確認後寫回（不標 dirty、不進待同步）
   const k=cupProductsKey(shop);
   let json; try{ json=JSON.stringify(doc); }catch(e){ return false; }
   const tryWrite=v=>{ try{ localStorage.setItem(k,v); const back=_lz1Unwrap(localStorage.getItem(k)); return (back.kind==='json'||back.kind==='lz') && back.json===json; }catch(e){ return false; } };
@@ -30499,7 +30555,181 @@ function cupSaveProductsLocal(shop, doc){
   const ok=(enc!==null && tryWrite(enc)) || tryWrite(json);
   if(!ok) return false;
   _cupProdMem[shop]=doc; delete _cupProdBad[shop];
+  if(!(opts&&opts.fromSync)){ _cupPDirtyAdd(k); _markPending(k); try{ cupRefreshSyncBtn(shop); }catch(e){} }   // PR-C2：使用者套用 ⇒ 待同步（試跑期間按同步只算不寫）
   return true;
+}
+// ══ PR-C2 第 3 塊：酷澎商品主檔同步（lastpushed／dirty／待推值／merge 推送），閘門 window.__CUP_PRODUCTS_ENFORCE（預設 false＝試跑）══
+//   key 都不以 ec_momo_ 開頭（否則 _pendingKeyOwner 會判給 MOMO）：
+//     ec_coupang_products_lastpushed|<通路>＝上次「確認推上去」的簽名 {選項ID: 整筆序列化}（純 JSON）；不存在＝bootstrap（不刪雲端）
+//     ec_coupang_products_dirty＝JSON 陣列，存過還沒確認推上去的主檔 key（跨重整）
+//   🔴 只有 cupSyncProductsMerge 在 setShop 回 {ok:true}、讀回 4 片筆數與 latestExport 都對上之後，才寫回本機（合併結果）＋lastpushed＋清 dirty。
+const _CUP_PDIRTY_LS='ec_coupang_products_dirty';
+const _CUP_PLP_LS='ec_coupang_products_lastpushed';
+function cupProductsLastPushedKey(shop){ return _CUP_PLP_LS+'|'+shop; }
+// dirty 註冊表：損毀（不是陣列／解析失敗）⇒ 一律當 dirty（寧可多撿進待同步，試跑期間不會寫）
+function _cupPDirtyRaw(){ let raw=null; try{ raw=localStorage.getItem(_CUP_PDIRTY_LS); }catch(e){ return { corrupt:true, list:[] }; } if(raw===null) return { corrupt:false, list:[] };
+  try{ const a=JSON.parse(raw); return Array.isArray(a)?{ corrupt:false, list:a }:{ corrupt:true, list:[] }; }catch(e){ return { corrupt:true, list:[] }; } }
+function _cupPDirtyHas(k){ const r=_cupPDirtyRaw(); return r.corrupt || r.list.includes(k); }
+function _cupPDirtyAdd(k){ const r=_cupPDirtyRaw(); if(r.corrupt){ try{ console.warn('[酷澎商品主檔] dirty 註冊表損毀，重建'); }catch(e){} } if(r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.concat([k]))); }catch(e){ try{ console.error('[酷澎商品主檔] dirty 註冊表寫不進去：'+k); }catch(_){} } }
+function _cupPDirtyDel(k){ const r=_cupPDirtyRaw(); if(r.corrupt||!r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.filter(x=>x!==k))); }catch(e){} }
+function _cupProductsLastPushedGet(shop){   // {選項ID:簽名} 或 null（不存在／損毀 ⇒ bootstrap）
+  try{ const raw=localStorage.getItem(cupProductsLastPushedKey(shop)); if(raw===null) return null; const m=JSON.parse(raw); return (m&&typeof m==='object'&&!Array.isArray(m))?m:null; }catch(e){ return null; } }
+function _cupProductsLastPushedSet(shop, items){
+  try{ localStorage.setItem(cupProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); return true; }catch(e){ try{ console.error('[酷澎商品主檔] lastpushed 寫不進去：',shop,e); }catch(_){} return false; } }
+// 每次重讀 localStorage（不經、也不改模組快取 _cupProdMem）：{ state:'ok'|'absent'|'bad', doc }
+function _cupProductsReadLs(shop){
+  let raw=null; try{ raw=localStorage.getItem(cupProductsKey(shop)); }catch(e){ return { state:'bad', doc:null }; }
+  if(raw===null) return { state:'absent', doc:null };
+  try{ const u=_lz1Unwrap(raw); if(u.kind==='json'||u.kind==='lz'){ const d=JSON.parse(u.json); if(d&&Array.isArray(d.items)) return { state:'ok', doc:d }; } }catch(e){}
+  return { state:'bad', doc:null };
+}
+// 同步要推的本機值（預覽與推送共用）：主檔 key → doc 或 null（讀不到／沒有）
+function cupPendingProducts(key){ if(!cupIsProductsKey(key)) return null; const r=_cupProductsReadLs(key.split('|')[1]); return r.state==='ok'?r.doc:null; }
+// sweep 判準（E）：dirty，或本機有主檔（含讀不到的，讓分派列成問題）而且沒有 lastpushed
+function _cupProductsNeedsPush(k){
+  if(!cupIsProductsKey(k)) return false;
+  if(_cupPDirtyHas(k)) return true;
+  let has=false, lp=null; try{ has=localStorage.getItem(k)!==null; lp=localStorage.getItem(cupProductsLastPushedKey(k.split('|')[1])); }catch(e){ return false; }
+  return has && lp===null;
+}
+async function _cupDelGuardPreflight(shop){
+  const rd=_cupProductsReadLs(shop); if(rd.state!=='ok') return null;
+  const cloud=await _cupCloudGetDoc(shop,'server'); if(!cloud||!Array.isArray(cloud.items)) return null;
+  return cupProductsCloudMerge(cloud.items, cloud.latestExport, rd.doc, _cupProductsLastPushedGet(shop)).guardLevel;
+}
+// syncToCloud 的 task：沒確認就 throw（進 failed、key 留在待同步）
+function _cupProductsTaskRun(shop, approved){
+  return cupSyncProductsMerge(shop, approved instanceof Set?{approvedDeletes:approved}:undefined).then(r=>{ if(!r||r.ok!==true) throw new Error((r&&r.why)||'酷澎商品主檔寫入未確認'); return r; });
+}
+window.__CUP_PRODUCTS_ENFORCE=false;   // 🟡 試跑：酷澎商品主檔同步只算合併計畫、只印 log、不寫雲端。切 true 的條件見 CLAUDE.md（C3）
+// 推送（opts.shadow＝只算不寫；opts.approvedDeletes＝syncToCloud 預檢已確認的刪除清單）。
+//   回 { ok:true, shadow, shop, plan } 或 { ok:false, shadow, shop, why, plan?, unconfirmed?, written? }；不丟錯（讀雲端失敗也回 ok:false）。
+async function cupSyncProductsMerge(shop, opts){
+  const shadow=!!(opts&&opts.shadow===true);
+  const k=cupProductsKey(shop);
+  const head='[cup products merge '+(shadow?'SHADOW':'ENFORCE')+'] '+shop;
+  const stop=(why,extra)=>{ try{ console.error('%c'+head+'：'+why,'color:#dc2626;font-weight:700'); }catch(e){} return Object.assign({ ok:false, shadow, shop, why }, extra||{}); };
+  if(!window.__cloudCoupangProducts) return stop('雲端層未就緒，這次不做');
+  const rd=_cupProductsReadLs(shop);
+  if(rd.state==='bad') return stop('本機商品主檔讀不到（解不開），這次不做；請通知 Keani');
+  if(rd.state==='absent') return stop('這台電腦沒有商品主檔，這次不做');
+  let cloud;
+  try{ cloud=await _cupCloudGetDoc(shop,'server'); }
+  catch(e){ return stop('讀不到雲端（'+((e&&e.message)||e)+'），這次不做（讀不到不等於雲端是空的）'); }
+  if(!cloud||!Array.isArray(cloud.items)) return stop('雲端回傳的格式不對，這次不做');
+  const localItems=rd.doc.items;
+  if(localItems.length===0 && cloud.items.length>0) return stop('本機主檔是空的、雲端有 '+cloud.items.length+' 筆，這次不做（避免清空雲端）');
+  const lp=_cupProductsLastPushedGet(shop);
+  const plan=cupProductsCloudMerge(cloud.items, cloud.latestExport, rd.doc, lp);
+  const sp=cupProductsSplitShards(plan.merged);
+  const kb=sp.shards.map(a=>Math.round(cupProductsShardBytes(a,{shop, latestExport:plan.latestExport})/1024*10)/10);
+  const g=plan.guardLevel;
+  const sum={ shop, at:Date.now(), shadow, mode:plan.mode, lastpushed:!!lp, localCount:localItems.length, cloudCount:plan.cloudCount, mergedCount:plan.mergedCount,
+    push:plan.pushSkus.length, delete:plan.deleteSkus.length, keptCloud:plan.keptCloud.length, guardLevel:g.level, guardN:g.n, guardM:g.m,
+    latestExport:plan.latestExport, localLatestExport:rd.doc.latestExport||'', cloudLatestExport:cloud.latestExport||'',
+    shardCounts:sp.shards.map(a=>a.length), shardKB:kb, badPid:sp.badPid,
+    deleteSample:plan.deleteSkus.slice(0,20), keptCloudSample:plan.keptCloud.slice(0,20) };
+  try{ window.__cupLastMergePlan=sum; }catch(e){}
+  try{ console.log('%c'+head+'（mode='+sum.mode+'）'
+    +'\n   本機 '+sum.localCount+'｜雲端 '+sum.cloudCount+'｜合併後 '+sum.mergedCount
+    +'\n   推 '+sum.push+'、刪 '+sum.delete+'、雲端較新保留 '+sum.keptCloud
+    +'\n   刪除防線 '+sum.guardLevel+'（'+sum.guardN+'/'+sum.guardM+'）｜latestExport '+(sum.latestExport||'—')+'（本機 '+(sum.localLatestExport||'—')+'、雲端 '+(sum.cloudLatestExport||'—')+'）'
+    +'\n   四片筆數 '+sum.shardCounts.join(' / ')+'｜KB '+kb.join(' / ')+'｜badPid '+sum.badPid,
+    'color:'+(shadow?'#2563eb':'#16a34a')+';font-weight:700'); }catch(e){}
+  if(kb.some(x=>x>300)){ try{ console.warn('%c'+head+'：有分片超過 300 KB（'+kb.join(' / ')+' KB）','color:#b45309;font-weight:700'); }catch(e){} }
+  if(kb.some(x=>x>CUP_PRODUCTS_SHARD_WARN_KB)) return stop('有分片超過 '+CUP_PRODUCTS_SHARD_WARN_KB+' KB（'+kb.join(' / ')+' KB），這次不做',{plan:sum});
+  if(g.level==='abort') return stop(_momoDelGuardAbortMsg(g),{plan:sum});
+  if(shadow) return { ok:true, shadow:true, shop, plan:sum };
+  if(g.level==='confirm'){
+    const ap=opts&&opts.approvedDeletes;
+    if(ap instanceof Set){ if(!g.skus.every(x=>ap.has(x))) return stop('確認後雲端內容變了（要刪的跟你確認的不一樣），這次沒推，請重按同步',{plan:sum}); }
+    else{ const yes=await _momoDelGuardConfirm({shop:cupShopDisplay(shop), n:g.n, m:g.m, skus:g.skus}); if(!yes) return stop('要從雲端刪除 '+g.n+' 個選項，你按了取消，這次沒推',{plan:sum}); }
+  }
+  if(_cupCloudOverlay) return stop('本機測試的假雲端（__cupProductsMock）開著，不准真寫；先 __cupProductsMock(null)',{plan:sum});
+  const payload=sp.shards.map(items=>({ items:momoFsSanitizeDeep(items), latestExport:plan.latestExport }));
+  let ret;
+  try{ ret=await window.__cloudCoupangProducts.setShop(shop, payload); }
+  catch(e){ return stop('寫入失敗（'+((e&&e.message)||e)+'）。本機、lastpushed、dirty 都沒動',{plan:sum}); }
+  let back=null; try{ back=await _cupCloudGetDoc(shop,'server'); }catch(e){ back=null; }
+  const cf=cupProductsWriteConfirmed(ret, back, sum.shardCounts, sum.mergedCount, plan.latestExport);
+  if(!cf.ok) return stop('寫入未確認：'+cf.why+'。本機、lastpushed、dirty 都沒動',{plan:sum, unconfirmed:true});
+  const newDoc=Object.assign({}, rd.doc, { schema:1, latestExport:plan.latestExport, items:plan.merged });
+  if(!cupSaveProductsLocal(shop, newDoc, {fromSync:true})) return stop('雲端已寫入並確認，但本機主檔存不進去（空間不足？）；lastpushed、dirty 都沒動，請先釋出空間再同步一次',{plan:sum, written:true});
+  if(!_cupProductsLastPushedSet(shop, plan.merged)) return stop('雲端與本機都已更新，但 lastpushed 寫不進去；dirty 沒清，下次同步會再比一次（不會刪雲端）',{plan:sum, written:true});
+  _cupPDirtyDel(k);
+  try{ _pendingSyncKeys.delete(k); }catch(e){}
+  try{ cupRefreshSyncBtn(shop); }catch(e){}
+  try{ console.log('%c'+head+'：已寫入並確認（4 片合計 '+sum.mergedCount+' 筆）','color:#16a34a;font-weight:700'); }catch(e){}
+  return { ok:true, shadow:false, shop, plan:sum };
+}
+// Console：單通路試跑／真寫（不看閘門）。真寫只在要驗收時用；本機防護碼下會被攔、回「寫入未確認」。
+window.__cupProductsMergeShadow=function(shop){ return cupSyncProductsMerge(shop,{shadow:true}); };
+window.__cupProductsMergeEnforce=function(shop){ return cupSyncProductsMerge(shop); };
+// ══ PR-C2 第 4 塊：雲端主檔緩存（只給預覽比對／上傳比雲端／Console 用；不碰 _cupProdMem、localStorage、動銷率卡）══
+//   window.__cupProductsCloudLatest 由 firebase.js 訂閱樣板寫入；這裡的套用只把它整理進 _cupProdCloud，再發 coupangProductsCloudReady。
+//   complete（到齊）＝伺服器快照（fromCache:false）而且 4 片都到、或確定 0 片（雲端沒有）。1～3 片＝沒到齊。
+const _cupProdCloud={};   // shop → { items, latestExport, fromCache, shardsSeen, complete, mock }
+let _cupCloudOverlay=null;   // 只有 localhost 的 __cupProductsMock 會設；正式站永遠 null
+function _cupApplyCloud(latest){
+  const src=Object.assign({}, (latest&&typeof latest==='object')?latest:{});
+  if(_cupCloudOverlay) Object.keys(_cupCloudOverlay).forEach(s=>{ src[s]=Object.assign({ mock:true }, _cupCloudOverlay[s]); });
+  Object.keys(src).forEach(shop=>{ const v=src[shop]||{};
+    const seen=Number(v.shardsSeen)||0, fromCache=!!v.fromCache;
+    _cupProdCloud[shop]={ items:Array.isArray(v.items)?v.items:[], latestExport:String(v.latestExport||''), fromCache, shardsSeen:seen,
+      complete:!fromCache && (seen===CUP_PRODUCTS_SHARDS || seen===0), mock:!!v.mock };
+  });
+  try{ window.dispatchEvent(new CustomEvent('coupangProductsCloudReady', { detail:{ shops:Object.keys(src) } })); }catch(e){}
+}
+window.__cupApplyCloudProducts=function(latest){ _cupApplyCloud(latest); };
+// 載入時撿回待同步（_pendingSyncKeys 只活在這個分頁；重新整理後酷澎鈕、離開警告要靠這裡才看得到 dirty／沒有 lastpushed 的主檔）。判準同 sweep（_cupProductsNeedsPush）。
+try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(cupIsProductsKey(k) && _cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); } }catch(e){}
+// 讀雲端（強制伺服器）：預覽、推送、預檢共用。假雲端開著時回假資料（形狀同 __cloudCoupangProducts.getDoc）。
+function _cupCloudGetDoc(shop, src){
+  const m=_cupCloudOverlay&&_cupCloudOverlay[shop];
+  if(m){ const sp=cupProductsSplitShards(m.items).shards, ex=m.shardsSeen>0;
+    return Promise.resolve({ exists:ex, items:m.items.slice(), latestExport:m.latestExport, perShard:sp.map((a,i)=>({ exists:ex&&i<m.shardsSeen, n:a.length, latestExport:m.latestExport })) }); }
+  return window.__cloudCoupangProducts.getDoc(shop, src);
+}
+// 上傳預覽要比的基準：本機與雲端 latestExport 較新的那個。雲端沒到齊 ⇒ ready:false（不能套用）。
+function _cupPmRef(shop, S){
+  const c=_cupProdCloud[shop], ready=!!(c&&c.complete);
+  const cloudLatest=ready?c.latestExport:'', local=(S&&S.prevLatest)||'';
+  const ref=cloudLatest>local?cloudLatest:local;
+  return { ready, ref, src:(cloudLatest&&cloudLatest>=local)?'cloud':'local', older:!!(S&&S.exportTime&&ref&&S.exportTime<ref), cloudLatest };
+}
+window.addEventListener('coupangProductsCloudReady', ()=>{ try{ ['麻吉','露營館'].forEach(s=>{ if(_cupPmStage[s]) cupRenderProductsPreview(s); }); }catch(e){} });
+// 同步預覽「狀態」格（酷澎商品主檔）
+function _cupProductsPreviewCell(it){
+  if(it._cupLocalBad) return '<span class="cup-ps-bad">本機主檔讀不到，這次不會推（請通知 Keani）</span>';
+  if(it.status==='readfail') return '<span class="cup-ps-bad">讀不到雲端主檔，這次無法比對（推送時會再讀一次，讀不到就不寫）</span>';
+  const p=it._cupPlan||{};
+  const mode=p.cloudEmpty?'第一次上傳':'更新';
+  const shadow=(window.__CUP_PRODUCTS_ENFORCE===true)?'':'<div class="cup-ps-shadow">試跑中：只計算、不會寫入</div>';
+  return '<span class="cup-ps-mode">'+mode+'</span><span class="cup-ps-nums">會推 '+(p.push||0)+' 筆 · 會刪 '+(p.del||0)+' 筆 · 雲端較新保留 '+(p.kept||0)+' 筆</span>'+shadow;
+}
+// ── 本機測試用假雲端：只在 localhost／127.0.0.1 定義（判斷在定義處；正式站 window.__cupProductsMock 不存在）──
+//   __cupProductsMock({ shop:'麻吉', from:'local'|'empty'|items陣列, newer:3, newerSkus:[…], newerLastSeen:'2099-…', latestExport:'…', fromCache:true, shardsSeen:2 })
+//     只改記憶體：_cupCloudGetDoc（預覽、shadow 計畫）與 _cupProdCloud（上傳比雲端）回假雲端；newer＝前 N 筆（或 newerSkus）lastSeen 改新、價格 +1。
+//   __cupProductsMock(null)＝還原（重新套用真的訂閱快照）。假雲端開著時 cupSyncProductsMerge 不准真寫。
+if(typeof location!=='undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)){
+  window.__cupProductsMock=function(opts){
+    if(opts===null||opts===false){ _cupCloudOverlay=null; _cupApplyCloud(window.__cupProductsCloudLatest||{}); try{ console.log('[cup mock] 已還原成真雲端'); }catch(e){} return { mock:false }; }
+    const shop=opts&&opts.shop; if(shop!=='麻吉'&&shop!=='露營館') throw new Error('shop 要是 麻吉 或 露營館');
+    const clone=x=>JSON.parse(JSON.stringify(x));
+    let items;
+    if(Array.isArray(opts.from)) items=clone(opts.from);
+    else if(opts.from==='empty') items=[];
+    else { const d=_cupProductsReadLs(shop); items=d.doc?clone(d.doc.items):[]; }
+    const newerLS=opts.newerLastSeen||'2099-01-01 00:00:00', want=new Set((opts.newerSkus||[]).map(String)); const newerSkus=[];
+    items=items.map((p,i)=>{ if(want.size?want.has(String(p.sku)):i<(opts.newer|0)){ newerSkus.push(String(p.sku)); return Object.assign({},p,{ lastSeen:newerLS, price:(Number(p.price)||0)+1 }); } return p; });
+    const latestExport=(opts.latestExport!=null)?String(opts.latestExport):items.reduce((m,p)=>String(p.lastSeen||'')>m?String(p.lastSeen||''):m,'');
+    const shardsSeen=(opts.shardsSeen!=null)?(opts.shardsSeen|0):(items.length?CUP_PRODUCTS_SHARDS:0);
+    _cupCloudOverlay=Object.assign({}, _cupCloudOverlay||{}, { [shop]:{ items, latestExport, shardsSeen, fromCache:!!opts.fromCache } });
+    _cupApplyCloud(window.__cupProductsCloudLatest||{});
+    const r={ mock:true, shop, items:items.length, latestExport, shardsSeen, fromCache:!!opts.fromCache, newerSkus };
+    try{ console.log('[cup mock] 假雲端：',r); }catch(e){}
+    return r;
+  };
 }
 // 通路防呆的既有清單：報表的 dispId／code ∪ 本機主檔的 Product ID／code
 function _cupProductsIdSets(shop){ const s=_cupShopIdSets(shop); const d=cupLoadProducts(shop);
@@ -30556,11 +30786,15 @@ function cupRenderProductsPreview(shop){
           'cup-pm-ovl-sure-'+esc(shop), `我確定這份是「${nm}」的商品清單`)+ovHtml; }
     }
   }
-  // 匯出時間：比本機主檔舊 ⇒ 擋
+  // 匯出時間：比「本機與雲端較新的那個」舊 ⇒ 紅框＋勾選（PR-C2）；雲端還沒到 ⇒ 載入中、套用鈕停用
+  const RF=_cupPmRef(shop, S);
   let timeHtml='';
-  if(S.older) timeHtml=redBox(`⚠ <b>這份檔比這台電腦的商品主檔舊</b>：這份檔的匯出時間 <b>${esc(_cupFmtExport(S.exportTime))}</b>，主檔目前是 <b>${esc(_cupFmtExport(S.prevLatest))}</b>。<br>套用的話，主檔裡比較新的那幾筆會保留原樣（不會倒退），只補進這份檔才有的選項；「上架中」仍以 ${esc(_cupFmtExport(S.prevLatest))} 那份清單為準。`,
+  if(!RF.ready) timeHtml=`<div class="cup-pm-wait">雲端主檔載入中…（收到雲端資料後才能套用，會自動更新）</div>`;
+  if(RF.older && RF.src==='cloud') timeHtml+=redBox(`⚠ <b>這份檔比雲端主檔（${esc(_cupFmtExport(RF.ref))}）舊</b>：這份檔的匯出時間 <b>${esc(_cupFmtExport(S.exportTime))}</b>。<br>套用的話，同步時雲端比較新的那幾筆會保留原樣（不會倒退），只補進這份檔才有的選項。`,
       'cup-pm-old-sure-'+esc(shop), '我確定要套用這份比較舊的檔');
-  else if(S.noTime) timeHtml=`<div style="color:#d97706;font-size:12px;margin-bottom:8px">讀不到這份檔的匯出時間，無法判斷它比主檔新或舊。</div>`;
+  else if(RF.older) timeHtml+=redBox(`⚠ <b>這份檔比這台電腦的商品主檔舊</b>：這份檔的匯出時間 <b>${esc(_cupFmtExport(S.exportTime))}</b>，主檔目前是 <b>${esc(_cupFmtExport(S.prevLatest))}</b>。<br>套用的話，主檔裡比較新的那幾筆會保留原樣（不會倒退），只補進這份檔才有的選項；「上架中」仍以 ${esc(_cupFmtExport(S.prevLatest))} 那份清單為準。`,
+      'cup-pm-old-sure-'+esc(shop), '我確定要套用這份比較舊的檔');
+  else if(S.noTime) timeHtml+=`<div style="color:#d97706;font-size:12px;margin-bottom:8px">讀不到這份檔的匯出時間，無法判斷它比主檔新或舊。</div>`;
   const unk=Object.entries(P.unknownStatus);
   const rej=P.rejected?`<span style="color:#d97706">${P.rejected} 筆沒有選項 ID（${esc(Object.entries(P.rejectedByApproval).map(([k,v])=>k+' '+v).join('、'))}），不進主檔</span>`:'沒有被退件／審核中的列';
   box.innerHTML=`
@@ -30580,7 +30814,7 @@ function cupRenderProductsPreview(shop){
         <div style="color:#6b7280">商品主檔目前只存在這台電腦，不會同步雲端（換電腦、其他人看不到）。</div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="mm-btn-primary" onclick="cupApplyProductsMaster('${esc(shop)}')">✓ 套用到這台電腦的商品主檔</button>
+        <button class="mm-btn-primary" onclick="cupApplyProductsMaster('${esc(shop)}')"${RF.ready?'':' disabled title="雲端主檔載入中"'}>✓ 套用到這台電腦的商品主檔</button>
         <button onclick="cupCancelProductsMaster('${esc(shop)}')" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:12px;cursor:pointer">取消</button>
       </div>
     </div>`;
@@ -30590,7 +30824,9 @@ function cupApplyProductsMaster(shop){
   if(!S){ if(typeof showToast==='function') showToast('請先選 price_inventory 檔','warn'); return; }
   const need=(id,msg)=>{ const c=document.getElementById(id); if(!c||!c.checked){ if(typeof showToast==='function') showToast(msg,'warn'); return false; } return true; };
   if(S.overlap && S.overlap.low && !need('cup-pm-ovl-sure-'+shop,'這份檔可能選錯通路，請先勾「我確定這份是「'+cupShopDisplay(shop)+'」的商品清單」')) return;
-  if(S.older && !need('cup-pm-old-sure-'+shop,'這份檔比主檔舊，請先勾「我確定要套用這份比較舊的檔」')) return;
+  const RF=_cupPmRef(shop, S);
+  if(!RF.ready){ if(typeof showToast==='function') showToast('雲端主檔還在載入，請稍候再套用','warn'); return; }
+  if(RF.older && !need('cup-pm-old-sure-'+shop,'這份檔比'+(RF.src==='cloud'?'雲端':'本機')+'主檔舊，請先勾「我確定要套用這份比較舊的檔」')) return;
   // 套用前重算一次（預覽之後本機主檔可能被別的分頁改過）
   const prev=cupLoadProducts(shop);
   if(_cupProdBad[shop]){ if(typeof showToast==='function') showToast('這台電腦的商品主檔讀不到，這次不套用','error'); return; }
@@ -30600,7 +30836,7 @@ function cupApplyProductsMaster(shop){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔沒有存',message:'這台電腦的瀏覽器空間不夠，商品主檔沒有存進去。可以先用左下角「釋出空間」再試一次。',kind:'error'});
     return; }
   _cupPmStage[shop]=null;
-  if(typeof showToast==='function') showToast('已存到這台電腦的商品主檔（'+doc.items.length+' 個選項）。目前不會同步雲端。','success');
+  if(typeof showToast==='function') showToast('已存本機（'+doc.items.length+' 個選項），按「☁ 同步雲端」上傳（目前為試跑，不會真的寫入）','success');
   cupRenderShop(shop);
 }
 function cupCancelProductsMaster(shop){ _cupPmStage[shop]=null; cupRenderShop(shop); }
@@ -30623,7 +30859,7 @@ function cupRenderProductsTab(shop){
   }
   return `<div style="max-width:760px">
     <div class="mm-note" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#92400e">
-      上傳 Wing「商品管理 → 管理商品 → 在 Excel 中大量編輯 → 下載」的 <b>price_inventory</b>（價格／庫存／銷售狀態），建立${nm}的商品主檔，給總表算動銷率。<br>
+      上傳 Wing「商品管理 → 管理商品 → 在 Excel 中大量編輯 → 下載」的 <b>price_inventory</b>（價格／庫存／銷售狀態），建立${nm}的商品主檔，用來算動銷率與庫存；會同步到雲端（目前試跑中，按「☁ 同步雲端」只計算、不會真的寫入）。<br>
       <b>目前只存在這台電腦</b>，不會同步雲端；換電腦或其他人要看，得在那台電腦也上傳一次。
     </div>
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:12px 16px;margin-bottom:14px">${cur}</div>
@@ -30649,7 +30885,9 @@ function cupRenderSellThrough(shop, rows, hasReport){
 }
 // Console 只讀：本機主檔狀態（不回傳內容）
 window.__cupProductsState=function(){ const out={}; ['麻吉','露營館'].forEach(s=>{ const d=cupLoadProducts(s); let chars=0; try{ chars=(localStorage.getItem(cupProductsKey(s))||'').length; }catch(e){}
-  const L=d?cupProductsListed(d):null; out[s]={ has:!!d, bad:!!_cupProdBad[s], items:d?d.items.length:0, latestExport:d?d.latestExport:'', listed:L?L.listed.size:0, stopped:L?L.stopped.size:0, lsChars:chars }; }); return out; };
+  const L=d?cupProductsListed(d):null; const c=_cupProdCloud[s];
+  out[s]={ has:!!d, bad:!!_cupProdBad[s], items:d?d.items.length:0, latestExport:d?d.latestExport:'', listed:L?L.listed.size:0, stopped:L?L.stopped.size:0, lsChars:chars,
+    cloud:c?{ items:c.items.length, latestExport:c.latestExport, fromCache:c.fromCache, shardsSeen:c.shardsSeen, complete:c.complete, mock:!!c.mock }:null }; }); return out; };
 function cupGeneratePreview(){
   const btn=document.getElementById('cup-gen-btn');
   if(btn){btn.disabled=true;btn.textContent='解析中…';}
@@ -31004,7 +31242,7 @@ function cupRenderUploadTab(shop){
       <div class="mm-upctl"><input type="file" id="cup-order-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'order')"><span id="cup-order-status" style="font-size:12px">${st('order')}</span></div></div>
     <div class="mm-uprow"><div class="mm-uplbl">MSF 付款明細 <span class="mm-code">VAT History</span><span class="opt">選填</span><div class="mm-hint">退貨金額歸期</div></div>
       <div class="mm-upctl"><input type="file" id="cup-msf-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'msf')"><span id="cup-msf-status" style="font-size:12px">${st('msf')}</span></div></div>
-    <div class="mm-uprow"><div class="mm-uplbl">price_inventory <span class="mm-code">庫存</span><span class="opt">選填</span><div class="mm-hint">先收檔、本階段不解析（庫存欄稍後接入）</div></div>
+    <div class="mm-uprow"><div class="mm-uplbl">price_inventory <span class="mm-code">庫存</span><span class="opt">選填</span><div class="mm-hint">只填這份報表的庫存欄（同代碼多頁取最大值）；動銷率用的商品主檔請到「商品同步」分頁上傳</div></div>
       <div class="mm-upctl"><input type="file" id="cup-pi-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'pi')"><span id="cup-pi-status" style="font-size:12px">${st('pi')}</span></div></div>
     <button class="mm-btn-primary" id="cup-gen-btn" style="margin-top:12px" onclick="cupGeneratePreview()" ${_cupFiles.order?'':'disabled'}>▶ 產生預覽</button>
     <span class="mm-gen-hint" id="cup-gen-hint">${_cupFiles.order?'解析訂單/MSF、算費用與退貨歸期（先預覽、確認後才寫入）':'請先選「我的訂單」'}</span>
@@ -32065,6 +32303,95 @@ function cupSellThroughCalc(rows, listedSet){
   return { num:sold.size, den:den.size, listedN:(listedSet?listedSet.size:0), soldNotListed, pct:(den.size>0?sold.size/den.size*100:null) };
 }
 /* ═══ CUP-PM-PURE-END ═══ */
+/* ═══ CUP-PS-PURE-BEGIN：酷澎商品主檔雲端分片與合併（PR-C2 第 1 塊）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage／Firestore ═══ */
+//   雲端形狀：coupang_products/{maji|luying}_{0..3}，每份 { schema:1, shop, shard, shards:4, items:[…], latestExport, updatedAt }。
+//   items 每筆＝C1 本機主檔同一形狀 { sku, pid, sid, code, price, base, status(韓文原文), stock, firstSeen, lastSeen }，不存商品名稱。
+//   依賴（profit.js 其他地方定義，node 測試一起抽）：momoProductsPlanMerge、_momoProductsBuildSig、_momoStableStr、_momoDelGuardLevel、MOMO_DEL_GUARD_*。
+const CUP_PRODUCTS_SHARDS=4;
+const CUP_PRODUCTS_SHARD_WARN_KB=700;   // 任一片超過 ⇒ 紅字警告（同 MOMO_DOC_WARN_KB；Firestore 單份上限 1 MB）
+// Product ID 是純數字 ⇒ BigInt(pid) % 4；空白或不是純數字 ⇒ 第 0 片（呼叫端用 cupProductsPidOk 計數）。
+//   用 BigInt：Product ID 可能超過 2^53，Number 取餘數會錯。同一商品頁的所有選項 pid 相同 ⇒ 一定同一片。
+function cupProductsPidOk(pid){ return /^[0-9]+$/.test(String(pid==null?'':pid).trim()); }
+function cupProductsShardOf(pid){
+  if(!cupProductsPidOk(pid)) return 0;
+  return Number(BigInt(String(pid).trim()) % BigInt(CUP_PRODUCTS_SHARDS));
+}
+// items → { shards:[[…],[…],[…],[…]], badPid }（badPid＝pid 空白或不是純數字、被歸到第 0 片的選項數）。各片內維持原本順序。
+function cupProductsSplitShards(items){
+  const shards=[]; for(let i=0;i<CUP_PRODUCTS_SHARDS;i++) shards.push([]);
+  let badPid=0;
+  (Array.isArray(items)?items:[]).forEach(p=>{ if(!p) return; if(!cupProductsPidOk(p.pid)) badPid++; shards[cupProductsShardOf(p.pid)].push(p); });
+  return { shards, badPid };
+}
+// 一片的 Firestore 大小估算（位元組）。算法照 Firestore 文件：字串＝UTF-8 位元組＋1、數字 8、布林／null 1、
+//   map＝Σ(欄位名 UTF-8＋1 ＋ 值)、陣列＝Σ值、文件額外 32＋文件名稱（collection／doc id 各 UTF-8＋1、再＋16）。
+//   meta（選填）{ shop, latestExport, docId } 只用來把頂層欄位算進去；沒給就用最長的通路名與 19 字的時間估。
+function cupProductsShardBytes(shardItems, meta){
+  const enc=(typeof TextEncoder!=='undefined')?new TextEncoder():null;
+  const u8=s=>enc?enc.encode(String(s)).length:unescape(encodeURIComponent(String(s))).length;
+  const val=v=>{
+    if(v===null||v===undefined||typeof v==='boolean') return 1;
+    if(typeof v==='number') return 8;
+    if(typeof v==='string') return u8(v)+1;
+    if(Array.isArray(v)) return v.reduce((s,x)=>s+val(x),0);
+    if(typeof v==='object') return Object.keys(v).reduce((s,k)=>s+u8(k)+1+val(v[k]),0);
+    return 8;
+  };
+  const m=meta||{};
+  const docName=u8('coupang_products')+1+u8(m.docId||'luying_0')+1+16;
+  const top={ schema:1, shop:(m.shop!=null?m.shop:'露營館'), shard:0, shards:CUP_PRODUCTS_SHARDS, latestExport:(m.latestExport!=null?m.latestExport:'0000-00-00 00:00:00') };
+  return 32+docName+val(top)+(u8('updatedAt')+1+8)+(u8('items')+1)+val(Array.isArray(shardItems)?shardItems:[]);
+}
+// 雲端合併（整個通路層級：4 片串起來的 cloudItems）。
+//   1) 逐筆比資料自己的時間：同一個選項雲端 lastSeen 比本機新 ⇒ 用雲端那筆（記進 keptCloud），否則用本機那筆；
+//      兩邊都有時 firstSeen 取兩邊非空值裡較早的。不比雲端 updatedAt。
+//   2) 再交給 momoProductsPlanMerge（last-pushed 模型）：lastpushed＝null ⇒ bootstrap，以雲端為基準、不刪任何雲端選項；
+//      有 lastpushed ⇒ 只推跟上次推的不一樣的；本機沒有、上次推過的才刪；雲端獨有的原封保留。
+//   3) latestExport＝雲端與本機較大的；guardLevel＝_momoDelGuardLevel（N＝雲端現在還有的要刪筆數）。
+//   回 { mode, merged, pushSkus, deleteSkus, keptCloud, latestExport, guardLevel, changed, added, preserveCount, conflictSkus, cloudCount, mergedCount, wholeOverwritePush, cloudOnly }
+function cupProductsCloudMerge(cloudItems, cloudLatest, localDoc, lastpushed){
+  const cloud=Array.isArray(cloudItems)?cloudItems:[];
+  const localItems=(localDoc&&Array.isArray(localDoc.items))?localDoc.items:[];
+  const cloudMap=new Map(); cloud.forEach(p=>{ if(p&&p.sku!=null) cloudMap.set(String(p.sku),p); });
+  const earlier=(a,b)=>{ a=a||''; b=b||''; if(!a) return b; if(!b) return a; return a<b?a:b; };
+  const keptCloud=[];
+  const eff=localItems.map(lp=>{
+    if(!lp||lp.sku==null) return lp;
+    const cp=cloudMap.get(String(lp.sku));
+    if(!cp) return lp;
+    const cloudNewer=String(cp.lastSeen||'')>String(lp.lastSeen||'');   // CUP-PS-KEEP-NEWER（node 反向測試會把這行改掉）
+    const pick=cloudNewer?cp:lp;
+    if(cloudNewer) keptCloud.push(String(lp.sku));
+    const fsn=earlier(lp.firstSeen, cp.firstSeen);
+    return (fsn===(pick.firstSeen||''))?pick:Object.assign({}, pick, { firstSeen:fsn });
+  });
+  const plan=momoProductsPlanMerge(null, cloud, eff, (lastpushed&&typeof lastpushed==='object'&&!Array.isArray(lastpushed))?lastpushed:null);
+  const lA=String(cloudLatest||''), lB=String((localDoc&&localDoc.latestExport)||'');
+  const latestExport=lA>lB?lA:lB;
+  const guardLevel=_momoDelGuardLevel(plan, cloud);
+  return { mode:plan.mode, merged:plan.merged, pushSkus:plan.pushSkus, deleteSkus:plan.deleteSkus, keptCloud, latestExport, guardLevel,
+    changed:plan.changed, added:plan.added, preserveCount:plan.preserveCount, conflictSkus:plan.conflictSkus,
+    cloudCount:plan.cloudCount, mergedCount:plan.mergedCount, wholeOverwritePush:plan.wholeOverwritePush, cloudOnly:plan.cloudOnly };
+}
+// 寫入確認（PR-C2 第 3 塊）：enforce 只有全部成立才動本機／lastpushed／dirty。
+//   ret＝setShop 回傳值，必須「嚴格」是 { ok:true }（被唯讀／本機防護擋下會是 undefined）；back＝寫完再 getDoc(shop,'server') 的結果；
+//   shardCounts＝這次寫的 4 片筆數；mergedCount＝合併後總筆數；latestExport＝這次寫的。回 { ok, why }。
+function cupProductsWriteConfirmed(ret, back, shardCounts, mergedCount, latestExport){
+  if(!(ret && typeof ret==='object' && !Array.isArray(ret) && ret.ok===true && Object.keys(ret).length===1)) return { ok:false, why:'寫入沒有回傳 {ok:true}（被防護擋下，或寫入失敗）' };
+  if(!back || typeof back!=='object') return { ok:false, why:'寫完讀不到雲端，無法確認' };
+  const ps=back.perShard, cnt=Array.isArray(shardCounts)?shardCounts:[];
+  if(!Array.isArray(ps) || ps.length!==cnt.length || cnt.length!==CUP_PRODUCTS_SHARDS) return { ok:false, why:'讀回的分片數不對' };
+  for(let i=0;i<cnt.length;i++){
+    if(!ps[i] || ps[i].exists!==true) return { ok:false, why:'讀回第 '+i+' 片不存在' };
+    if(ps[i].n!==cnt[i]) return { ok:false, why:'讀回第 '+i+' 片 '+ps[i].n+' 筆，寫的是 '+cnt[i]+' 筆' };
+  }
+  const total=ps.reduce((a,x)=>a+x.n,0);
+  if(total!==mergedCount) return { ok:false, why:'讀回合計 '+total+' 筆，合併結果是 '+mergedCount+' 筆' };
+  if(String(back.latestExport||'')!==String(latestExport||'')) return { ok:false, why:'讀回的 latestExport（'+back.latestExport+'）跟寫的（'+latestExport+'）不同' };
+  return { ok:true, why:'' };
+}
+/* ═══ CUP-PS-PURE-END ═══ */
+window.__cloudDrainLatest('__cupProductsCloudLatest','__cupApplyCloudProducts');   // PR-C2：profit.js 動態載入，補套已緩存的雲端主檔快照（要在 CUP_PRODUCTS_SHARDS 定義之後）
 
 // ④ MSF（VAT History Report 分頁，含表頭）→ per-order ＋ 按銷售確認月的銷售/退貨淨額（退貨率用）。
 //    cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11(賣家券銷售=7)/退貨12-18(賣家券退貨=14)
