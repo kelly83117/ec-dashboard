@@ -31188,6 +31188,35 @@ function cupRenderSellThrough(shop, rows, hasReport){
   if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 頁。\n分母＝目前上架 '+r.listedN+' 頁 ∪ 本月有賣出 ⇒ '+r.den+' 頁（其中 '+r.soldNotListed+' 頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n'+_cupStSrcTip(L.latest);
 }
 function _cupStSrcTip(latest){ return '主檔來自雲端（最新匯出 '+_cupFmtExport(latest)+'），任何一台上傳並同步後大家都會看到。'; }
+// ══ 通路健檢的酷澎動銷率（2026-11-18 第 3 塊）：唯讀轉接，跟上面總表動銷率卡同一套（cupProductsListed＋cupSellThroughCalc）══
+//   window.__healthCoupangSt(shop, month) → { state:'ok'|'loading'|'noProducts'|'noReport', num, den, listedN, soldNotListed, latest }
+//   🔴 主檔或報表沒到齊回 loading，不能當 0：主檔看雲端快照到齊（_cupProdCloud[shop].complete）；報表看 coupang_reports 訂閱
+//     有沒有送過資料（coupangReportReady 事件，或記憶體已經有酷澎報表）。訂閱開了 15 秒都沒有任何報表 ⇒ 當成到齊（回 noReport）。
+//   不寫任何東西；名稱不以 __cloud 開頭，不影響本機防寫物件數。
+let _cupRepSeen=false, _cupRepSubAt=0;
+window.addEventListener('coupangReportReady', ()=>{ _cupRepSeen=true; });
+function _cupReportsReady(){
+  if(_cupRepSeen) return true;
+  try{ if(Object.keys(Store._profitMem||{}).some(k=>cupIsReportKey(k))){ _cupRepSeen=true; return true; } }catch(e){}
+  return !!_cupRepSubAt && Date.now()-_cupRepSubAt>15000;
+}
+const _cupListedCache=new WeakMap();   // 主檔 doc → cupProductsListed 結果（doc 換了就重算）
+window.__healthCoupangSt=function(shop, month){
+  const out={ state:'loading', num:null, den:null, listedN:null, soldNotListed:null, latest:'' };
+  try{ if(typeof window.__loadCoupangSubs==='function'){ if(!_cupRepSubAt) _cupRepSubAt=Date.now(); window.__loadCoupangSubs(); } }catch(e){}
+  const d=cupLoadProducts(shop);
+  if(_cupProdBad[shop]) return Object.assign(out, { state:'noProducts', why:'bad' });
+  const c=_cupProdCloud[shop];
+  if(!(c&&c.complete)) return out;
+  if(!d) return Object.assign(out, { state:'noProducts' });
+  let L=_cupListedCache.get(d); if(!L){ L=cupProductsListed(d); _cupListedCache.set(d, L); }
+  out.latest=L.latest; out.listedN=L.listed.size;
+  if(!_cupReportsReady()) return out;
+  const rep=cupLoadReport(shop, month);
+  if(!rep||!Array.isArray(rep.rows)) return Object.assign(out, { state:'noReport' });
+  const r=cupSellThroughCalc(rep.rows, L.listed);
+  return Object.assign(out, { state:'ok', num:r.num, den:r.den, soldNotListed:r.soldNotListed });
+};
 // Console 只讀：本機主檔狀態（不回傳內容）
 window.__cupProductsState=function(){ const out={}; ['麻吉','露營館'].forEach(s=>{ const d=cupLoadProducts(s); let chars=0; try{ chars=(localStorage.getItem(cupProductsKey(s))||'').length; }catch(e){}
   const L=d?cupProductsListed(d):null; const c=_cupProdCloud[s];
