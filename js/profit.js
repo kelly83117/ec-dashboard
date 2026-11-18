@@ -21225,10 +21225,13 @@ function _momoSyncPendingCount(){
   }catch{ notesDirtyAll=true; }
   const notesDirtyHas=k=>notesDirtyAll||!!(notesDirtySet&&notesDirtySet.has(k));
   // (2) localStorage 裡符合 sweep 白名單前綴的——重整後 session 標記已清空，靠這個撐起亮暗（只讀 key 名，不 parse value）
+  //   2026-11-18 小修③：ec_momo_products|* 改成跟 sweep 同判準（_momoIsDirty：dirty 註冊表有這把才算）。舊版只看 key 在不在 →
+  //   每台開過 MOMO 的電腦鈕都常亮、按下去預覽卻是空的。dirty 註冊表迴圈外讀一次（同 _momoIsDirty 的讀法與 fail 方向：讀壞＝都不算，跟 sweep 一致）。
+  let _prodDirtySet=new Set(); try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Array.isArray(a)) _prodDirtySet=new Set(a); }catch{}
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || (k.startsWith('ec_momo_optlog|') && !cupIsOptlogKey(k)) || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* 酷澎優化紀錄（麻吉／露營館）改由酷澎鈕推、這裡不算；origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || (k==='ec_momo_cost_by_origin' && _costDirty)   /* #491：cost 只有 dirty 非空才算（與 sweep 同判準 momoCostDirtyGet().length>0）。cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if((k.startsWith('ec_momo_products|') && _prodDirtySet.has(k)) ||(_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || (k.startsWith('ec_momo_optlog|') && !cupIsOptlogKey(k)) || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* 酷澎優化紀錄（麻吉／露營館）改由酷澎鈕推、這裡不算；origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || (k==='ec_momo_cost_by_origin' && _costDirty)   /* #491：cost 只有 dirty 非空才算（與 sweep 同判準 momoCostDirtyGet().length>0）。cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|') && (!_REPORT_DIRTY_GATE || (_repIn(k) && !_reportDirtyHold.has(k))))) keys.add(k);
@@ -22752,9 +22755,13 @@ function _optlogHydrateOnce(shop){
   }catch(e){ console.warn('[優化紀錄] 讀本機紀錄失敗：',shop,e); }
 }
 // 工作日誌只有在「所有家的紀錄都從雲端到位」才算次數（見 momoUpdateDailyProgress）。沒有雲端層（離線 fallback）照舊。
-function _optlogDpReady(){ return typeof window.__optlogReady!=='function' || [...MOMO_OPTLOG_DP_SHOPS, ...CUP_OPTLOG_DP_SHOPS].every(s=>window.__optlogReady(s)); }   // 酷澎兩家也要到位（momoUpdateDailyProgress 一起算 coupang-summary）
+function _optlogDpReady(){ return typeof window.__optlogReady!=='function' || [...MOMO_OPTLOG_DP_SHOPS, ...CUP_OPTLOG_DP_SHOPS, ...BKFD_OPTLOG_DP_SHOPS].every(s=>window.__optlogReady(s)); }   // 酷澎、博客來、FriDay 也要到位（momoUpdateDailyProgress 一起算 coupang-summary、bkfd-summary）
+// PChome 工作日誌（pchomeUpdateDailyProgress）也算 ec_momo_optlog|PChome 的補成本 → 這一家到位前不算（不然會算出少的次數蓋掉當天的 pchome-summary）。
+function _optlogPchDpReady(){ return typeof window.__optlogReady!=='function' || window.__optlogReady(PCHOME_MOMO_OPTLOG_SHOP); }
+let _optlogPchDpWanted=null;   // PChome 那支還沒到位時被要求重算：{ push:bool }
 let _optlogDpWanted=null;   // 還沒到位時被要求重算的 { dates:Set, push:bool }；到位後補算一次
 function _optlogDpFlush(){
+  if(_optlogPchDpWanted&&_optlogPchDpReady()){ const pw=_optlogPchDpWanted; _optlogPchDpWanted=null; try{ pchomeUpdateDailyProgress({silent:true, pushToCloud:pw.push}); }catch(e){ console.warn('[優化紀錄] 補算 PChome 工作日誌失敗',e); } }
   if(!_optlogDpWanted||!_optlogDpReady()) return;
   const w=_optlogDpWanted; _optlogDpWanted=null;
   try{ momoUpdateDailyProgress({silent:true, dates:[...w.dates], pushToCloud:w.push}); }catch(e){ console.warn('[優化紀錄] 補算工作日誌失敗',e); }
@@ -22955,9 +22962,16 @@ function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以�
 //   跟 momo-summary 在 momoUpdateDailyProgress 同一次算、同一次寫（不另開一個整份覆蓋 ec.dailyProgress 的寫入者）。
 //   counts key＝內部賣場名·類型（麻吉·補成本），顯示時用 cupShopDisplay 轉成「好麻吉·補成本」。
 const CUP_OPTLOG_DP_SHOPS=['麻吉','露營館'];
+// 博客來／FriDay（2026-11-18 小修②）：KPI 補成本寫的「補成本」優化紀錄（ec_momo_optlog|博客來／FriDay → app/optlog_*），
+//   合成一張卡 bkfd-summary「博客來／FriDay · 今日調整」：兩家目前都只有補成本、量很少，各開一張卡只會多兩張幾乎空的卡。
+//   跟 momo-summary／coupang-summary 同一次算、同一次寫（同一個寫入者、同一道 __optlogReady 閘）。counts key＝店名·類型（博客來·補成本）。
+const BKFD_OPTLOG_DP_SHOPS=['博客來','FriDay'];
+// PChome 的「補成本」（ec_momo_optlog|PChome，KPI／共用成本表補的）併進既有 pchome-summary（pchomeUpdateDailyProgress），key 固定 'PChome·補成本' 這類。
+const PCHOME_MOMO_OPTLOG_SHOP='PChome';
 // 掃當天 optlog → { 人名: { '甲配·調價':N, ... } }（type 動態、不寫死）
 function momoOptlogTodayCounts(date){ return _optlogDayCounts(MOMO_OPTLOG_DP_SHOPS, date); }
 function cupOptlogDayCounts(date){ return _optlogDayCounts(CUP_OPTLOG_DP_SHOPS, date); }
+function bkfdOptlogDayCounts(date){ return _optlogDayCounts(BKFD_OPTLOG_DP_SHOPS, date); }
 function _optlogDayCounts(shops, date){
   const today=date||momoNowParts().date;
   const byPerson={};
@@ -22990,6 +23004,9 @@ function momoUpdateDailyProgress(opts){
   // opts.dates：要重算的日期清單（刪除/編輯過去日期的紀錄用）；沒給 → 只算今天（既有呼叫端行為不變）
   const dates=(opts.dates&&opts.dates.length)?[...new Set(opts.dates.filter(Boolean))]:[today];
   if(!dates.length) return;
+  // PChome 補成本（ec_momo_optlog|PChome）算在 pchome-summary：先讓 PChome 那支重算今天（只寫本機；下面推雲時會一起帶上）。
+  //   補成本都會走到這裡（momoSetCostByOrigin → momoUpdateDailyProgress），所以不用另外掛觸發點。
+  if(dates.indexOf(today)>=0){ try{ if(typeof pchomeUpdateDailyProgress==='function') pchomeUpdateDailyProgress({silent:true}); }catch(e){ console.warn('[PChome 工作日誌]',e); } }
   const all=Store.get('ec.dailyProgress',{})||{};
   const next=Object.assign({}, all);
   const toItems=v=>Array.isArray(v)?v.slice():(v&&String(v).trim()?[{id:'legacy',text:String(v).trim(),done:false}]:[]);
@@ -22997,13 +23014,17 @@ function momoUpdateDailyProgress(opts){
   dates.forEach(date=>{
     const countsByPerson=momoOptlogTodayCounts(date);
     const cupByPerson=cupOptlogDayCounts(date);   // 酷澎（coupang-summary），同一次寫入
+    const bkByPerson=bkfdOptlogDayCounts(date);   // 博客來／FriDay（bkfd-summary），同一次寫入
     const day=Object.assign({}, all[date]||{});
-    // 受影響 = 該日有新 counts 的人 ∪ 該日已有 momo-summary／coupang-summary 的人（後者要能在刪光後被清掉）
-    const dayAffected=new Set([...Object.keys(countsByPerson), ...Object.keys(cupByPerson)]);
-    Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&(it.kind==='momo-summary'||it.kind==='coupang-summary'))) dayAffected.add(person); });
+    const OWN=it=>it&&(it.kind==='momo-summary'||it.kind==='coupang-summary'||it.kind==='bkfd-summary');
+    // 受影響 = 該日有新 counts 的人 ∪ 該日已有 momo／coupang／bkfd-summary 的人（後者要能在刪光後被清掉）
+    const dayAffected=new Set([...Object.keys(countsByPerson), ...Object.keys(cupByPerson), ...Object.keys(bkByPerson)]);
+    Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(OWN)) dayAffected.add(person); });
     if(dayAffected.size===0) return;
     dayAffected.forEach(person=>{
-      const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary'&&it.kind!=='coupang-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、PChome、待辦）只換掉 momo-summary 與 coupang-summary
+      const kept=toItems(day[person]).filter(it=>it&&!OWN(it));   // 保留其他 item（蝦皮 insight/profit 摘要、PChome、待辦）只換掉這支自己寫的三種
+      const bc=bkByPerson[person];
+      if(bc&&Object.keys(bc).length){ kept.unshift({id:'auto-bkfd-'+person, kind:'bkfd-summary', counts:bc, done:false, auto:true}); anyContent=true; }
       const cc=cupByPerson[person];
       if(cc&&Object.keys(cc).length){ kept.unshift({id:'auto-coupang-'+person, kind:'coupang-summary', counts:cc, done:false, auto:true}); anyContent=true; }
       const c=countsByPerson[person];
@@ -23064,6 +23085,36 @@ function momoOpenDpDetail(person, date, combo){
 function momoCloseDpDetail(){ const ov=document.getElementById('momo-dp-detail-ov'); if(ov) ov.remove(); }
 // 工作日誌 coupang-summary chip 明細（照 momoOpenDpDetail；共用同一個 overlay 與 momoCloseDpDetail）。
 //   紀錄的 sku 是原廠編號（酷澎報表的 code；補成本也是原廠編號）→ 品名從酷澎報表找，最新月份優先。
+// 工作日誌 bkfd-summary chip 明細（博客來／FriDay 補成本；照 cupOpenDpDetail，共用同一個 overlay 與 momoCloseDpDetail）。sku＝原廠編號／商品貨號，品名不另查（note 已寫原廠與成本）。
+function bkfdOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; bkfdOpenDpDetail(el.getAttribute('data-bk-person')||'', el.getAttribute('data-bk-date')||'', el.getAttribute('data-bk-combo')||''); }
+function bkfdOpenDpDetail(person, date, combo){
+  const rows=[];
+  BKFD_OPTLOG_DP_SHOPS.forEach(shop=>{
+    const map=momoLoadOptlog(shop)||{};
+    Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
+      if(!e || (e.date||'')!==date) return;
+      if(momoOptlogUserToName(e.by)!==person) return;
+      if((shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
+      rows.push({shop, sku, type:e.type||'其他', note:e.note||'', time:e.time||''});
+    }); });
+  });
+  rows.sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+  const esc=_momoEsc;
+  const body = rows.length ? rows.map(r=>`<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start">
+      <span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">${esc(r.time)}</span>
+      <div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><span style="font-family:monospace">${esc(r.sku)}</span></div>${r.note?`<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">${esc(r.note)}</div>`:''}</div>
+    </div>`).join('') : `<div style="padding:14px 2px;color:#9ca3af;font-size:12px">${_optlogDpReady()?'找不到對應紀錄（可能已刪除或改期）':'優化紀錄載入中，請稍後再開一次'}</div>`;
+  let ov=document.getElementById('momo-dp-detail-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-dp-detail-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseDpDetail(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div><div style="font-size:14px;font-weight:700;color:#0f766e">${esc(combo)}　${rows.length} 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">${esc(person)}　${esc(date)}　·　博客來／FriDay 優化紀錄</div></div>
+      <button onclick="momoCloseDpDetail()" style="border:0;background:none;color:#9ca3af;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
+    </div>
+    <div style="padding:6px 16px 14px;overflow:auto">${body}</div></div>`;
+}
 function cupOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; cupOpenDpDetail(el.getAttribute('data-cup-person')||'', el.getAttribute('data-cup-date')||'', el.getAttribute('data-cup-combo')||''); }
 function cupOpenDpDetail(person, date, combo){
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}   // 品名要酷澎報表；優化紀錄本身開站就訂閱
@@ -27236,9 +27287,29 @@ async function momoSyncCostByOrigin(){
   const mergedMap = momoMergeByKey(cloudMap, localMap, effKeys);
   const mergedMeta = momoMergeByKey(cloudMeta, localMeta, effKeys);
   const np=momoNowParts();
-  await window.__cloudCostByOrigin.set(momoFsSanitizeDeep({ costMap: mergedMap, meta: mergedMeta, updatedAt: np.date+' '+np.time }));
-  momoSaveCostByOrigin(mergedMap); momoSaveCostMeta(mergedMeta); momoCostDirtyClear();   // 本機回寫 merged（含同事的）+ 清 dirty
+  const payload=momoFsSanitizeDeep({ costMap: mergedMap, meta: mergedMeta, updatedAt: np.date+' '+np.time });
+  await window.__cloudCostByOrigin.set(payload);
+  // 🔴 2026-11-18 小修①：set 是原生 setDoc（成功也回 undefined），唯讀帳號／本機防護把它換成空函式時一樣回 undefined、不會丟錯，
+  //   舊版因此把「沒寫進去」當成功、清掉 dirty → 唯讀帳號補的成本遺失。改成寫完讀回，逐一比對這次要推的原廠編號（成本＋meta）。
+  //   讀回是快取（離線）一律當沒確認；對不上 ⇒ throw（syncToCloud 列為同步失敗、pending 與 dirty 都留著，下次重推；逐 key merge 重推無害）。
+  const vs=await window.__cloudCostByOrigin.getDoc();
+  const vd=(vs&&vs.exists&&vs.exists()&&!(vs.metadata&&vs.metadata.fromCache))?(vs.data()||{}):null;
+  const why=momoCostWriteConfirmed(payload, vd, effKeys);
+  if(why){ console.error('[成本表] 寫入未確認：'+why+'。dirty 沒有清，資料還在本機。'); throw new Error('成本表寫入未確認（'+why+'），資料還在本機，請稍後再按同步重試。'); }
+  momoSaveCostByOrigin(mergedMap); momoSaveCostMeta(mergedMeta); momoCostDirtyClear();   // 本機回寫 merged（含同事的）+ 清 dirty（確認寫入後才清；清法同改版前）
 }
+// 純函式：成本表寫入讀回比對。payload＝寫出去的（已 sanitize）；read＝讀回的 doc data（null＝讀不到／來自快取）；keys＝這次推的原廠編號。
+//   回 ''＝確認；否則回白話原因。只比這次推的 key（別人同時改別的原廠編號不影響）；本機刪除的 key 要讀回也不存在。
+function momoCostWriteConfirmed(payload, read, keys){
+  if(!read) return '寫入後讀不到雲端成本表（或只讀到本機快取）';
+  const pc=(payload&&payload.costMap)||{}, pm=(payload&&payload.meta)||{}, rc=read.costMap||{}, rm=read.meta||{};
+  const canon=v=>(v===undefined||v===null)?'null':(Array.isArray(v)?'['+v.map(canon).join(',')+']':(typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v)));   // 跟鍵順序無關（Firestore 讀回的 map 順序不保證）
+  const same=(a,b)=>canon(a)===canon(b);
+  const bad=[];
+  (keys||[]).forEach(k0=>{ const k=momoFsSafeKey(k0); if(!same(pc[k],rc[k])||!same(pm[k],rm[k])) bad.push(k0); });
+  return bad.length?('讀回後 '+bad.length+' 個原廠編號跟寫出去的不一樣：'+bad.slice(0,5).join('、')):'';
+}
+window.__momoCostWriteConfirmed = momoCostWriteConfirmed;   // 純函式，node / Console 測試用
 // ══════ 成本表維護入口（甲配/乙配/MO+ 共用 ec_momo_cost_by_origin；直接補莫筆克沒有的原廠編號）══════
 function momoCurrentUserName(){ try{ const s=(window.Store&&Store.get)?(Store.get('ec.session',{})||{}):{}; const un=s.username||s.user||s.name; if(un) return momoOptlogUserToName(un); }catch(e){} return ''; }
 // 某原廠編號被哪些賣場的哪些商品用到（掃四賣場 product.origin / origins[]）→ [{shop, n, skus:[..前幾個..]}]
@@ -34321,7 +34392,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,momoReconStoreDecide,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoAnaSwitchTab,momoPCInput,momoPCSel,momoPCSelAll,momoPCToggleMore,momoPCBulkApply,momoPCReset,momoPCToOptlog,momoPCSave,momoPCSaveConfirm,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,cupOpenDpDetailFromEl,cupShopDisplay,momoShopDisplay,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoAnaSwitchTab,momoPCInput,momoPCSel,momoPCSelAll,momoPCToggleMore,momoPCBulkApply,momoPCReset,momoPCToOptlog,momoPCSave,momoPCSaveConfirm,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,cupOpenDpDetailFromEl,bkfdOpenDpDetailFromEl,cupShopDisplay,momoShopDisplay,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoOptlogTypeToggle,momoOptlogTimeSet,momoOptlogBySet,momoOptlogSysToggle,
   momoSearchClear,momoSearchClearToggle,
@@ -36239,10 +36310,15 @@ function pchomeOptlogTodayCounts(){
     Object.keys(map).forEach(function(sku){ (map[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==today) return;
       var person=momoOptlogUserToName(e.by)||'未指派'; var key=shop+PCHOME_OPTLOG_DP_SEP+(e.type||'其他');
       var c=byPerson[person]=byPerson[person]||{}; c[key]=(c[key]||0)+1; }); }); });
+  // 2026-11-18 小修②：KPI／共用成本表的「補成本」存在 ec_momo_optlog|PChome（app/optlog_PChome），不在上面 PChome 自己的優化紀錄裡 → 一起算進這張卡。
+  //   key＝'PChome·補成本'（店名段固定 'PChome'，pchomeOpenDpDetail 靠它分辨要去哪一份找明細）。
+  try{ var mb=_optlogDayCounts([PCHOME_MOMO_OPTLOG_SHOP], today); Object.keys(mb).forEach(function(person){ var c=byPerson[person]=byPerson[person]||{}; Object.keys(mb[person]).forEach(function(k){ c[k]=(c[k]||0)+mb[person][k]; }); }); }catch(e){ console.warn('[PChome 工作日誌] 讀補成本紀錄失敗',e); }
   return byPerson;
 }
 function pchomeUpdateDailyProgress(opts){
   opts=opts||{}; if(!(window.Store&&Store.get)) return;
+  // 🔴 ec_momo_optlog|PChome 還沒從雲端到位 → 不算不寫（會少算補成本、蓋掉當天的 pchome-summary）。到位後 _optlogDpFlush 補算。
+  if(!_optlogPchDpReady()){ if(!_optlogPchDpWanted){ _optlogPchDpWanted={push:false}; console.warn('[優化紀錄] PChome 補成本紀錄還沒到位，PChome 工作日誌等到位後再算'); } if(opts.pushToCloud) _optlogPchDpWanted.push=true; return; }
   var today=momoNowParts().date, countsByPerson=pchomeOptlogTodayCounts();
   var all=Store.get('ec.dailyProgress',{})||{}; var day=Object.assign({}, all[today]||{});
   var affected=new Set(Object.keys(countsByPerson));
@@ -36270,6 +36346,13 @@ function pchomeOpenDpDetail(person, date, combo){
     var map=pchomeLoadOptlog(shop)||{};
     Object.keys(map).forEach(function(sku){ (map[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==date) return; if((momoOptlogUserToName(e.by))!==person) return; if((shop+PCHOME_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
       rows.push({shop:shop, sku:sku, name:nameBy[sku]||'', type:e.type||'其他', note:e.note||'', time:e.time||''}); }); }); });
+  // 'PChome·補成本' 這類 → 去 ec_momo_optlog|PChome 找（sku＝原廠編號＝PChome 料號）
+  if(String(combo).indexOf(PCHOME_MOMO_OPTLOG_SHOP+PCHOME_OPTLOG_DP_SEP)===0){
+    var nb={}; try{ (pchomeLoadProducts()||[]).forEach(function(p){ nb[p.料號]=p.商品名||''; }); }catch(e){}
+    var mm=momoLoadOptlog(PCHOME_MOMO_OPTLOG_SHOP)||{};
+    Object.keys(mm).forEach(function(sku){ (mm[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==date) return; if(momoOptlogUserToName(e.by)!==person) return; if((PCHOME_MOMO_OPTLOG_SHOP+PCHOME_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
+      rows.push({shop:PCHOME_MOMO_OPTLOG_SHOP, sku:sku, name:nb[sku]||'', type:e.type||'其他', note:e.note||'', time:e.time||''}); }); });
+  }
   rows.sort(function(a,b){ return String(a.time).localeCompare(String(b.time)); });
   var esc=_momoEsc;
   var body=rows.length? rows.map(function(r){ return '<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start"><span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">'+esc(r.time)+'</span><div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><b>'+esc(r.name||r.sku)+'</b> <span style="color:#9ca3af;font-family:monospace">'+esc(r.sku)+'</span></div>'+(r.note?'<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">'+esc(r.note)+'</div>':'')+'</div></div>'; }).join('') : '<div style="padding:14px 2px;color:#9ca3af;font-size:12px">找不到對應紀錄（可能已刪除或改期）</div>';

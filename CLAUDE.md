@@ -338,7 +338,8 @@ ESM 有個致命陷阱必須牢記：
   KPI「從報表帶入」（只寫寄倉）：純函式 `booksKpiFromRecon(帳月)`（訂單數＝訂單明細筆數、營收＝寄倉 Σ成本小計、商品成本＝成本表 × 淨數量（商品貨號＝原廠編號）、平台費＝折讓＋費用報表），
   快照 `snapshots.{月}.preAutofillBooks`、還原 `__kpiBooksRestore`。
   帶入預覽缺成本清單旁「補成本」（`kpiBooksOpenMissingCostPanel` / `kpiBooksMissCostSave`，照酷澎 cupOpenMissingCostPanel 複製）：寫共用成本表（manual、dirty，按「☁ 同步雲端」才上雲），
-  同酷澎也會記一筆「補成本」優化紀錄（`ec_momo_optlog|博客來`，計入工作日誌）。
+  同酷澎也會記一筆「補成本」優化紀錄（`ec_momo_optlog|博客來`）。2026-11-18 起計入工作日誌（之前沒算）：博客來、FriDay 合成一張「博客來／FriDay · 今日調整」卡（kind `bkfd-summary`，跟 momo／coupang-summary 同一次在 `momoUpdateDailyProgress` 算、等 `__optlogReady` 到位才算）；
+  PChome 的補成本（`ec_momo_optlog|PChome`）併進既有「PChome · 今日調整」卡（chip `PChome·補成本`，`pchomeUpdateDailyProgress` 等 `__optlogReady('PChome')` 才算）。
 - `app/health_rules` — 通路健檢的評分標準版本（「從某個月開始適用」，過去月份照舊標準），**不放 app/main**。透過 `window.__cloudHealthRules`：
   讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。**寫入只有 health.js `_hlStdSave`**（評分標準設定視窗，只限管理員）。
   形狀 `{ schema:1, versions:{ 'YYYY-MM':{ from:'YYYY-MM', items:{ pureRate:{ w, lines, linesByChannel?, provisional? }, sellThrough:{…} }, note, by, byName, at } } }`；
