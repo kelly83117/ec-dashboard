@@ -2756,11 +2756,9 @@ function _sweepAllLocalReportsIntoPending(){
   try{ momoClearMoPlusReconPdf(); }catch{}   // 清除 MO+ 月對帳孤兒 doc.pdf（PDF/手動 B/F/I 區塊已移除）→ 同步時整份覆蓋、雲端也去除
   try{ _editsMigrateItemsDirty(); }catch{}   // ec_edits 升級補登記：舊版留下的 key 級 dirty 沒有對應的品號級條目，不補會被 _editsPushGate 判 problem 而永久卡死
   try{   // 一次性遷移：2b 期的本機訂單明細（存過但從未上雲、沒 dirty 標記）→ 標 dirty，使用者下次按「☁ 同步雲端」即上雲。不自動推。
-    if(!localStorage.getItem('ec_pchome_orders_migrated_v1')){
-      var _om=null; try{ _om=localStorage.getItem('ec_pchome_orders'); }catch(e){}
-      if(_om && _om!=='{}' && _om!=='null') pchomeDirtyAdd('ec_pchome_orders');
-      try{ localStorage.setItem('ec_pchome_orders_migrated_v1','1'); }catch(e){}
-    }
+    //   #491：舊版只看「本機有沒有訂單」，雲端訂閱寫進本機的訂單也會被誤標 → 新電腦第一次同步就推回雲端。
+    //   改成只在「本機有雲端沒有的訂單」才標（判斷集中在 _pchomeOrdersMigrateCheck）；雲端還沒到＝這次不判、不設旗標。
+    if(typeof window.__pchomeOrdersCloudLatest!=='undefined') _pchomeOrdersMigrateCheck(window.__pchomeOrdersCloudLatest);
   }catch{}
   try{
     for(let i=0;i<localStorage.length;i++){
@@ -2886,8 +2884,10 @@ function _sweepAllLocalReportsIntoPending(){
       // 成本表 ec_momo_cost_by_origin → momo_cost_by_origin collection（PR #127 起上雲、逐 key merge）。
       //   ⚠ #93 的「本機輔助表·不同步」排除已移除、改回正常同步項——sweep（這裡）與計數端 _momoSyncPendingCount 白名單**兩處都要含它**
       //   （PR #93 血淚：只改一處會「邏輯對但東西不見／亮暗對不上」）。meta（…_meta）不進 pending：隨 cost 那筆一起 read-merge-write。
+      //   #491：只有 dirty（這台真的改過的原廠編號）非空才算待推。舊版本機有就撿 → 每次同步都整份重寫一次成本表、MOMO 鈕常亮。
+      //   計數端 _momoSyncPendingCount 用同一條判準（momoCostDirtyGet().length>0），改一邊要改另一邊。
       if(k==='ec_momo_cost_by_origin'){
-        _pendingSyncKeys.add(k);
+        if(momoCostDirtyGet().length>0) _pendingSyncKeys.add(k);
         if(!(Store._mem&&Store._mem[k])){ try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
         if(!(Store._profitMem&&Store._profitMem[k])){ try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
         continue;
@@ -21164,7 +21164,8 @@ function _momoSyncPendingCount(){
   const _repMap=_REPORT_DIRTY_GATE?_reportDirtyRead().map:null;
   const _repIn=k=>Object.prototype.hasOwnProperty.call(_repMap,k);
   // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
-  _pendingSyncKeys.forEach(k=>{ const _o=_pendingKeyOwner(k); if(_o!=='momo'&&_o!=='shopee')return; if(_REPORT_DIRTY_GATE&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')&&!_repIn(k)&&!_reportDirtyLocalFail.has(k))return; keys.add(k); });   // 白名單：只數 momo 自己的 key（＋蝦皮族 ec|／ec_notes|／ec_split|：momo 的同步會一併推它們，與下面 localStorage 那段同一批）。PChome／酷澎有自己的鈕，不洩漏進來
+  const _costDirty=(()=>{ try{ return momoCostDirtyGet().length>0; }catch{ return false; } })();   // #491：成本表 dirty 閘（sweep 同判準）。(1) 也要擋：同步成功後 momoSaveCostByOrigin 會再 _markPending，不擋鈕會整個 session 常亮
+  _pendingSyncKeys.forEach(k=>{ const _o=_pendingKeyOwner(k); if(_o!=='momo'&&_o!=='shopee')return; if(k==='ec_momo_cost_by_origin'&&!_costDirty)return; if(_REPORT_DIRTY_GATE&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')&&!_repIn(k)&&!_reportDirtyLocalFail.has(k))return; keys.add(k); });   // 白名單：只數 momo 自己的 key（＋蝦皮族 ec|／ec_notes|／ec_split|：momo 的同步會一併推它們，與下面 localStorage 那段同一批）。PChome／酷澎有自己的鈕，不洩漏進來
   // ec_notes dirty 註冊表：迴圈外讀一次。三種狀態的判準與 _notesIsDirty（本檔搜 `function _notesIsDirty`）逐條對齊：
   //   raw===null      註冊表不存在＝從沒人編輯過的正常空狀態 → 都不算（集合空）
   //   非陣列 / throw  內容損毀或 localStorage 被擋 → notesDirtyAll=true（全算進去、鈕亮）
@@ -21181,7 +21182,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || (k==='ec_momo_cost_by_origin' && _costDirty)   /* #491：cost 只有 dirty 非空才算（與 sweep 同判準 momoCostDirtyGet().length>0）。cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|') && (!_REPORT_DIRTY_GATE || (_repIn(k) && !_reportDirtyHold.has(k))))) keys.add(k);
@@ -27124,6 +27125,9 @@ function momoSaveCostMeta(meta){ const k=momoCostMetaKey();
 }
 // 成本表逐 key merge 上雲（sync 任務呼叫）：讀雲端現值 → 只覆蓋本機 dirty 的原廠編號 → 寫回；本機同步吸收同事的 + 清 dirty。
 async function momoSyncCostByOrigin(){
+  // #491：dirty 是空的＝這台沒有改過任何成本 → 直接不讀不寫（舊版會把剛讀到的雲端整份 setDoc 回去，多人同時按同步時可能蓋掉別人剛補的成本）。
+  //   ⚠ 也因此「雲端空 → 整份本機上雲」的首次上雲分支只在 dirty 非空時才會走到（雲端早就有資料，實務上不會再用到）。
+  if(momoCostDirtyGet().length===0){ console.info('[成本表] 本機沒有改過的成本（dirty 空），這次不寫雲端'); return; }
   const snap = await window.__cloudCostByOrigin.getDoc();
   const cd = (snap && snap.exists && snap.exists()) ? (snap.data()||{}) : {};
   const cloudMap = cd.costMap||{}, cloudMeta = cd.meta||{};
@@ -34502,8 +34506,27 @@ async function pchomeSyncOrders(){
 // firebase.js app/pchome_orders 訂閱 → 套用雲端訂單（扁平化帳務月桶）。bounce-back 守衛：
 //   本機有未推（dirty）→ 雲端底 + 本機覆蓋（保住剛上傳未推的、也吸收雲端其他機器新訂單）；乾淨 → 採用雲端（換機/清快取讀回）。
 //   🔴 雲端空且本機有訂單 → 不覆蓋（首次上雲前／尚未推，避免把本機訂單洗掉）。
+// #491：訂單一次性遷移的唯一判斷（sweep、PChome 預覽、本訂閱三處共用）。旗標 ec_pchome_orders_migrated_v1 設了就不再判。
+//   本機沒有訂單 → 設旗標（不用遷移）；雲端快照是空的 → 這次不判、不設旗標（沒開 persistence，離線時可能先送空快照，不能當成「雲端沒有」）；
+//   其他 → 本機有雲端沒有的訂單才標 dirty（2b 期存過、從沒上雲的那種），然後設旗標。回傳這次有沒有標 dirty。
+//   ⚠ 一定要在下面套用雲端之前呼叫：乾淨時套用會直接改成雲端版，本機獨有的訂單就不見了。
+function _pchomeOrdersMigrateCheck(monthBuckets){
+  try{
+    if(localStorage.getItem('ec_pchome_orders_migrated_v1')) return false;
+    var data=monthBuckets||{}, cloudFlat={};
+    Object.keys(data).forEach(function(bm){ var b=data[bm]; if(b&&typeof b==='object') Object.keys(b).forEach(function(k){ cloudFlat[k]=b[k]; }); });
+    var localMap=pchomeLoadOrders()||{}, localKeys=Object.keys(localMap);
+    if(localKeys.length===0){ localStorage.setItem('ec_pchome_orders_migrated_v1','1'); return false; }
+    if(Object.keys(cloudFlat).length===0) return false;
+    var onlyLocal=localKeys.filter(function(k){ return !Object.prototype.hasOwnProperty.call(cloudFlat,k); });
+    if(onlyLocal.length){ pchomeDirtyAdd('ec_pchome_orders'); console.warn('[pchome orders] 一次性遷移：本機有 '+onlyLocal.length+' 筆雲端沒有的訂單 → 標待同步（按「☁ 同步雲端」才推）', onlyLocal.slice(0,10)); }
+    localStorage.setItem('ec_pchome_orders_migrated_v1','1');
+    return onlyLocal.length>0;
+  }catch(e){ return false; }
+}
 window.__pchomeApplyCloudOrders=function(monthBuckets){
   try{
+    try{ _pchomeOrdersMigrateCheck(monthBuckets); }catch(e){}   // #491：先判遷移（要在決定 dirty／套用雲端之前）
     var data=monthBuckets||{}, cloudFlat={};
     Object.keys(data).forEach(function(bm){ var b=data[bm]; if(b&&typeof b==='object') Object.keys(b).forEach(function(k){ cloudFlat[k]=b[k]; }); });
     var localMap=pchomeLoadOrders()||{};
@@ -35081,6 +35104,9 @@ function pchomeReconConflict(local, cloud){ local=local||{}; cloud=cloud||{}; va
 // 同步預覽（完全照 momo momoRenderSyncPreviewModal：class/內聯樣式/用字/警示 box/全選計數/confirm() 二次攔截；確認鈕綠 #10b981；差異走 .mm-sync-diff）
 async function pchomeOpenSyncPreview(shop){
   if(!window.__cloudProfit){ if(typeof showToast==='function') showToast('雲端未連線','error'); return; }
+  // #491：確認同步時 syncToCloud 會跑 sweep（含訂單一次性遷移）。先在這裡判一次，真的有本機獨有的訂單時預覽就會列出來，
+  //   不會發生「預覽沒列、確認後才標 dirty、這次又不推」的殘留標記。
+  try{ if(typeof window.__pchomeOrdersCloudLatest!=='undefined') _pchomeOrdersMigrateCheck(window.__pchomeOrdersCloudLatest); }catch(e){}
   var keys=pchomePendingKeys();
   if(!keys.length){ if(typeof showToast==='function') showToast('目前沒有待同步的 PChome 資料',''); return; }
   var recon=pchomeLoadRecon(), prods=pchomeLoadProducts();
@@ -36206,6 +36232,7 @@ function pchomeCostFile(shop,e){
     var r=momoPersistCostByOrigin(cost.costByOrigin)||{};
     var added=r.added||0, updated=r.updated||0, prot=(r.protected&&r.protected.length)||0;
     var pc=pchomeApplyCostTable(oldMap);   // 兩個賣場共用同一份商品主檔 → 一次上傳兩邊一起更新
+    if(pc&&pc.changed){ try{ PCHOME_OV_SHOPS.forEach(function(s){ pchomeRefreshSyncBtn(s); }); }catch(e){} }   // #490 同類：主檔有改 → 兩家同步鈕立刻亮
     if(msg){ msg.textContent='已匯入共用成本表：新增 '+added+'、更新 '+updated+(prot?('、保留人工值 '+prot):'')+'（四賣場共用）。PChome 商品成本同步更新 '+pc.changed+' 個（轉單、寄倉一起）'+(pc.kept?('，手動改過的 '+pc.kept+' 個保留'):'')+'。到「☁ 同步雲端」推上雲（成本表隨 MOMO 同步）。'; msg.style.color='#059669'; }
   }).catch(function(err){
     var m=(err&&err.message)||String(err);
@@ -36338,6 +36365,8 @@ function pchomeConfirmListingMerge(shop){
   var o=document.getElementById('pchome-listing-ov'); if(o) o.remove();
   var msg=document.getElementById('pchome-listing-msg-'+shop);
   if(msg){ msg.textContent='已合併寫入（新增 '+plan.adds.length+'／更新 '+plan.updates.length+'／標下架 '+plan.vanishes.length+'）｜主檔 '+((out||[]).length)+' 料號、匯出時間 '+(匯出t||'未知')+'。到「☁ 同步雲端」推上雲。'; msg.style.color='#059669'; }
+  // #490：主檔兩家共用 → 轉單、寄倉的同步鈕都要刷新（pchomeSaveProducts 的 _markPending 只更新全域鈕）
+  try{ PCHOME_OV_SHOPS.forEach(function(s){ pchomeRefreshSyncBtn(s); }); }catch(e){}
 }
 // ── 月對帳：對帳明細 CSV → 存營收/費用/訂單明細（snapshot 覆蓋）＋費用卡＋(F)勾稽＋料號 diff 警告。不建商品主檔（主檔改由上架清單負責）──
 function pchomeReconTabHTML(shop){
