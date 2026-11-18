@@ -12949,11 +12949,17 @@ function _kpiFillHtml(row){
   if(group.key==='coupang'){
     const canBtn=month>=KPI_COUPANG_SINCE;
     const cps=canBtn?KPI_COUPANG_SHOPS.map(s=>{try{return coupangKpiFromProfit(KPI_COUPANG_PROFIT_SHOP[s],month);}catch(e){return{ok:false};}}):[];
-    const anyReady=cps.some(c=>c.ok);
+    const repReady=cps.some(c=>c.ok);
     const anyOld=cps.some(c=>c.oldFormat);
+    // 直接開 KPI（沒進過淨利表酷澎）時酷澎報表還沒訂閱 → 原本會誤顯示「淨利表尚未產表」。先載酷澎報表＋接雲端成本表，載完重畫；載入期間顯示「載入中」。
+    // 成本是帶入當下用本機成本表算的 → 成本表沒接上雲端前不准帶入（灰字「成本表載入中」）。
+    const costOk=!canBtn||!repReady||momoCostMatchesCloud();
+    const loading=canBtn&&(!_kpiCupDataTried||(repReady&&!costOk));
+    if(loading) _kpiCupCostWait();
+    const anyReady=repReady&&costOk;
     const h=anyReady?_kpiCoupangAutoHint(month,row):null;
-    const offShort=!canBtn?'2026-06 以前':(anyOld?'報表舊格式':'淨利表尚未產表');
-    const offHint=!canBtn?'2026-06 以前維持手填':(anyOld?'此月報表為舊格式（營收沒扣賣家優惠券），請重新上傳 DeliveryList 後產表':'淨利表尚未產表');
+    const offShort=!canBtn?'2026-06 以前':(anyOld?'報表舊格式':(repReady?'成本表載入中':(loading?'載入中':'淨利表尚未產表')));
+    const offHint=!canBtn?'2026-06 以前維持手填':(anyOld?'此月報表為舊格式（營收沒扣賣家優惠券），請重新上傳 DeliveryList 後產表':(repReady?'成本表正在接上雲端（成本是用共用成本表當下算的，接上前不帶入，免得用到這台的舊成本）':(loading?'正在載入酷澎報表與成本表':'淨利表尚未產表')));
     autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${(canBtn&&anyReady)?'':`<span class="km-au-hint" title="${_kpiEscAttr(offHint)}">${_kpiEscAttr(offShort)}</span>`}<span class="km-howto">怎麼傳？${_kpiInfoHtml('酷澎在淨利表上傳（淨利表 → 酷澎 → 訂單明細，先選好賣場）：',COUPANG_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${(canBtn&&anyReady)?'':' km-au-off'}"${(canBtn&&anyReady)?'':' disabled'} onclick="kpiCoupangAutoFill()" title="${_kpiEscAttr(canBtn?'商城兩店的訂單數、營收（淨額＝扣賣家券；DeliveryList 匯出時已移除退貨訂單，營收已是退貨後淨額，不再扣 MSF 退貨）、商品成本、平台費，從淨利表酷澎同店同月合計帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；耗材自動（訂單數×3）；退貨運費、酷澎買斷手填。':'2026-06 以前維持手填，不帶入')}">從淨利表帶入 ${month.replace('-','/')}</button></span>`;
   }
   return `<div class="km-fill">
@@ -15085,17 +15091,26 @@ function _kpiCoupangSnapGet(month){
 }
 // 酷澎報表＋成本表跟 MOMO 一起懶載入（__loadCoupangSubs / __loadMomoSubs）；帶入前先要求載入，最多等 15 秒。
 //   就緒＝成本表有值 ＋ 酷澎 collection 至少收到一次快照（用 _profitMem 有無 ec_coupang| key 判斷；正式站必有既有報表 doc）。
+//   2026-11-18 補修：成本是帶入當下用本機成本表算的（coupangKpiFromProfit 讀 momoLoadCostByOrigin，報表本身不存成本），
+//   所以成本表一律要先接上雲端（momoCostEnsureCloud：本機 dirty 以外＝雲端），本機有舊表也一樣；沒接上不准帶入。
+//   回 {ok, cost}：ok＝報表與成本表都到；cost＝成本表已接上雲端。
 async function _kpiEnsureCoupangData(){
   const t0=Date.now();
   try{if(typeof window.__loadCoupangSubs==='function')window.__loadCoupangSubs();}catch{}
-  if(!Object.keys(momoLoadCostByOrigin()||{}).length){try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}}
+  const costP=momoCostEnsureCloud(15000);
   const cupSnap=()=>_cupScanKeys('ec_coupang|',cupIsReportKey).length>0;
-  while(Date.now()-t0<15000){
-    if(Object.keys(momoLoadCostByOrigin()||{}).length&&cupSnap())return true;
-    await new Promise(r=>setTimeout(r,300));
-  }
-  return cupSnap();
+  while(Date.now()-t0<15000&&!cupSnap()) await new Promise(r=>setTimeout(r,300));
+  const cost=await costP;
+  return {ok:cost&&cupSnap(), cost, report:cupSnap()};
 }
+// KPI 酷澎鈕的背景載入：酷澎報表（__loadCoupangSubs）＋雲端成本表（momoCostEnsureCloud），等到了（或逾時）重畫一次 KPI。
+//   _kpiCupDataTried：至少完整等過一次 → 之後報表真的沒有才顯示「淨利表尚未產表」（不會一直卡在載入中）。
+let _kpiCupCostWaitP=null, _kpiCupDataTried=false, _kpiCupWaitFailAt=0;
+//   沒接上（逾時）就 60 秒內不再自動重試、也不重畫，避免一直重畫打斷填寫；只有「第一次等完」或「成本表接上了」才重畫。
+function _kpiCupCostWait(){ if(_kpiCupCostWaitP) return; if(_kpiCupDataTried&&_kpiCupWaitFailAt&&Date.now()-_kpiCupWaitFailAt<60000) return;
+  const first=!_kpiCupDataTried;
+  _kpiCupCostWaitP=_kpiEnsureCoupangData().then(r=>{ _kpiCupCostWaitP=null; _kpiCupDataTried=true; _kpiCupWaitFailAt=(r&&r.cost)?0:Date.now();
+    if((first||(r&&r.cost))&&document.getElementById('kpi-tab-content')){ try{ _kpiRefreshViews(); }catch(e){} } }); }
 async function kpiCoupangAutoFill(){
   const month=_kpiYM();
   if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
@@ -15103,7 +15118,8 @@ async function kpiCoupangAutoFill(){
   const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入酷澎資料與成本表中…';}
   const ready=await _kpiEnsureCoupangData();
   if(btn){btn.disabled=false;btn.textContent='從淨利表帶入 '+month.replace('-','/');}
-  if(!ready){if(typeof showToast==='function')showToast('酷澎報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  if(!ready.cost){if(typeof showToast==='function')showToast('成本表還沒接上雲端（載入中或網路慢），為了不用舊成本算，這次不帶入，請稍後再按一次','error',6000);return;}
+  if(!ready.ok){if(typeof showToast==='function')showToast('酷澎報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
   {const cps=KPI_COUPANG_SHOPS.map(s=>coupangKpiFromProfit(KPI_COUPANG_PROFIT_SHOP[s],month));
    if(!cps.some(c=>c.ok)){if(typeof showToast==='function')showToast(cps.some(c=>c.oldFormat)?'此月報表為舊格式，請重新上傳 DeliveryList 後產表':'淨利表尚未產表（商城兩店）','error',6000);renderKpiTab();return;}}
   const plan=_kpiCoupangAutoPlan(month);
@@ -27196,6 +27212,46 @@ function momoCostDirtyKey(){ return 'ec_momo_cost_dirty'; }
 function momoCostDirtyGet(){ try{ const l=localStorage.getItem(momoCostDirtyKey()); const a=l?JSON.parse(l):[]; return Array.isArray(a)?a:[]; }catch{ return []; } }
 function momoCostDirtyAdd(origin){ try{ const s=new Set(momoCostDirtyGet()); s.add(origin); localStorage.setItem(momoCostDirtyKey(),JSON.stringify([...s])); }catch{} }
 function momoCostDirtyClear(keys){ try{ if(!keys){ localStorage.removeItem(momoCostDirtyKey()); return; } const rm=new Set(keys); const left=momoCostDirtyGet().filter(k=>!rm.has(k)); localStorage.setItem(momoCostDirtyKey(),JSON.stringify(left)); }catch{} }
+// ── 共用成本表「已接上雲端」（2026-11-18 成本表訂閱補修）──
+//   成本表訂閱跟 MOMO 組一起懶載（__loadMomoSubs，載過不重訂）。只要本機有一份舊表、又沒進過 MOMO 頁，就會一直用舊表算
+//   （實例：Gini 本機 7,128 筆 vs 雲端 7,212 筆、488 筆不同，好麻吉 2026-10 淨利 84,542 vs 84,608）。
+//   momoCostEnsureCloud()：確保訂閱已開 → 讀一次雲端現值 → 等到「本機（dirty 以外）＝雲端」才回 true（訂閱的套用規則不動：有 dirty 的不覆蓋）。
+//   比對的雲端現值會在 momoCostByOriginReady（別人改了、訂閱套用了）或每 3 秒重讀，避免拿過期的那份比。逾時回 false。
+let _costCloudMap=null, _costCloudP=null, _costCloudAt=0;
+function _costCloudFetch(force){
+  if(force||!_costCloudP){
+    _costCloudP=(async()=>{ try{ const snap=await window.__cloudCostByOrigin.getDoc(); const d=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{}; _costCloudMap=d.costMap||{}; _costCloudAt=Date.now(); return true; }catch(e){ _costCloudP=null; return false; } })();
+  }
+  return _costCloudP;
+}
+try{ window.addEventListener('momoCostByOriginReady', ()=>{ _costCloudAt=0; }); }catch(e){}
+function momoCostMatchesCloud(){
+  if(!_costCloudMap) return false;
+  const c=_costCloudMap, l=momoLoadCostByOrigin()||{}, dirty=new Set(momoCostDirtyGet().map(String));
+  for(const k in c){ if(dirty.has(k)) continue; if(!Object.prototype.hasOwnProperty.call(l,k) || String(l[k])!==String(c[k])) return false; }
+  for(const k in l){ if(dirty.has(k)) continue; if(!Object.prototype.hasOwnProperty.call(c,k)) return false; }
+  return true;
+}
+let _costEnsureP=null;
+function momoCostEnsureCloud(timeoutMs){
+  try{ if(typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
+  if(_costCloudMap && _costCloudAt && momoCostMatchesCloud()) return Promise.resolve(true);
+  if(_costEnsureP) return _costEnsureP;
+  _costEnsureP=(async()=>{
+    const t0=Date.now(), lim=timeoutMs||20000;
+    try{
+      if(!(await _costCloudFetch(!_costCloudAt))) return false;
+      while(Date.now()-t0<lim){
+        if(momoCostMatchesCloud()) return true;
+        await new Promise(r=>setTimeout(r,300));
+        if(!_costCloudAt || Date.now()-_costCloudAt>3000) await _costCloudFetch(true);
+      }
+      return momoCostMatchesCloud();
+    }finally{ _costEnsureP=null; }
+  })();
+  return _costEnsureP;
+}
+window.__momoCostCloudState=function(){ return { fetched:!!_costCloudMap, cloudN:_costCloudMap?Object.keys(_costCloudMap).length:null, localN:Object.keys(momoLoadCostByOrigin()||{}).length, dirty:momoCostDirtyGet().length, matches:momoCostMatchesCloud() }; };   // Console 只讀
 function momoMergeByKey(cloud, local, dirtyKeys){
   const out=Object.assign({}, cloud||{});
   (dirtyKeys||[]).forEach(k=>{ if(local && Object.prototype.hasOwnProperty.call(local,k)) out[k]=local[k]; else delete out[k]; });
@@ -28259,8 +28315,9 @@ function setMomoShop(shop,btn){
 function setCoupangShop(shop,btn){
   // ⚡ 懶載酷澎組（coupang_reports/msf/note）。含總表：酷澎逐店表需要各店 coupang doc；切回同平台不重訂。
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
-  // 酷澎頁也要共用成本表：沒進過 MOMO 頁、本機又沒有成本表的電腦，整頁會變成缺成本。照 KPI _kpiEnsureCoupangData 的做法載 MOMO 組（含成本表訂閱，載過不重訂）。
-  try{ if(!Object.keys(momoLoadCostByOrigin()||{}).length && typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
+  // 酷澎頁的成本一律接雲端成本表：不看本機有沒有（本機有舊表也要訂閱，不然一直用舊表算）。momoCostEnsureCloud 會開 MOMO 組訂閱（載過不重訂），
+  //   訂閱照既有規則套用（有 dirty 的不覆蓋）、發 momoCostByOriginReady → _cupRedrawIfVisible 重畫；接上後再補一次重畫。
+  try{ momoCostEnsureCloud().then(ok=>{ if(ok) _cupRedrawIfVisible(); else console.warn('[酷澎] 成本表 20 秒內沒有接上雲端，暫用本機成本表'); }); }catch(e){}
   // 換通路先清已選未處理的檔案（_cupFiles 是兩家共用的全域）：杜絕「好麻吉選的檔切到露營館直接產表」。同一家重畫不清（上傳分頁靠 _cupFiles 顯示已選檔名）。
   if(_cupFilesShop && _cupFilesShop!==shop) cupClearStagedFiles();
   //   另一家的畫面也清掉：兩家的上傳分頁用同一組 id（cup-order-status／cup-gen-btn…），舊的留在 DOM 裡，getElementById 會抓到隱藏那家的，
