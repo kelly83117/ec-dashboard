@@ -17707,8 +17707,8 @@ function setCoupangSummaryView(v){
 // 不用再手動輸入一次；月份選單切換時（onCupMonthChange）跟頁籤第一次開啟時都會呼叫這裡。
 function _cupKpiShopData(row,shop){
   const group=KPI_GROUPS.find(g=>g.key==='coupang');
-  const raw=row?.coupang?.[shop]||{};
-  const d=_kpiCalcAll(raw,group);
+  // #500：要走 _kpiShopCalc（＝_kpiCalcAll(_kpiRawForCalc(...))），跟 KPI 頁同一支；直接 _kpiCalcAll(raw) 會漏掉 autoFill（耗材＝訂單數×$3），純利偏高。
+  const d=_kpiShopCalc(row,group,shop);
   const rev=d.rev||0,pure=d.pure||0;
   return{qty:d.qty||0,rev,cost:d.cost||0,fee:d.fee||0,ret:d.ret||0,tax:d.tax||0,material:d.material||0,pure,rate:rev>0?pure/rev*100:null};
 }
@@ -31244,6 +31244,10 @@ function cupBuildRows(rd, nameByCode){
 // 舊格式偵測（2026-11-05 加賣家券扣除前的報表）：有資料列但缺 sellerCoupon 欄 → 舊格式（營收是 gross、沒扣賣家券）。
 //   空／null＝沒有報表（不是舊格式）。淨利表顯示紅字、KPI 帶入 disabled，不默默用 gross。
 function _cupRowsOld(rows){ return Array.isArray(rows) && rows.length>0 && rows[0].sellerCoupon==null; }
+// 酷澎淨利表的營業稅（2026-11-18，Vanessa 決定照 MOMO MO+ momoMoPlusMarginCalc）：營收是含稅淨額 → 內含營業稅＝營收 × 5/105。
+//   🔴 只用在畫面（cupEnrichRows／cupSkuMonthly）：不存進報表（cupBuildRows 不動）、KPI 帶入（coupangKpiFromProfit）不讀它。
+//   不四捨五入（同 MO+ 與 KPI 稅金公式欄），逐列加總＝營收合計 × 5/105。毛利不扣稅；耗材、退貨運費只在 KPI 扣。
+function cupVatOf(rev){ return (Number(rev)||0)*5/105; }
 // render 時 live 補 cost/net/costStatus（缺成本＝真缺 missing／純數字條碼 barcode；不用 0 頂替）
 function cupEnrichRows(rows){
   const costMap=momoLoadCostByOrigin();
@@ -31251,10 +31255,11 @@ function cupEnrichRows(rows){
     const unit=costMap[r.code], has=(unit!=null&&!isNaN(+unit));
     r.cost = has ? Math.round((+unit)*(r.qty||0)) : null;
     r.costStatus = has ? 'ok' : (/^\d+$/.test(r.code) ? 'barcode' : 'missing');
-    r.gross = has ? ((r.rev||0)-(r.cost||0)) : null;                 // 毛利 = 營收 − 成本
+    r.gross = has ? ((r.rev||0)-(r.cost||0)) : null;                 // 毛利 = 營收 − 成本（不扣稅）
     r.grossRate = (r.gross!=null&&r.rev>0) ? r.gross/r.rev : null;
-    r.net = has ? ((r.rev||0)-(r.cost||0)-(r.fee||0)) : null;        // 淨利 = 毛利 − 平台費用($2/單已含在 fee)
-    r.netRate = (r.net!=null&&r.rev>0) ? r.net/r.rev : null;
+    r.tax = cupVatOf(r.rev);                                          // 營業稅 = 營收 × 5/105（只在記憶體，不存）
+    r.net = has ? ((r.rev||0)-r.tax-(r.cost||0)-(r.fee||0)) : null;  // 淨利 = 營收 − 營業稅 − 成本 − 平台費用($2/單已含在 fee)
+    r.netRate = (r.net!=null&&r.rev>0) ? r.net/r.rev : null;         // 分母＝含稅營收（同 MO+ 與 KPI 純利率）
     r.stock = (r.stock!=null) ? r.stock : null;   // PR-3b：保留報表 doc 帶來的庫存（舊 doc 無此欄→undefined→null→顯示「—」）；dispId 原樣透傳
   });
   return rows;
@@ -31265,7 +31270,8 @@ function cupKpi(rows){
   const net=cov.reduce((s,r)=>s+(r.net||0),0);
   const cRev=cov.reduce((s,r)=>s+(r.rev||0),0);
   const qty=rows.reduce((s,r)=>s+(Number(r.qty)||0),0);
-  return { rev, net, rate:(cRev>0?net/cRev*100:null), qty };
+  const tax=cov.reduce((s,r)=>s+(Number(r.tax)||0),0);   // 本期淨利扣掉的營業稅（只算有成本的列，同 net）
+  return { rev, net, rate:(cRev>0?net/cRev*100:null), qty, tax };
 }
 // 退貨率（銷售確認月）：Σ 各 MSF doc 的 byConfirmMonth[month]。MSF 檔是每月一份（非累積），跨 docs 加總不重複計。
 //   回 { rate, saleNet, retNet } 或 null（沒上傳該月 MSF、或舊格式 MSF doc 無 byConfirmMonth、或 saleNet≤0）。
@@ -31330,7 +31336,7 @@ function cupProfitTabHTML(shop){
   if(!_cupSelMonth[shop] || months.indexOf(_cupSelMonth[shop])<0) _cupSelMonth[shop]= months.length?months[months.length-1]:'';   // 選值不在可見集合→重設到最新有資料月（照 MO+）
   const sel=_cupSelMonth[shop];
   const monthOpts = months.length ? [...months].reverse().map(m=>`<option value="${m}"${m===sel?' selected':''}>${m.slice(0,4)}/${+m.slice(5,7)}</option>`).join('') : `<option value="">尚無期別資料</option>`;
-  const cmpTip='上面三格跟「上個月」比。營收/成本/淨利都取自 DeliveryList（已是退貨後淨額）。表格逐列不做跨期比較。';
+  const cmpTip='加權淨利率＝淨利 ÷ 營收（只算有成本的商品；淨利已扣營業稅＝營收×5/105，同 MOMO）。上面三格跟「上個月」比。營收/成本/淨利都取自 DeliveryList（已是退貨後淨額）。表格逐列不做跨期比較。';
   return `
     <div style="margin-bottom:12px"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupSelectMonth('${shop}',this.value)">${monthOpts}</select></span></div>
     <div class="mm-kpis" style="margin-bottom:10px">
@@ -31384,7 +31390,8 @@ function cupRenderProfitBody(shop){
   const feeRule='費率規則（已內含在「平台費用」欄，基數＝扣賣家券後的商品淨額）：成交手續費 <b>5.5%</b> ＋ 金流/系統費 <b>2%</b> ＋ 免運活動服務費 <b>7%</b>（所有訂單）＋ 金流 2%×運費 ＋ 發票代收轉付 <b>$2/訂單</b>。';
   const couponNote=oldFmt
     ? '<div style="color:#dc2626;font-weight:700;margin-bottom:4px">⚠ 此月報表為舊格式（營收沒有扣賣家優惠券），請到「訂單明細」重新上傳 DeliveryList 後產表</div>'
-    : (monthCoupon>0?'<div style="color:#6b7280;margin-bottom:4px">營收已扣賣家優惠券（本月 −'+momoMoney(monthCoupon)+'）</div>':'');
+    : ('<div style="color:#6b7280;margin-bottom:4px">'+(monthCoupon>0?'營收已扣賣家優惠券（本月 −'+momoMoney(monthCoupon)+'）；':'')
+        +(rows.length?'淨利已扣營業稅 '+momoMoney(kpi.tax||0)+'（營收 × 5/105，同 MOMO），耗材、退貨運費只在 KPI 扣':'')+'</div>');
   set('cup-fee-rule-'+shop, couponNote+feeRule);
   // 最新月份提醒：DeliveryList 匯出/上傳時間若早於「該月最後一天 + 25 天」，此月可能還有退貨未結算（DeliveryList 尚未移除）。
   //   報表沒存匯出時間 → 用上傳時間（saved.ts）判斷。
@@ -31450,7 +31457,7 @@ function cupExportExcel(shop){
   if(!rows.length){ alert('尚無資料可匯出'); return; }
   const hc=getCupHiddenCols(); const cols=getCupOrderedCols().filter(c=>!hc.has(c.k));
   const cellVal=(r,c)=>{ const v=r[c.k];
-    if(c.k==='cost'||c.k==='gross'||c.k==='net'){ if(r.costStatus==='missing') return '缺成本'; if(r.costStatus==='barcode') return '—(條碼)'; return v==null?'':v; }
+    if(c.k==='cost'||c.k==='gross'||c.k==='net'){ if(r.costStatus==='missing') return '缺成本'; if(r.costStatus==='barcode') return '—(條碼)'; return v==null?'':(c.k==='net'?Math.round(v):v); }   // 淨利扣營業稅（營收×5/105）後有小數 → 匯出取整數，同畫面 momoMoney
     if(c.k==='stock') return v==null?'':v;   // PR-3b：匯出真實庫存（未上傳 PI→null→空白）
     if(c.fmt==='pct') return v==null?'':+(v*100).toFixed(1);
     return v==null?'':v;
@@ -31464,7 +31471,7 @@ function cupRenderUploadTab(shop){
   const st=(f)=> _cupFiles[f]?`<span class="mm-ok">✓ ${_momoEsc(_cupFiles[f].name)}</span>`:`<span class="mm-muted">未選</span>`;
   return `<div style="max-width:760px">
     <div class="mm-note" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#075985">
-      酷澎報表<b>逐月上傳</b>（訂購日期單月）。營收＝選項價格×數量 − 賣家優惠券（匯出時已排除退貨單，營收就是退貨後的淨額）、費用照官方規則估算（成交5.5%＋金流2%＋免運7%，基數是訂單商品淨額；金流另加運費×2%；發票$2/單）、成本查莫筆克（原廠編號）。MSF 付款明細<b>只用來看退貨率</b>（銷售確認月），不調整營收、成本、費用。
+      酷澎報表<b>逐月上傳</b>（訂購日期單月）。營收＝選項價格×數量 − 賣家優惠券（匯出時已排除退貨單，營收就是退貨後的淨額）、費用照官方規則估算（成交5.5%＋金流2%＋免運7%，基數是訂單商品淨額；金流另加運費×2%；發票$2/單）、成本查莫筆克（原廠編號）、淨利扣營業稅（營收×5/105）。MSF 付款明細<b>只用來看退貨率</b>（銷售確認月），不調整營收、成本、費用。
     </div>
     <div class="mm-uprow"><div class="mm-uplbl">我的訂單 <span class="mm-code">Delivery</span><span class="req">*必要</span><div class="mm-hint">營收/運費/成本對應·單月</div></div>
       <div class="mm-upctl"><input type="file" id="cup-order-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'order')"><span id="cup-order-status" style="font-size:12px">${st('order')}</span></div></div>
@@ -31903,8 +31910,8 @@ const CUP_TABLE_COLS=[
   {k:'gross',label:'毛利',fmt:'grossCell',w:100,info:'毛利 ＝ 營收 − 成本。'},
   {k:'grossRate',label:'毛利率',fmt:'pct',w:90,info:'毛利率 ＝ 毛利 ÷ 營收。'},
   {k:'fee',label:'平台費用',fmt:'num',w:104,info:'成交手續費 5.5% ＋ 金流/系統費 2% ＋ 免運活動服務費 7%（僅免運訂單）＋ 發票代收轉付 $2/訂單，合計約 13.94%。'},
-  {k:'net',label:'淨利',fmt:'netCell',w:100,info:'淨利 ＝ 毛利 − 平台費用。'},
-  {k:'netRate',label:'淨利率',fmt:'pct',w:90,info:'淨利率 ＝ 淨利 ÷ 營收。'},
+  {k:'net',label:'淨利',fmt:'netCell',w:100,info:'淨利 ＝ 營收 × 100/105（扣營業稅）− 成本 − 平台費用（＝毛利 − 營業稅 − 平台費用；營業稅＝營收 × 5/105，同 MOMO MO+）。耗材、退貨運費只在 KPI 扣。滑鼠移到格子上看該列扣了多少營業稅。'},
+  {k:'netRate',label:'淨利率',fmt:'pct',w:90,info:'淨利率 ＝ 淨利 ÷ 營收（含稅營收，同 MOMO MO+ 與 KPI 純利率）。'},
   {k:'stock',label:'庫存',fmt:'stockCell',w:80,info:'來源 price_inventory 檔；未上傳該檔＝整欄顯示「—」（缺資料、非商品缺庫存）。'},
   {k:'note',label:'調整',w:130,info:'手動備註／調整（本機記錄）。'},
 ];
@@ -32115,7 +32122,9 @@ function renderCoupangTableBody(shop){
       if(c.fmt==='netCell'){
         if(r.costStatus==='barcode') return `<td title="無成本 → 無法算淨利（純數字條碼）" style="color:#9ca3af">—</td>`;
         if(r.costStatus==='missing'||v==null) return `<td title="缺成本 → 淨利不計（未用 0 頂替）" style="color:#dc2626;font-weight:600">缺成本</td>`;
-        return `<td>${momoMoney(v)}</td>`;   // 照抄 MO+ 金額欄：預設字重/色
+        // 照 MO+ 淨利率格的滑鼠提示（22325）：寫出扣了多少營業稅
+        const nTip=`淨利 ${momoMoney(v)} ＝ 營收 ${momoMoney(r.rev||0)} − 營業稅 ${momoMoney(r.tax||0)}（營收×5/105）− 成本 ${momoMoney(r.cost||0)} − 平台費用 ${momoMoney(r.fee||0)}`;
+        return `<td title="${_momoEsc(nTip)}">${momoMoney(v)}</td>`;   // 照抄 MO+ 金額欄：預設字重/色
       }
       if(c.fmt==='stockCell'){ return (v==null)
         ? `<td title="未上傳 price_inventory（或此月無此檔）→ 庫存無資料；非商品缺庫存" style="color:#9ca3af">—</td>`
@@ -32229,7 +32238,7 @@ function cupSkuMonthly(shop, code){
     const qty=row?Number(row.qty)||0:0, rev=row?Number(row.rev)||0:0, fee=row?Number(row.fee)||0:0;
     const active=qty>0||Math.abs(rev)>0.5;
     const cost=hasCost?Math.round((+unit)*qty):null;
-    const net=(hasCost)?(rev-cost-fee):null;
+    const net=(hasCost)?(rev-cupVatOf(rev)-cost-fee):null;   // 同 cupEnrichRows：扣營業稅（營收×5/105）
     return { mo:m, label:m.slice(2,4)+'/'+m.slice(5,7), qty, active,
       margin:(active&&net!=null&&rev>0)?(net/rev*100):null,     // 淨利率 %
       avgPrice:(active&&qty>0)?(rev/qty):null };                 // 成交均價＝淨額/件
@@ -32268,7 +32277,8 @@ function cupRenderAnalysis(shop, r){
     ${mrow('毛利',grossTxt,'營收 − 成本')}
     ${mrow('毛利率',r.costStatus==='ok'?pct(r.grossRate):'—','')}
     ${mrow('平台費用',money(r.fee),'成交5.5%+金流2%+免運7%+$2/單')}
-    ${mrow('淨利',netTxt,'毛利 − 平台費用')}
+    ${mrow('營業稅','−'+money(r.tax),'營收 × 5/105')}
+    ${mrow('淨利',netTxt,'毛利 − 營業稅 − 平台費用')}
     ${mrow('淨利率',r.costStatus==='ok'?pct(r.netRate):'—','')}
     ${mrow('庫存',r.stock==null?'—':Number(r.stock).toLocaleString(),r.stock==null?'未上傳 price_inventory':'price_inventory')}
   </table></div>`;
@@ -32288,6 +32298,7 @@ function cupRenderAnalysis(shop, r){
     ${mrow('淨額／件',per(r.rev)!=null?money(per(r.rev)):'—','營收基礎')}
     ${mrow('成本／件',(r.costStatus==='ok'&&per(r.cost)!=null)?money(per(r.cost)):(barcode?'—':'缺成本'),'莫筆克單位成本')}
     ${mrow('毛利／件',(r.costStatus==='ok'&&per(r.gross)!=null)?money(per(r.gross)):(barcode?'—':'缺成本'),'')}
+    ${mrow('營業稅／件',per(r.tax)!=null?money(per(r.tax)):'—','淨額 × 5/105')}
     ${mrow('淨利／件',(r.costStatus==='ok'&&per(r.net)!=null)?money(per(r.net)):(barcode?'—':'缺成本'),'')}
   </table>${costEdit}`;
   ov.innerHTML=`<div class="ana-modal" style="width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
