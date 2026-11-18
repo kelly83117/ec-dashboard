@@ -12935,7 +12935,8 @@ function _kpiFillHtml(row){
   if(group.key==='friday'){
     const auBtn=(site)=>{
       const fr=fridayKpiFromRecon(month,null,site),h=fr.ok?_kpiFridayAutoHint(month,row,site):null;
-      return `${h==='changed'?'<span class="km-au-hint">'+site+'來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">${site}等上傳</span>`}<button id="km-au-btn-${site}" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill('${site}')" title="${_kpiEscAttr(fr.ok?site+'的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填。'+(site==='i站'?'（i站平台費＝聯合曝光費（每列總價×1%）＋促銷折扣負擔，規則待第一張結帳單驗證。）':''):fr.why)}">從報表帶入（${site}）${month.replace('-','/')}</button>`;
+      const cOk=!fr.ok||_kpiCostGate(), ok=fr.ok&&cOk;   // 商品成本用共用成本表當下算 → 沒接上雲端前不准帶入
+      return `${h==='changed'?'<span class="km-au-hint">'+site+'來源已更新，可重新帶入</span>':''}${fr.ok?(cOk?'':'<span class="km-au-hint" title="成本表正在接上雲端（商品成本用共用成本表當下算，接上前不帶入，免得用到這台的舊成本）">成本表載入中</span>'):`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">${site}等上傳</span>`}<button id="km-au-btn-${site}" class="km-au-btn${ok?'':' km-au-off'}"${ok?'':' disabled'} onclick="kpiFridayAutoFill('${site}')" title="${_kpiEscAttr(fr.ok?site+'的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填。'+(site==='i站'?'（i站平台費＝聯合曝光費（每列總價×1%）＋促銷折扣負擔，規則待第一張結帳單驗證。）':''):fr.why)}">從報表帶入（${site}）${month.replace('-','/')}</button>`;
     };
     autoBtn=`<span class="km-au-bar"><button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：訂單匯出（主站檔名 _SCM／i站 _BCM）、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），站別會自動判斷、可手動改。先預覽、確認才寫入。">上傳 FriDay 報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('FriDay 要傳 2 種（主站、i站都一樣）：',FRIDAY_HOWTO_LINES,'km-info-pre')}</span>${auBtn('主站')}${auBtn('i站')}</span>`;
   }
@@ -12943,7 +12944,8 @@ function _kpiFillHtml(row){
   if(group.key==='books'){
     const br=booksKpiFromRecon(month);
     const h=br.ok?_kpiBooksAutoHint(month,row):null;
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('博客來寄倉每月傳 4 種：',BOOKS_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+    const bcOk=!br.ok||_kpiCostGate(), bOk=br.ok&&bcOk;   // 商品成本用共用成本表當下算 → 沒接上雲端前不准帶入
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?(bcOk?'':'<span class="km-au-hint" title="成本表正在接上雲端（商品成本用共用成本表當下算，接上前不帶入，免得用到這台的舊成本）">成本表載入中</span>'):`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('博客來寄倉每月傳 4 種：',BOOKS_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${bOk?'':' km-au-off'}"${bOk?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   // 酷澎：商城兩店從淨利表（酷澎 → 訂單明細上傳的同店同月報表）帶入；2026-06 以前維持手填（鈕 disabled）、淨利表尚未產表也 disabled
   if(group.key==='coupang'){
@@ -13400,9 +13402,12 @@ function _kpiAutoPreviewHtml(month,plan){
 async function kpiMomoAutoFill(){
   const month=_kpiYM();
   if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
-  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入 MOMO 資料中…';}
+  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入 MOMO 資料與成本表中…';}
+  const _costP=momoCostEnsureCloud(15000);   // 2026-11-18：MO+ 商品成本用共用成本表當下算（_kpiMoPlusCost）→ 先接上雲端
   await _kpiEnsureMomoData(month);
-  if(btn){btn.disabled=false;}
+  const _costOk=await _costP;
+  if(btn){btn.disabled=false;btn.textContent='從對帳單帶入 '+month.replace('-','/');}
+  if(!_costOk){if(typeof showToast==='function')showToast(KPI_COST_WAIT_MSG,'error',6000);return;}
   const plan=_kpiMomoAutoPlan(month);
   const writes=plan.items.filter(x=>x.status==='write');
   const row0=getOrCreateKpiRow(month);
@@ -14328,14 +14333,24 @@ function _kpiBooksSnapGet(month){
   return _kpiBooksSnapLocal.get(month)||null;
 }
 // 成本表跟 MOMO 一起懶載入（__loadMomoSubs）；帶入前先要求載入，最多等 15 秒
+// ── KPI 共用：商品成本用共用成本表「當下」算的帶入（博客來、FriDay、MOMO 的 MO+、酷澎），成本表要先接上雲端 ──
+const KPI_COST_WAIT_MSG='成本表還沒接上雲端（載入中或網路慢），為了不用這台的舊成本算，這次不帶入，請稍後再按一次';
+let _kpiCostWaitP=null, _kpiCostWaitFailAt=0;
+// 畫鈕時用：成本表＝雲端 → true；否則背景接（接上後重畫 KPI 一次；沒接上 60 秒內不重試、不重畫）→ false（鈕灰＋「成本表載入中」）
+function _kpiCostGate(){
+  if(momoCostMatchesCloud()) return true;
+  if(!_kpiCostWaitP && !(_kpiCostWaitFailAt && Date.now()-_kpiCostWaitFailAt<60000)){
+    _kpiCostWaitP=momoCostEnsureCloud().then(ok=>{ _kpiCostWaitP=null; _kpiCostWaitFailAt=ok?0:Date.now(); if(ok&&document.getElementById('kpi-tab-content')){ try{ _kpiRefreshViews(); }catch(e){} } });
+  }
+  return false;
+}
+// 2026-11-18：成本表一律先接上雲端（momoCostEnsureCloud，本機有舊表也一樣）；回 {ok, cost}。
 async function _kpiEnsureBooksData(){
   const t0=Date.now();
-  if(!Object.keys(momoLoadCostByOrigin()||{}).length){try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}}
-  while(Date.now()-t0<15000){
-    if(typeof window.__booksReconCloudLatest!=='undefined'&&Object.keys(momoLoadCostByOrigin()||{}).length)return true;
-    await new Promise(r=>setTimeout(r,300));
-  }
-  return typeof window.__booksReconCloudLatest!=='undefined';
+  const costP=momoCostEnsureCloud(15000);
+  while(Date.now()-t0<15000&&typeof window.__booksReconCloudLatest==='undefined') await new Promise(r=>setTimeout(r,300));
+  const cost=await costP;
+  return {ok:cost&&typeof window.__booksReconCloudLatest!=='undefined', cost};
 }
 async function kpiBooksAutoFill(){
   const month=_kpiYM();
@@ -14343,7 +14358,8 @@ async function kpiBooksAutoFill(){
   const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入博客來資料與成本表中…';}
   const ready=await _kpiEnsureBooksData();
   if(btn){btn.disabled=false;btn.textContent='從報表帶入 '+month.replace('-','/');}
-  if(!ready){if(typeof showToast==='function')showToast('博客來報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  if(!ready.cost){if(typeof showToast==='function')showToast(KPI_COST_WAIT_MSG,'error',6000);return;}
+  if(!ready.ok){if(typeof showToast==='function')showToast('博客來報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
   const br=booksKpiFromRecon(month);
   if(!br.ok){if(typeof showToast==='function')showToast(br.why,'error',6000);renderKpiTab();return;}
   const plan=_kpiBooksAutoPlan(month);
@@ -14827,14 +14843,13 @@ function _kpiFridaySnapGet(month,site){
   if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
   return _kpiFridaySnapLocal.get(site+'|'+month)||null;
 }
+// 2026-11-18：成本表一律先接上雲端（momoCostEnsureCloud，本機有舊表也一樣）；回 {ok, cost}。
 async function _kpiEnsureFridayData(){
   const t0=Date.now();
-  if(!Object.keys(momoLoadCostByOrigin()||{}).length){try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}}
-  while(Date.now()-t0<15000){
-    if(typeof window.__fridayReconCloudLatest!=='undefined'&&Object.keys(momoLoadCostByOrigin()||{}).length)return true;
-    await new Promise(r=>setTimeout(r,300));
-  }
-  return typeof window.__fridayReconCloudLatest!=='undefined';
+  const costP=momoCostEnsureCloud(15000);
+  while(Date.now()-t0<15000&&typeof window.__fridayReconCloudLatest==='undefined') await new Promise(r=>setTimeout(r,300));
+  const cost=await costP;
+  return {ok:cost&&typeof window.__fridayReconCloudLatest!=='undefined', cost};
 }
 async function kpiFridayAutoFill(site){
   site=site||'主站';
@@ -14843,7 +14858,8 @@ async function kpiFridayAutoFill(site){
   const btn=document.getElementById('km-au-btn-'+site);if(btn){btn.disabled=true;btn.textContent='載入 FriDay 資料與成本表中…';}
   const ready=await _kpiEnsureFridayData();
   if(btn){btn.disabled=false;btn.textContent='從報表帶入（'+site+'）'+month.replace('-','/');}
-  if(!ready){if(typeof showToast==='function')showToast('FriDay 報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  if(!ready.cost){if(typeof showToast==='function')showToast(KPI_COST_WAIT_MSG,'error',6000);return;}
+  if(!ready.ok){if(typeof showToast==='function')showToast('FriDay 報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
   const fr=fridayKpiFromRecon(month,null,site);
   if(!fr.ok){if(typeof showToast==='function')showToast(fr.why,'error',6000);renderKpiTab();return;}
   const plan=_kpiFridayAutoPlan(month,null,null,site);
@@ -34692,6 +34708,75 @@ window.__cloudDrainLatest('__pchomeOrdersCloudLatest','__pchomeApplyCloudOrders'
 //   語意【不變】＝整份覆蓋（products 整個陣列寫 `list` 欄；recon 整個帳務月 map 寫 `data` 欄）；只是換了 doc。
 //   寫：走既有 syncToCloud task 迴圈（ec_pchome_products / ec_pchome_recon 分支，見上方），不另開寫入路徑。
 //   讀：firebase.js 訂閱 app/pchome_products / app/pchome_recon → 下方 apply（過渡期 app/profit 舊欄位只當 fallback）。
+// ── 一次性修正工具：PChome 商品主檔的成本改回雲端共用成本表的值（2026-11-18）──
+//   起因：Gini 本機成本表是舊的、PChome 頁當時不訂閱成本表，11/17 重傳上架清單時 pchomeApplyListingMerge 用本機舊值寫進 rec.cost、推上雲。
+//   用法（Console）：__pchomeCostRepair()＝只看（dryRun）；__pchomeCostRepair({dryRun:false, confirm:'確定修正'})＝真的寫；
+//     選填 skip:[原廠編號…]＝這次不改（例：11/17 之前就已經是舊值的 F466-03、H356-05、F375-01、C154-02、H203-05、H404-01）。
+//   只挑「原廠編號在雲端成本表、主檔 cost≠雲端值、商品歷程（app/pchome_history）沒有手填成本」的筆：
+//     · 歷程最後一筆有 cost 而且＝主檔 → 手填，保留不改；
+//     · 歷程有 cost 但≠主檔 → 列為「要人工確認」，不改；
+//     · 原廠編號不在雲端成本表 → 不動。
+//   寫入：讀伺服器 → 算 → 寫前再讀一次（內容變了就停）→ 用既有 __cloudPchomeProducts.setField('list', …) 整份寫回（只有那幾筆的 cost 不同，不刪任何筆）→ 讀回逐筆核對。
+//   擋下條件：唯讀帳號、這台有未推的 PChome 主檔（ec_pchome_dirty 有 ec_pchome_products，推上去會把舊值蓋回）、讀到快取、讀回不符。
+//   不改本機：本機主檔等訂閱自己更新（沒有 dirty 時訂閱會採用雲端版）。寫前請先跑 v3 備份。
+window.__pchomeCostRepair=async function(opts){
+  opts=opts||{}; const dry=opts.dryRun!==false;
+  const stab=v=>JSON.stringify(v,(k,x)=>(x&&typeof x==='object'&&!Array.isArray(x))?Object.keys(x).sort().reduce((o,kk)=>{o[kk]=x[kk];return o;},{}):x);   // 欄位順序不影響比對（Firestore 讀回的順序不一定跟寫入時一樣）
+  const skipSet=new Set((opts.skip||[]).map(x=>String(x).trim()));   // 選填：這次不改的原廠編號（例：只想修 11/17 那 120 筆時，把另外 6 筆放這裡）
+  const out={dryRun:dry, ok:false, why:'', counts:{}, fix:[], keepManual:[], needCheck:[], skipped:[]};
+  try{
+    if(!window.__cloudPchomeProducts||!window.__cloudCostByOrigin||!window.__cloudPchomeHistory){ out.why='雲端層還沒就緒'; return out; }
+    const readAll=async()=>{
+      const ps=await window.__cloudPchomeProducts.getDoc();
+      if(!ps||!ps.exists||!ps.exists()) throw new Error('讀不到 app/pchome_products');
+      if(ps.metadata&&ps.metadata.fromCache) throw new Error('讀到的是快取，不是伺服器（網路？）');
+      const list=(ps.data()||{}).list; if(!Array.isArray(list)) throw new Error('app/pchome_products 的 list 不是陣列');
+      return list; };
+    const list=await readAll();
+    const cs=await window.__cloudCostByOrigin.getDoc(); const costMap=((cs&&cs.exists&&cs.exists())?(cs.data()||{}):{}).costMap||{};
+    if(!Object.keys(costMap).length) throw new Error('讀不到雲端成本表');
+    const hs=await window.__cloudPchomeHistory.getDoc(); const hist=(hs&&hs.exists&&hs.exists())?(hs.data()||{}):{};
+    let same=0, notIn=0, noCode=0;
+    list.forEach((rec,i)=>{
+      const code=String((rec&&(rec.料號||rec.origin||rec.sku))||'').trim(); if(!code){ noCode++; return; }
+      if(!Object.prototype.hasOwnProperty.call(costMap,code)){ notIn++; return; }
+      const cloud=Number(costMap[code]), master=(rec.cost==null||rec.cost==='')?null:Number(rec.cost);
+      if(master===cloud){ same++; return; }
+      const hc=(Array.isArray(hist[code])?hist[code]:[]).filter(e=>e&&e.cost!=null&&e.cost!=='');
+      const last=hc.length?hc[hc.length-1]:null;
+      const row={i, 原廠編號:code, 商品名:String(rec.商品名||'').slice(0,30), 主檔cost:master, 雲端成本表:cloud};
+      if(last&&Number(last.cost)===master){ row.手填=last.date+' '+(last.time||'')+' '+(last.note||''); out.keepManual.push(row); return; }
+      if(last){ row.手填歷程=last.date+' cost '+last.cost+' '+(last.note||''); out.needCheck.push(row); return; }
+      if(skipSet.has(code)){ out.skipped.push(row); return; }
+      out.fix.push(row);
+    });
+    out.counts={主檔筆數:list.length, 等於雲端:same, 不在雲端成本表:notIn, 沒有原廠編號:noCode, 要修正:out.fix.length, 手填保留:out.keepManual.length, 要人工確認:out.needCheck.length, 指定不改:out.skipped.length};
+    console.log('[__pchomeCostRepair] '+(dry?'只看（dryRun）':'準備寫入')+'：', out.counts);
+    if(out.fix.length) console.table(out.fix.map(r=>({原廠編號:r.原廠編號,商品名:r.商品名,主檔cost:r.主檔cost,雲端成本表:r.雲端成本表})));
+    if(out.keepManual.length){ console.log('手填保留（不改）：'); console.table(out.keepManual); }
+    if(out.needCheck.length){ console.log('有手填歷程但主檔不等於手填值（不改，請人工確認）：'); console.table(out.needCheck); }
+    if(dry){ out.ok=true; return out; }
+    // ── 真的寫 ──
+    if(opts.confirm!=='確定修正'){ out.why="要真的寫，請用 __pchomeCostRepair({dryRun:false, confirm:'確定修正'})"; console.warn(out.why); return out; }
+    if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){ out.why='唯讀帳號不能寫'; console.warn(out.why); return out; }
+    if(pchomeDirtyGet().indexOf('ec_pchome_products')>=0){ out.why='這台有還沒推的 PChome 商品主檔（ec_pchome_dirty），推上去會把舊成本蓋回來；請先處理本機主檔（通知 Keani），這次不寫'; console.warn(out.why); return out; }
+    if(!out.fix.length){ out.ok=true; out.why='沒有要修正的筆'; return out; }
+    const list2=await readAll();
+    if(stab(list2)!==stab(list)){ out.why='雲端主檔在檢查之後被改過，這次不寫；請重跑 dryRun 再確認'; console.warn(out.why); return out; }
+    const next=JSON.parse(JSON.stringify(list));
+    for(const r of out.fix){ const rec=next[r.i]; const code=String((rec&&(rec.料號||rec.origin||rec.sku))||'').trim(); if(code!==r.原廠編號) throw new Error('第 '+r.i+' 筆的原廠編號對不上（'+code+'≠'+r.原廠編號+'），停止'); rec.cost=r.雲端成本表; }
+    const payload=momoFsSanitizeDeep(next);
+    await window.__cloudPchomeProducts.setField('list', payload);
+    const back=await readAll();
+    let bad=0; const badRows=[];
+    if(back.length!==payload.length){ bad++; badRows.push('筆數 '+back.length+'≠'+payload.length); }
+    else payload.forEach((rec,i)=>{ if(stab(back[i])!==stab(rec)){ bad++; if(badRows.length<10) badRows.push(i+':'+String(rec.料號||'')); } });
+    if(bad){ out.why='讀回核對不符 '+bad+' 筆（可能被唯讀／本機防護擋下、或寫入沒生效），雲端沒有照預期改，本機沒動'; out.badRows=badRows; console.error('[__pchomeCostRepair] '+out.why, badRows); return out; }
+    out.ok=true; out.why='已修正 '+out.fix.length+' 筆，讀回逐筆核對相同';
+    console.log('%c[__pchomeCostRepair] '+out.why,'color:#059669;font-weight:700');
+    return out;
+  }catch(e){ out.why=(e&&e.message)||String(e); console.error('[__pchomeCostRepair] 停止：',out.why); return out; }
+};
 async function pchomeSyncProducts(){
   if(!window.__cloudPchomeProducts) throw new Error('PChome 商品主檔雲端層未就緒');
   var arr=pchomeLoadProducts()||[];
@@ -35359,6 +35444,8 @@ function pchomeConfirmSync(shop){
 }
 // ── section 殼（賣場層＝轉單/寄倉，比照甲配/乙配；子分頁照 momoRenderShop）──
 function setPChomeShop(shop,btn){
+  // 2026-11-18：PChome 頁也一律接上雲端共用成本表（套用上架清單、匯入成本檔、新增商品會把成本寫進主檔，不能用這台的舊表）。見 momoCostEnsureCloud。
+  try{ momoCostEnsureCloud(); }catch(e){}
   _saveProfitView('pchome',shop);
   document.querySelectorAll('.stab').forEach(function(b){b.classList.remove('active');});
   if(btn)btn.classList.add('active');
@@ -36162,6 +36249,7 @@ function pchomeEditSupplyChanged(shop){ var spEl=document.getElementById('pch-ed
 // 原廠編號→莫筆克成本提示字串（編輯/新增共用；不自動填成本，提示用）
 function pchomeOriginCostHintHTML(originVal){ var o=String(originVal||'').trim();
   if(!o) return '此欄＝廠商料號／料號；填了會查莫筆克成本表提示成本（不自動改，需自行填成本＋原因）';
+  if(!pchomeCostGateOk()){ try{ momoCostEnsureCloud(); }catch(e){} return '成本表載入中（還沒接上雲端），稍後重新點一次這個欄位再看成本'; }
   var mc=null; try{ var map=momoLoadCostByOrigin(); if(map&&map[o]!=null) mc=map[o]; }catch(e){}
   if(mc!=null&&Number(mc)>0) return '莫筆克成本表：原廠 '+_momoEsc(o)+' 成本 <b>$'+mc+'</b>（未自動填入；採用請填進成本欄＋異動原因）';
   return '莫筆克成本表查無「'+_momoEsc(o)+'」的成本';
@@ -36291,6 +36379,7 @@ function pchomeAddSupplyChanged(shop){ var spEl=document.getElementById('pch-add
 function pchomeAddOriginChanged(shop){ var src=document.getElementById('pch-add-cost-src-'+shop), costEl=document.getElementById('pch-add-cost-'+shop); if(!src) return;
   var origin=((document.getElementById('pch-add-origin-'+shop)||{}).value||'').trim();
   if(!origin){ src.innerHTML=''; return; }
+  if(!pchomeCostGateOk()){ src.innerHTML='<span style="color:#9ca3af">成本表載入中，接上雲端後會自動帶入成本…</span>'; try{ momoCostEnsureCloud().then(function(ok){ if(ok) pchomeAddOriginChanged(shop); }); }catch(e){} return; }
   var mc=null; try{ var map=momoLoadCostByOrigin(); if(map&&map[origin]!=null) mc=map[origin]; }catch(e){}
   if(mc!=null&&Number(mc)>0){ if(costEl){ costEl.value=mc; } pchomeAddSuggestSupply(shop); src.innerHTML='<span style="color:#0369a1;font-weight:600">莫筆克成本：原廠 '+_momoEsc(origin)+' 自動帶入 $'+mc+'</span>'; }
   else src.innerHTML='<span style="color:#d97706">查無「'+_momoEsc(origin)+'」成本，請手動輸入（填入成本後會自動建議售價）</span>';
@@ -36350,11 +36439,18 @@ function pchomeSyncTabHTML(shop){
     +'</div>';
 }
 // 莫筆克成本檔匯入（照甲配 momoSyncGenerate 的 cost 分支：momoParseCostList → momoPersistCostByOrigin，寫四賣場共用成本表、人工值不覆蓋）。
+// ── PChome 寫主檔成本前的閘門（2026-11-18）──
+//   實例：Gini 本機成本表是舊的、PChome 頁又不訂閱成本表，11/17 重傳上架清單時 pchomeApplyListingMerge 用本機舊值寫 rec.cost、推上雲（126 筆不同）。
+//   規則：會把成本寫進 PChome 主檔的動作（套用上架清單、匯入莫筆克成本檔、新增商品自動帶成本），按下去前本機成本表必須＝雲端（momoCostMatchesCloud，dirty 以外）；
+//   沒接上就灰字「成本表載入中」並擋下。合併／推送邏輯本身不動。
+var PCHOME_COST_WAIT_MSG='成本表載入中（要先接上雲端共用成本表，免得把這台的舊成本寫進商品主檔），請稍候幾秒再試';
+function pchomeCostGateOk(){ try{ return momoCostMatchesCloud(); }catch(e){ return false; } }
 function pchomeCostFile(shop,e){
   var f=e&&e.target&&e.target.files&&e.target.files[0];
   try{ if(e&&e.target) e.target.value=''; }catch(_){}   // 允許重傳同檔
   if(!f) return;
   var msg=document.getElementById('pchome-cost-msg-'+shop);
+  if(!pchomeCostGateOk()){ if(msg){ msg.textContent=PCHOME_COST_WAIT_MSG+'（成本表接上後請重新選檔）'; msg.style.color='#9ca3af'; } try{ momoCostEnsureCloud().then(function(ok){ if(ok&&msg) { msg.textContent='成本表已接上雲端，可以重新選檔匯入。'; msg.style.color='#059669'; } }); }catch(_e){} return; }
   if(msg){ msg.textContent='解析中…'; msg.style.color='#6b7280'; }
   momoReadWorkbook(f).then(function(wb){
     var rows=wb.sheet('商品資料')||wb.firstSheet();
@@ -36457,6 +36553,7 @@ function pchomeApplyListingMerge(shop){
 }
 // 差異預覽 gate（照 momo 視覺語彙：overlay + 取消灰/確認綠 #10b981）。解析後不直接寫、確認才 pchomeApplyListingMerge。
 function pchomeRenderListingPreview(shop, plan, 匯出t){
+  var costOk=pchomeCostGateOk();   // 成本表沒接上雲端 → 確認鈕停用＋灰字，接上後自動重畫這個預覽
   var esc=function(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
   var ov=document.getElementById('pchome-listing-ov'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-listing-ov'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -36484,13 +36581,17 @@ function pchomeRenderListingPreview(shop, plan, 匯出t){
     +'</div>'
     +'<div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end;align-items:center">'
     +'<button onclick="pchomeCancelListingMerge(\''+shop+'\')" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>'
-    +'<button onclick="pchomeConfirmListingMerge(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認套用'+(nothing?'':'（新增 '+plan.adds.length+'／更新 '+plan.updates.length+'／下架 '+plan.vanishes.length+'）')+'</button>'
+    +(costOk
+      ? '<button onclick="pchomeConfirmListingMerge(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認套用'+(nothing?'':'（新增 '+plan.adds.length+'／更新 '+plan.updates.length+'／下架 '+plan.vanishes.length+'）')+'</button>'
+      : '<span style="color:#9ca3af;font-size:12px">成本表載入中…（接上雲端後才能套用，避免寫入舊成本）</span><button disabled style="padding:7px 18px;border-radius:7px;border:none;background:#e5e7eb;color:#9ca3af;font-size:13px;font-weight:600;cursor:not-allowed">確認套用</button>')
     +'</div></div>';
+  if(!costOk){ try{ momoCostEnsureCloud().then(function(ok){ if(ok && _pchomeListingPending[shop] && document.getElementById('pchome-listing-ov')) pchomeRenderListingPreview(shop, plan, 匯出t); }); }catch(e){} }
 }
 function pchomeCancelListingMerge(shop){ _pchomeListingPending[shop]=null; var o=document.getElementById('pchome-listing-ov'); if(o) o.remove();
   var msg=document.getElementById('pchome-listing-msg-'+shop); if(msg){ msg.textContent='已取消，未寫入任何資料。'; msg.style.color='#9ca3af'; } }
 function pchomeConfirmListingMerge(shop){
   var pend=_pchomeListingPending[shop]; if(!pend){ var o0=document.getElementById('pchome-listing-ov'); if(o0)o0.remove(); return; }
+  if(!pchomeCostGateOk()){ if(typeof showToast==='function') showToast(PCHOME_COST_WAIT_MSG,'warn'); try{ momoCostEnsureCloud().then(function(ok){ if(ok && _pchomeListingPending[shop] && document.getElementById('pchome-listing-ov')) pchomeRenderListingPreview(shop, pend.plan, pend.匯出時間); }); }catch(e){} return; }   // 2026-11-18：沒接上雲端成本表不套用
   var plan=pend.plan, 匯出t=pend.匯出時間;
   var out=pchomeApplyListingMerge(shop);
   var o=document.getElementById('pchome-listing-ov'); if(o) o.remove();
