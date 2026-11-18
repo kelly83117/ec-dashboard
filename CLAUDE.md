@@ -62,8 +62,9 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：34 個物件 / 54 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 34**（2026-11-06 #436 ④ ⑤ 合併：廣告調整封存加 `__cloudNotesArchive`（寫入 `createMonth`、`commitDelete`、`restoreMonth`）→ 33 變 34、方法 51 變 54——**防護碼實測**（floor 34、MUST 補這三支）。
+   **「TEST_NOWRITE v2 已啟用：35 個物件 / 55 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 35**（2026-11-18 酷澎商品主檔 C2 加 `__cloudCoupangProducts`（寫入只有 `setShop`）→ 34 變 35、方法 54 變 55——**防護碼實測**（floor 35、MUST 補 `['__cloudCoupangProducts','setShop']`；正本 `nowrite.txt` 改前備份 `nowrite.txt.bak-20261118`）。
+   再之前：2026-11-06 #436 ④ ⑤ 合併：廣告調整封存加 `__cloudNotesArchive`（寫入 `createMonth`、`commitDelete`、`restoreMonth`）→ 33 變 34、方法 51 變 54——**防護碼實測**（floor 34、MUST 補這三支）。
    再之前：2026-11-06 #436 優化紀錄加 `__cloudOptlog`（寫入只有 `writePaths`）→ 32 變 33、方法 50 變 51——**防護碼實測**（floor 33、MUST 補 `['__cloudOptlog','writePaths']`）。
    再之前：2026-11-06 #436 商品調整加 `__cloudGrowth`（寫入只有 `writePaths`）→ 31 變 32、方法 49 變 50——**防護碼實測**（floor 32）。
    防護碼正本是 `C:\Users\keani\ec-tools\nowrite.txt`，`ec-tools.ps1` 檢查它必須剛好 **106 行**，加項目要接在既有行上。下面寫的 floor 31、MUST 清單是同日才真的補進檔案（之前檔案裡下限還是 5）。
@@ -92,7 +93,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 34 / 54 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 35 / 55 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -110,12 +111,12 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
    `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`、`['__cloudFridayRecon', 'writePaths']`，
-   還有 `['__cloudGrowth', 'writePaths']`、`['__cloudOptlog', 'writePaths']`、`['__cloudNotesArchive', 'createMonth']`、`['__cloudNotesArchive', 'commitDelete']`、`['__cloudNotesArchive', 'restoreMonth']`，物件下限改 34，否則新物件沒有 fail-loud 保護。
+   還有 `['__cloudGrowth', 'writePaths']`、`['__cloudOptlog', 'writePaths']`、`['__cloudNotesArchive', 'createMonth']`、`['__cloudNotesArchive', 'commitDelete']`、`['__cloudNotesArchive', 'restoreMonth']`、`['__cloudCoupangProducts', 'setShop']`，物件下限改 35，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 34** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 35** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -128,7 +129,9 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 34）。
+不要相信文件上的數字（包括上面那個 35）。
+
+🔴 **新增 Firestore collection 時，要同步補進 `C:\Users\keani\ec-tools\firestore-backup-v3.cjs` 的 `COLS`**（#494），不然 v3 備份不會備到它（v3 開跑會拿 repo 比對、印 🔴 提醒）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -358,6 +361,21 @@ ESM 有個致命陷阱必須牢記：
   - 上月營收＝前一個月整月 `momoAggregatePeriods().revenue`；最近有賣往回找到 `MOMO_FIRST_PERIOD`（2026-01）。
   - ⓘ 說明蝦皮版、MOMO 版共用 `_zeroTip(kind)`（`shopee`／`mobic`／`f1102`），改句子改這一支；Excel 共用 `_zeroWriteXlsx`，檔名 `零動銷_{通路}_{YYYY-MM}`、工作表 `YYYY-MM 零動銷`。
   - Console 只讀：`__momoZeroSnap('YYYY-MM')`（五家：清單筆數、分母－分子、零動銷標籤、三組、對不到原廠編號）。2026-10 驗收：甲配 312、乙配 17、MO+麻吉 460、MO+森之旅 235、MO+玩樂 141，三個數字都相等。
+- `coupang_products` collection — 酷澎商品主檔（Wing「價格／庫存／銷售狀態」price_inventory 匯出檔，2026-11-18 C2），**不放 app/main、不經 Store**。每通路 4 片：doc id `{maji|luying}_{0..3}`（`COUPANG_SHOP_DOCID`），露營館也是 4 片。
+  - **分片**：`BigInt(Product ID) % 4`（profit.js 純函式 `cupProductsShardOf`，同一商品頁的選項一定同一片；Product ID 空白或不是純數字歸第 0 片、log 計數 `badPid`）。
+  - **形狀**：`{ schema:1, shop, shard:0..3, shards:4, items:[{ sku:選項ID, pid:Product ID, sid:供應商商品ID, code:供應商商品代碼, price, base, status, stock, firstSeen, lastSeen }], latestExport:'YYYY-MM-DD HH:mm:ss', updatedAt:serverTimestamp }`。
+    `status` 存**韓文原文**（판매중／판매중지／其他原文，跟本機主檔同形狀，不轉 on/off）；**不存商品名稱**。時間是檔案 ZIP 項目時間（`coupangZipEntryTime`），不是檔名。
+  - **本機**：`ec_coupang_products|<通路>`（LZ1，C1）、`ec_coupang_products_lastpushed|<通路>`（純 JSON 簽名）、`ec_coupang_products_dirty`（JSON 陣列）。🔴 都不能用 `ec_momo_` 開頭（`_pendingKeyOwner` 會判給 MOMO）。主檔不放 `Store._mem`／`_profitMem`，推送與預覽都走 `cupPendingProducts`（每次重讀 localStorage）。
+  - **讀**：`window.__cloudCoupangProducts.getDoc(shop[, 'server'])`（4 片串起來 → `{exists, items, latestExport, perShard}`）、`subscribe`（整個 collection、`includeMetadataChanges`，訂閱放 `__loadCoupangSubs`、走 `__cloudSubscribeCached` 樣板 → `window.__cupProductsCloudLatest` → profit.js `__cupApplyCloudProducts` 只緩存進 `_cupProdCloud`、發 `coupangProductsCloudReady`；**不改本機主檔、不改動銷率卡**，動銷率卡仍讀本機（C3 才換））。
+  - **寫**：只有 `window.__cloudCoupangProducts.setShop(shop, shards)`（shards 一定 4 片，`writeBatch` 一次寫 4 份；成功回 `{ ok:true }`，被唯讀／本機防護擋下回 `undefined`）。呼叫端只有 profit.js `cupSyncProductsMerge`。
+  - **合併**（`cupProductsCloudMerge`，外包 `momoProductsPlanMerge` 的 last-pushed 模型）：逐選項比**資料自己的時間**——雲端 `lastSeen` 較新就保留雲端那筆（`keptCloud`）；`firstSeen` 取兩邊非空較早；`latestExport` 取較大；沒有 lastpushed＝bootstrap、不刪任何雲端選項。刪除防線照 MOMO（`_momoDelGuardLevel`，confirm 要在 syncToCloud 預檢先問完、abort 直接停）。任一片 > 700 KB 停、> 300 KB log 黃字。讀雲端一律 `'server'`，讀不到就停（不當成雲端空）。
+  - **閘門** `window.__CUP_PRODUCTS_ENFORCE`（profit.js，目前 **false＝試跑**：只算計畫、印 `[cup products merge SHADOW]`、存 `window.__cupLastMergePlan`，不寫雲端、不動 lastpushed／dirty／本機）。
+    試跑期間：酷澎同步鈕的預覽會列「酷澎商品主檔」（推／刪／雲端較新保留筆數＋灰字「試跑中」），確認後結尾列「試跑中，未寫入」；蝦皮全域鈕全推只 console.log、不列問題；MOMO 預覽不列。主檔會一直留在待同步（沒有 lastpushed），離開頁面會跳確認，C3 enforce 成功後消失。
+  - 🔴 **enforce 成功條件**（純函式 `cupProductsWriteConfirmed`）：`setShop` 回傳值**嚴格等於** `{ok:true}`，而且寫完再 `getDoc(shop,'server')` 讀回：4 片都存在、每片筆數跟寫的一樣、合計＝合併筆數、`latestExport` 一樣。全部成立才寫回本機（合併結果）→ lastpushed＝合併結果簽名 → 清 dirty；任一不符 ⇒ 本機、lastpushed、dirty 都不動，Console 紅字「寫入未確認」。
+  - **上傳預覽**（商品同步分頁）比「本機與雲端 `latestExport` 較新的那個」：比雲端舊 ⇒ 紅框＋勾「我確定」才能套用（合併仍逐筆保留較新的，不會倒退）；雲端還沒到齊（沒快照、`fromCache`、1～3 片）⇒「雲端主檔載入中」、套用鈕停用，收到快照自動重畫；雲端確定 0 片＝雲端沒有，可套用。
+  - **Console**：`__cupProductsMergeShadow(shop)`（只算）、`__cupProductsMergeEnforce(shop)`（單通路真寫、不看閘門，C3 驗收才用）、`__cupProductsState()`（含 cloud 欄位）、`__cupLastMergePlan`。本機測試 `__cupProductsMock({shop, newer, newerSkus, latestExport, fromCache, shardsSeen, from})`／`__cupProductsMock(null)`：只在 localhost／127.0.0.1 定義、只改記憶體；開著時 enforce 一律拒絕。node 測試 `scripts/coupang-products.test.cjs`。
+  - **回滾**：閘門維持 false 就不會寫。已經寫過的話：刪掉 `coupang_products` 的 8 份 doc（或用 v3 備份還原），再清各電腦的 `ec_coupang_products_lastpushed|*`（沒清的話下次同步以為推過、但不會刪雲端以外的東西）。程式回滾＝還原 C2 的 commit（firebase.js 物件與 profit.js 要一起）。
+  - 待辦：管理員容量提醒（app.js `__profitCapDocs`）還沒納入 `coupang_products/*`，目前只有 shadow log 與存檔時的每片大小。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
