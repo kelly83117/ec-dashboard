@@ -1262,6 +1262,7 @@ Object.assign(App, {
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
       <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
+      <p class="rev-hist-note">酷澎 2026-11-30 以前為好麻吉＋露營館合計。</p>
       ${failNote}`;
   },
   /* 趨勢比較分頁：通路（單選）＋年份（複選）→ 淡旺季卡片 → 折線圖 → 並排表
@@ -1361,6 +1362,7 @@ Object.assign(App, {
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
       <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
+      <p class="rev-hist-note">酷澎 2026-11-30 以前為好麻吉＋露營館合計。</p>
       ${failNote}`;
   },
   /* 建立趨勢折線圖 — revHistRedraw()（局部重畫）與 bindRevHist()（整頁 render 後）都會呼叫。
@@ -1565,7 +1567,7 @@ Object.assign(App, {
       `${yMonth}-${String(mMonth + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
     );
 
-    // 依區段分群（蝦皮 4 / MOMO 2 / 酷澎 1 / 其他通路 3）；只保留資料裡有平台的區段，小計欄跟著區段走
+    // 依區段分群（蝦皮 4 / MOMO 2 / 酷澎 2（雲端加了露營館之後）/ 其他通路 3）；只保留資料裡有平台的區段，小計欄跟著區段走
     const grouped = {};
     MARKETPLACE_SECTIONS.forEach(s => { grouped[s.key] = []; });
     platforms.forEach(p => { grouped[marketplaceSectionOf(p.name).key].push(p); });

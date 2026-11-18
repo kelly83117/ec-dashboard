@@ -28,14 +28,17 @@ const MAX_SPAN_DAYS = 31;
 const TOTAL_ROW_LABEL = '總計';
 const DATE_HEADER = '日期';
 
-// 14 個資料欄。key（通路|指標）就是回傳 JSON 的欄位名。
+// 15 個資料欄（14 個必填＋1 個選填）。key（通路|指標）就是回傳 JSON 的欄位名。
 const DATA_KEYS = [
   '玩樂盒子|營收', '玩樂盒子|廣告費',
   '生活好麻吉|營收', '生活好麻吉|廣告費',
   '維克生活|營收', '維克生活|廣告費',
   '森之旅|營收', '森之旅|廣告費',
-  'MOMO|營收', 'MO+|營收', '酷澎|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
+  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎露營館|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
 ];
+// 選填欄：2026 十二月分頁起才有（表頭第 1 列「酷澎露營館」、第 2 列「營收」）。
+//   分頁沒有這欄不算缺少，回傳值一律 ''（空白）；有這欄就照常讀。舊分頁永遠不會有，所以不能做成必填。
+const OPTIONAL_KEYS = ['酷澎露營館|營收'];
 // 有 ROAS 欄的通路（ROAS 欄只略過、不讀）
 const AD_CHANNELS = ['玩樂盒子', '生活好麻吉', '維克生活', '森之旅'];
 const METRICS = ['營收', '廣告費'];
@@ -172,7 +175,7 @@ function classify_(r1, r2) {
     res.cols[key] = c;
     res.data[key] = L;
   }
-  const missing = DATA_KEYS.filter(k => !(k in res.cols));
+  const missing = DATA_KEYS.filter(k => !(k in res.cols) && OPTIONAL_KEYS.indexOf(k) < 0);
   if (missing.length) P.push('缺少 ' + missing.length + ' 個資料欄：' + missing.map(label_).join('、'));
 
   // 右側：加總欄
@@ -194,7 +197,7 @@ function classify_(r1, r2) {
 
 function pick_(row, layout) {
   const o = {};
-  DATA_KEYS.forEach(k => { o[k] = cell_(row[layout.cols[k]]); });
+  DATA_KEYS.forEach(k => { o[k] = (k in layout.cols) ? cell_(row[layout.cols[k]]) : ''; });   // 選填欄找不到 → ''
   Object.keys(layout.checks).forEach(n => { o['_' + n] = cell_(row[layout.checks[n]]); });
   return o;
 }
@@ -281,5 +284,6 @@ function testSync() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   Logger.log(JSON.stringify(headersOnly_(ss, '2026-09'), null, 1));
   Logger.log(JSON.stringify(headersOnly_(ss, '2026-07')));
+  Logger.log(JSON.stringify(headersOnly_(ss, '2026-11')));
   Logger.log(JSON.stringify(readRange_(ss, '2026-09-22', '2026-09-28')).slice(0, 3000));
 }
