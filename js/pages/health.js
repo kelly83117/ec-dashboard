@@ -59,7 +59,7 @@ function _hlDeepFreeze(o) {
 //     MO+ 不含 2026-09：下半月幾乎沒有資料（MO+ 麻吉 8 個商品、約 2 千元），未來補齊後可重算。
 //     🔴 這裡只改 BASE（2026-10 以前）。2026-11 起吃雲端 app/health_rules 那一版，要管理員在「⚙ 評分標準」另存。
 const HEALTH_RULES = _hlDeepFreeze({
-  version: 'v9-2026-11',   // v9（2026-11-18）：酷澎商城開始算動銷率（types.coupang.sellThrough 非 null，只顯示；分數線沒設＝不給分）。v8（2026-11-10）：蝦皮純利率線改回 25/20/18（見 score.items 的 pureRate）
+  version: 'v10-2026-11',   // v10（2026-11-18）：酷澎商城分數線（暫定）純利率 25/22/15、動銷率 33/27/23（score.items 的 lines.coupang）。v9（2026-11-18）：酷澎商城開始算動銷率（types.coupang.sellThrough 非 null，只顯示；分數線沒設＝不給分）。v8（2026-11-10）：蝦皮純利率線改回 25/20/18（見 score.items 的 pureRate）
   from: '2026-01',                     // 這份規則從哪個月起適用（第一版＝firstMonth；之後的版本見 healthRulesForMonth）
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
@@ -73,13 +73,16 @@ const HEALTH_RULES = _hlDeepFreeze({
   //   provisional＝暫定（畫面標「暫定」）。之後做「標準設定頁」時才改成可設定；現在寫死在這裡，改數字要升 version。
   //   蝦皮純利率線（v8，2026-11-10）：11/10 老闆決定標準維持 25/20/18，KPI 資料維持含稅（v881 起含稅、純利扣稅金）。
   //     v7（2026-11-09）的改線已撤回。2026-11 起的線在雲端 app/health_rules，由管理員在「⚙ 評分標準」改。
+  //   酷澎商城線（v10，2026-11-18，Gini 決定、老闆事後確認，暫定）：好麻吉 2026-06～10 照 MOMO v6 算法（P75 往上／P50 往下／P10 往下取整，_hlPercentiles）。
+  //     純利率 25/22/15（P10 15.5／P50 22.7／P75 24.2）、動銷率 33/27/23（23.8／27.5／32.1）。露營館共用類型線（目前營收未滿 3 萬，不評分）。3 個月後再校。
+  //     2026-11 起的雲端版本用 __healthCoupangLines() 加（見檔尾）。畫面標「暫定」靠 HL_TYPE_PROVISIONAL。
   score: {
     tiers: [100, 80, 60],
     items: [
       { key: 'pureRate', label: '純利率', short: '純利', w: 0.5, dim: 'profit', provisional: false,
-        lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20] } },
+        lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20], coupang: [0.25, 0.22, 0.15] } },
       { key: 'sellThrough', label: '動銷率', short: '動銷', w: 0.5, dim: 'structure', provisional: true,
-        lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14] } },
+        lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14], coupang: [0.33, 0.27, 0.23] } },
     ],
   },
   // 面向（權重合計 100）。impl＝這個規則版本已實作；沒實作的不算進「依 N/M」的 M，卡片底部灰字列出。
@@ -1452,7 +1455,7 @@ function _hlGuideFullHtml(rules) {
   const pts = [
     '<b>純利率</b>＝純利 ÷ 營收；<b>毛利率</b>＝（營收 − 商品成本）÷ 營收。都取 KPI 月結（整月，跟財務對得上）。',
     `<b>動銷率</b>＝這個月有賣出的商品 ÷ 在架商品。蝦皮用洞察表「整月商品表現」，MOMO、PChome、酷澎商城跟各自的淨利表同一套算法${noSt.length ? `；${e(noSt.join('、'))}不算動銷率` : ''}。`,
-    `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}`,
+    `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}${Object.keys(HL_TYPE_PROVISIONAL).filter(t => R.score.items.some(it => it.lines && it.lines[t])).map(t => e(HL_TYPE_PROVISIONAL[t]) + '。').join('')}`,
     `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片右上角不放分數、改寫原因（滑鼠移上去看完整說明），不算 0 分。`,
     `<b>表現好／需注意商品</b>只列本月或上月營收 ${e(minRev)} 元以上的商品。`,
   ];
@@ -2264,7 +2267,11 @@ function _hlTileHtml(r, prev, rank, open, snap) {
   const ns = r.score == null ? _hlTileNoScore(r, R) : null;
   const tip = ns && ns.tip ? ` title="${escapeHtml(ns.tip)}"` : '';
   // 右邊：上＝徽章（或簡短原因／載入中），下＝「比上月 ±N」；沒有比上月也留一個空的位置，同排卡片第一列才一樣高
-  const delta = (r.score == null ? '' : _hlTileDeltaHtml(r, prev)) || '<span class="hl-tile-delta" aria-hidden="true"></span>';
+  // 類型層級暫定（HL_TYPE_PROVISIONAL，例：酷澎商城）：有分數時在「比上月」那一行後面加「・暫定」（同一個 span，第一列高度不變）
+  const provTip = r.score != null && HL_TYPE_PROVISIONAL[r.type], provHtml = provTip ? `<span title="${escapeHtml(provTip)}">暫定</span>` : '';
+  const deltaRaw = r.score == null ? '' : _hlTileDeltaHtml(r, prev);
+  const delta = deltaRaw ? (provHtml ? deltaRaw.slice(0, deltaRaw.lastIndexOf('</span>')) + '・' + provHtml + '</span>' : deltaRaw)
+    : (provHtml ? `<span class="hl-tile-delta">${provHtml}</span>` : '<span class="hl-tile-delta" aria-hidden="true"></span>');
   const right = (ns
     ? `<span class="hl-tile-noscore"${tip}>${escapeHtml(ns.text)}</span>`
     : _hlTileBadgeHtml(r)) + delta;
@@ -2560,6 +2567,8 @@ function _hlScoreHow(r) {
   if (r.pureOnly) return `這個月只看純利率（${_hlPureOnlyWhy(r)}）`;
   return (r.items || []).filter(it => it.status === 'ok').map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('＋');
 }
+// 類型層級的「暫定」（score.items 的 provisional 是整項的，沒有「某類型暫定」的欄位）：只給畫面標示用，不參與計分與驗證。
+const HL_TYPE_PROVISIONAL = Object.freeze({ coupang: '酷澎商城的分數線是暫定（2026-11，6～10 月資料，3 個月後再校）' });
 // 細項「看評分細節」（v5）：只列計分的兩項——本月數值、分數線（100／80／60，達到的那一級標出來）、得分；暫定的項目標「暫定」。
 //   以前的成長、廣告效率、商品結構面向表格不在這裡顯示了（面向函式還在，之後改成月份變化表）。
 function _hlScoreDetailHtml(r, snap) {
@@ -2573,10 +2582,12 @@ function _hlScoreDetailHtml(r, snap) {
     const sc = it.status === 'ok'
       ? `<span class="hl-sscore hl-l-${_hlLight(it.score)}">${it.score}</span>`
       : `<span class="hl-w">${escapeHtml(it.status === 'nostd' ? '不計分' : (_HL_STATUS_TEXT[it.status] || it.status))}</span>`;
-    return `<tr><td>${escapeHtml(it.label)}<span class="hl-w">${Math.round(it.w * 100)}%</span>${it.provisional ? '<span class="hl-uncal">暫定</span>' : ''}</td>
+    const prov = it.provisional || (it.lines && HL_TYPE_PROVISIONAL[r.type]);
+    return `<tr><td>${escapeHtml(it.label)}<span class="hl-w">${Math.round(it.w * 100)}%</span>${prov ? `<span class="hl-uncal"${!it.provisional ? ` title="${escapeHtml(HL_TYPE_PROVISIONAL[r.type])}"` : ''}>暫定</span>` : ''}</td>
       <td class="hl-num">${escapeHtml(val)}</td><td class="hl-tiers">${lines}</td><td class="hl-num">${sc}</td></tr>`;
   }).join('');
-  const how = r.score == null ? '' : `<div class="hl-dim-foot">總分＝${escapeHtml(_hlScoreHow(r))}。分數線達到幾分就是幾分（${T.join('／')}／0），不做中間分數。</div>`;
+  const how = (r.score == null ? '' : `<div class="hl-dim-foot">總分＝${escapeHtml(_hlScoreHow(r))}。分數線達到幾分就是幾分（${T.join('／')}／0），不做中間分數。</div>`)
+    + ((r.items || []).some(it => it.lines) && HL_TYPE_PROVISIONAL[r.type] ? `<div class="hl-dim-foot">${escapeHtml(HL_TYPE_PROVISIONAL[r.type])}。</div>` : '');
   return `<table class="hl-sub hl-score-tbl"><thead><tr><th>計分項目</th><th class="hl-num">本月</th><th>分數線</th><th class="hl-num">得分</th></tr></thead><tbody>${rows}</tbody></table>${how}`;
 }
 // 商品層資料的狀態列：資料時間標章＋（還沒載／逾時時）「載入商品資料」按鈕。沒有商品層的通路回空字串。
@@ -3421,6 +3432,128 @@ Object.assign(App, {
   },
 });
 
+/* ---------- Console：酷澎商城分數線（2026-11-18，管理員；照 2026-11-09 __healthShopeeTaxInLines 的做法） ----------
+ *   🔴 先進「通路健檢」頁再執行（要用這頁讀好的資料列出會影響的通路月份；不在健檢頁會直接停下）。
+ *   __healthCoupangLines()               試跑（commit:false）：列出每一版「改前 → 改後」與會影響的通路月份，不寫。
+ *   __healthCoupangLines({commit:true})  真的寫：有改的版本整版覆蓋＋第一次寫入時存快照，一次 writePaths，寫完讀回比對。
+ *   規則（純函式 _hlCupLinesPlanVersion）：只在 items.pureRate.lines、items.sellThrough.lines 加 coupang 這一組（HL_CUP_LINES）；
+ *     沒有 ⇒ 加上；已經一樣 ⇒ 跳過；已有但不一樣 ⇒ 列出、不動、請人工確認。其他類型、個別通路覆蓋（linesByChannel）一律原樣，
+ *     有 coupang-* 個別覆蓋只列出、不動。有改到的版本加 coupangLines:1（版本頂層，驗證不看），備註後面加「酷澎商城線暫定…」；by／byName／at 保持原作者。
+ *   快照：app/health_rules 頂層 preCoupangLines＝{ atMs, by, byName, schema, versions:改之前整份 versions }，只在第一次寫（已存在就不覆蓋）。
+ *   還原：__healthCoupangLinesRestore()，同樣預設試跑、{commit:true} 才寫。🔴 回滾順序：先還原資料、再還原程式。
+ *   寫入走 __cloudHealthRules.writePaths（沒有新雲端物件，本機防護物件數不變）；被防護擋下時回 undefined → 回 {ok:false,blocked:true}。 */
+// HL_CUP_LINES_PURE_BEGIN（只放純函式與常數）
+const HL_CUP_LINES = Object.freeze({ pureRate: Object.freeze([0.25, 0.22, 0.15]), sellThrough: Object.freeze([0.33, 0.27, 0.23]) });
+const HL_CUP_LINES_NOTE = '酷澎商城線暫定（2026-11，6～10 月資料，3 個月後再校）';
+// 一版 → { next:有改就是新版本（深拷貝）否則 null, rows:[{ 版本, 項目, 改前, 改後, 處理 }] }
+function _hlCupLinesPlanVersion(key, v) {
+  const rows = [], pct = a => (Array.isArray(a) ? a.map(x => Math.round(x * 1000) / 10).join('/') : '（沒有）');
+  const k = x => Math.round(x * 1000), same = (a, b) => Array.isArray(a) && a.length === 3 && a.every((x, i) => typeof x === 'number' && k(x) === k(b[i]));
+  const next = JSON.parse(JSON.stringify(v || {}));
+  let changed = false;
+  Object.keys(HL_CUP_LINES).forEach(item => {
+    const it = v && v.items && v.items[item], want = HL_CUP_LINES[item];
+    if (!it || typeof it !== 'object') { rows.push({ 版本: key, 項目: item, 改前: '—', 改後: '—', 處理: '這版沒有這個項目，不動' }); return; }
+    const cur = it.lines && Object.prototype.hasOwnProperty.call(it.lines, 'coupang') ? it.lines.coupang : null;
+    if (cur && same(cur, want)) rows.push({ 版本: key, 項目: item, 改前: pct(cur), 改後: pct(cur), 處理: '已經是這組線，跳過' });
+    else if (cur) rows.push({ 版本: key, 項目: item, 改前: pct(cur), 改後: pct(cur), 處理: '已有不同的酷澎線，不動，請人工確認' });
+    else {
+      next.items[item].lines = Object.assign({}, next.items[item].lines || {}, { coupang: want.slice() });
+      rows.push({ 版本: key, 項目: item, 改前: '（沒有＝標準未設定）', 改後: pct(want), 處理: '加上酷澎商城類型線' });
+      changed = true;
+    }
+    Object.keys((it && it.linesByChannel) || {}).filter(id => id.indexOf('coupang-') === 0).forEach(id =>
+      rows.push({ 版本: key, 項目: item + ' 個別通路 ' + id, 改前: pct(it.linesByChannel[id]), 改後: pct(it.linesByChannel[id]), 處理: '個別通路覆蓋，不動（會蓋過類型線）' }));
+  });
+  if (changed) {
+    next.coupangLines = 1;
+    const n = String(next.note || '');
+    if (n.indexOf(HL_CUP_LINES_NOTE) < 0) next.note = (n ? n + '；' : '') + HL_CUP_LINES_NOTE;
+  }
+  return { next: changed ? next : null, rows };
+}
+// HL_CUP_LINES_PURE_END
+async function _hlCupLinesRead(tag) {
+  if (App.route !== 'health') { console.error(tag + ' 請先進「通路健檢」頁再執行'); return null; }
+  if (!_hlStdCanEdit()) { console.error(tag + ' 只限管理員（唯讀帳號也不行）'); return null; }
+  const be = window.__cloudHealthRules;
+  if (!be || typeof be.writePaths !== 'function' || typeof be.getDoc !== 'function') { console.error(tag + ' 雲端未連線'); return null; }
+  try { return { be, d: await _hlStdReadServer(be) }; }
+  catch (e) { console.error(tag + ' 讀取伺服器失敗：' + ((e && e.message) || e)); return null; }
+}
+// 會影響的通路月份：用這頁的資料，酷澎商城兩家、各版適用的月份（到本月為止；本月 KPI 多半還沒填完），改前／改後各算一次。
+function _hlCupLinesImpact(before, after) {
+  const vs = Object.keys(after || {}).sort();
+  if (!vs.length) return [];
+  const { snap, months } = _hlBacktestSnap({ from: vs[0], to: _hlTodayYm() });
+  const chs = HEALTH_CHANNELS.filter(ch => ch.type === 'coupang');
+  const run = vers => { const s = Object.assign({}, snap, { healthRuleVersions: _hlRuleVersionsFromDoc({ schema: 1, versions: vers }) }); return healthBacktest(s, months, chs).raws; };
+  const a = run(before), b = run(after), txt = r => (r.總分 == null ? r.狀態 : r.總分 + ' 分');
+  return a.map((r, i) => ({ 通路: r.通路, 月: r.月, 改前: txt(r), 改後: txt(b[i]), 純利率: (b[i].items.find(x => x.key === 'pureRate') || {}).status, 動銷率: (b[i].items.find(x => x.key === 'sellThrough') || {}).status }));
+}
+window.__healthCoupangLines = async function (opts) {
+  const tag = '[健檢 酷澎分數線]', commit = !!(opts && opts.commit);
+  const r0 = await _hlCupLinesRead(tag); if (!r0) return null;
+  const { be, d } = r0;
+  if (!d || !_hlIsObj(d.versions)) { console.log(tag + ' 雲端沒有任何版本（全部用程式內的 BASE，BASE 已有酷澎線），不用加'); return { ok: true, items: 0 }; }
+  if (d.schema !== 1) { console.error(tag + ' schema 不認得（' + d.schema + '），不處理'); return null; }
+  const keys = Object.keys(d.versions).sort(), rows = [], nexts = {};
+  keys.forEach(k => { const p = _hlCupLinesPlanVersion(k, d.versions[k]); rows.push(...p.rows); if (p.next) nexts[k] = p.next; });
+  console.log(tag + ' 改前 → 改後'); console.table(rows);
+  const todo = Object.keys(nexts);
+  const after = Object.assign({}, d.versions, nexts);
+  const { problems } = _hlBuildRuleChain(_hlRuleVersionsFromDoc({ schema: 1, versions: after }));
+  if (problems.length) { console.error(tag + ' 加完的版本不合法，不寫：' + problems.join('；')); return { ok: false, problems }; }
+  let impact = [];
+  try { impact = _hlCupLinesImpact(d.versions, after); console.log(tag + ' 會影響的通路月份（雲端版本適用的月份，到本月）'); console.table(impact); }
+  catch (e) { console.warn(tag + ' 算影響範圍失敗（不影響寫入判斷）', e); }
+  if (!commit) {
+    console.log('%c' + tag + ' 試跑：要改 ' + todo.length + ' 版（' + (todo.join('、') || '無') + '），沒有寫入。快照：' + (d.preCoupangLines ? '已存在（不會覆蓋）' : '第一次寫入時存') + '。真的寫入：__healthCoupangLines({commit:true})', 'color:#5b5fcf;font-weight:700');
+    return { dryRun: true, todo, rows, impact, versionsAfter: _hlRuleVersionsFromDoc({ schema: 1, versions: after }) };
+  }
+  if (!todo.length) { console.log(tag + ' 沒有要改的版本'); return { ok: true, items: 0 }; }
+  const u = App.currentUser || {};
+  const payload = todo.map(k => [['versions', k], nexts[k]]);
+  if (!d.preCoupangLines) payload.push([['preCoupangLines'], { atMs: Date.now(), by: u.username || '', byName: u.name || '', schema: d.schema, versions: JSON.parse(JSON.stringify(d.versions)) }]);
+  console.log(tag + ' 寫入（一次）', payload);
+  let r;
+  try { r = await be.writePaths(payload); } catch (e) { console.error(tag + ' 寫入失敗', e); return { ok: false, error: String((e && e.message) || e) }; }
+  if (!(r && r.ok)) { console.error(tag + ' 這次沒有寫進雲端（防寫或唯讀狀態），雲端沒有變動'); return { ok: false, blocked: true }; }
+  const r1 = await _hlCupLinesRead(tag);
+  const bad = r1 && r1.d && r1.d.versions ? todo.filter(k => _hlStableJson(r1.d.versions[k]) !== _hlStableJson(nexts[k])) : todo;
+  if (bad.length) console.error(tag + ' 讀回不一致：' + bad.join('、'));
+  else console.log('%c' + tag + ' 已改 ' + todo.length + ' 版，讀回一致。請大家重新整理健檢頁', 'color:#16a34a;font-weight:700');
+  return { ok: !bad.length, items: todo.length, bad };
+};
+// 依 preCoupangLines.versions 把「帶 coupangLines 標記」的版本整版寫回；沒標記的（加完後有人用評分標準視窗存過）不動、列出來；快照標 restoredAt。
+window.__healthCoupangLinesRestore = async function (opts) {
+  const tag = '[健檢 酷澎分數線還原]', commit = !!(opts && opts.commit);
+  const r0 = await _hlCupLinesRead(tag); if (!r0) return null;
+  const { be, d } = r0, snap = d && d.preCoupangLines;
+  if (!snap || !_hlIsObj(snap.versions)) { console.error(tag + ' 沒有快照 preCoupangLines'); return null; }
+  if (snap.restoredAt) console.warn(tag + ' 快照已經還原過一次（' + new Date(snap.restoredAt).toLocaleString('zh-TW') + '）');
+  const cur = (d && d.versions) || {}, rows = [], todo = [];
+  Object.keys(snap.versions).sort().forEach(k => {
+    const c = cur[k];
+    if (!c) rows.push({ 版本: k, 處理: '雲端已經沒有這版，不動，請人工確認' });
+    else if (c.coupangLines !== 1) rows.push({ 版本: k, 處理: '沒有酷澎線標記（沒加過，或加完後有人存過），不動' });
+    else { rows.push({ 版本: k, 處理: '整版寫回加線前的內容' }); todo.push(k); }
+  });
+  console.table(rows);
+  const after = Object.assign({}, cur); todo.forEach(k => { after[k] = snap.versions[k]; });
+  const { problems } = _hlBuildRuleChain(_hlRuleVersionsFromDoc({ schema: 1, versions: after }));
+  if (problems.length) { console.error(tag + ' 還原後的版本不合法，不寫：' + problems.join('；')); return { ok: false, problems }; }
+  if (!commit) { console.log('%c' + tag + ' 試跑：要還原 ' + todo.length + ' 版，沒有寫入。真的寫入加 {commit:true}', 'color:#5b5fcf;font-weight:700'); return { dryRun: true, todo }; }
+  if (!todo.length) { console.log(tag + ' 沒有要還原的版本'); return { ok: true, items: 0 }; }
+  const payload = todo.map(k => [['versions', k], snap.versions[k]]).concat([[['preCoupangLines', 'restoredAt'], Date.now()]]);
+  let r;
+  try { r = await be.writePaths(payload); } catch (e) { console.error(tag + ' 寫入失敗', e); return { ok: false }; }
+  if (!(r && r.ok)) { console.error(tag + ' 這次沒有寫進雲端（防寫或唯讀狀態），雲端沒有變動'); return { ok: false, blocked: true }; }
+  const r1 = await _hlCupLinesRead(tag);
+  const bad = r1 && r1.d && r1.d.versions ? todo.filter(k => _hlStableJson(r1.d.versions[k]) !== _hlStableJson(snap.versions[k])) : todo;
+  if (bad.length) console.error(tag + ' 讀回不一致：' + bad.join('、')); else console.log('%c' + tag + ' 已還原 ' + todo.length + ' 版，讀回一致', 'color:#16a34a;font-weight:700');
+  return { ok: !bad.length, items: todo.length, bad };
+};
 /* ---------- Console：唯讀回測 ---------- */
 //   opts：{ from, to, products:true（也算商品層面向；只算「已經載入」的平台，其他平台當成只算 KPI）, adsRules:true（蝦皮廣告致虧三條候選規則逐通路逐月比較） }
 //   沒有 products ⇒ 跟塊 A 一樣只算 KPI（商品層面向「不適用」，不會因為商品層沒載入而沒有總分）。
