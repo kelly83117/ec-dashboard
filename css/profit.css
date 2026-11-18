@@ -2252,3 +2252,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-na{color:var(--text-faint);}
 .us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
 .us-empty-sm{padding:10px;border-top:1px solid var(--border);}
+/* 酷澎商品主檔（PR-C2 第 4 塊）：同步預覽的「狀態」格、上傳預覽的「雲端載入中」。顏色走 :root 變數。 */
+.cup-ps-mode{display:inline-block;margin-right:6px;padding:1px 8px;border-radius:10px;background:var(--info-soft);color:var(--info);font-weight:700;font-size:11px;}
+.cup-ps-nums{color:var(--text);font-weight:600;}
+.cup-ps-shadow{margin-top:3px;color:var(--text-muted);font-size:11px;}
+.cup-ps-bad{color:var(--danger);font-weight:700;}
+.cup-pm-wait{margin-bottom:8px;color:var(--text-muted);font-size:12px;}
