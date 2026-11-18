@@ -2767,7 +2767,7 @@ function _sweepAllLocalReportsIntoPending(){
       const k=localStorage.key(i);
       // PR-C2：酷澎商品主檔 ec_coupang_products|<通路>（→ coupang_products 4 片）。只在「dirty（存過、還沒確認推上去）」或「本機有主檔、沒有 lastpushed」時才撿（_cupProductsNeedsPush）。
       //   不補水 Store._mem：主檔只放 localStorage＋profit.js 模組快取（C1 設計），推送與預覽一律走 cupPendingProducts（每次重讀 localStorage）→ 看到的＝推的。
-      if(k&&cupIsProductsKey(k)){ if(_cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); continue; }
+      if(k&&cupIsProductsKey(k)){ if(_cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); else _pendingSyncKeys.delete(k); continue; }
       if(k&&k.indexOf('ec_coupang_products|')===0) continue;   // 段數不對的怪 key：不撿
       // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
       //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
@@ -30555,7 +30555,7 @@ function cupSaveProductsLocal(shop, doc, opts){   // opts.fromSync＝同步確�
   const ok=(enc!==null && tryWrite(enc)) || tryWrite(json);
   if(!ok) return false;
   _cupProdMem[shop]=doc; delete _cupProdBad[shop];
-  if(!(opts&&opts.fromSync)){ _cupPDirtyAdd(k); _markPending(k); try{ cupRefreshSyncBtn(shop); }catch(e){} }   // PR-C2：使用者套用 ⇒ 待同步（試跑期間按同步只算不寫）
+  if(!(opts&&opts.fromSync)){ _cupProdJustSaved[shop]=Date.now(); _cupPDirtyAdd(k); _markPending(k); try{ cupRefreshSyncBtn(shop); }catch(e){} }   // 使用者套用 ⇒ 待同步（C3 起按同步會真寫）
   return true;
 }
 // ══ PR-C2 第 3 塊：酷澎商品主檔同步（lastpushed／dirty／待推值／merge 推送），閘門 window.__CUP_PRODUCTS_ENFORCE（預設 false＝試跑）══
@@ -30572,10 +30572,40 @@ function _cupPDirtyRaw(){ let raw=null; try{ raw=localStorage.getItem(_CUP_PDIRT
 function _cupPDirtyHas(k){ const r=_cupPDirtyRaw(); return r.corrupt || r.list.includes(k); }
 function _cupPDirtyAdd(k){ const r=_cupPDirtyRaw(); if(r.corrupt){ try{ console.warn('[酷澎商品主檔] dirty 註冊表損毀，重建'); }catch(e){} } if(r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.concat([k]))); }catch(e){ try{ console.error('[酷澎商品主檔] dirty 註冊表寫不進去：'+k); }catch(_){} } }
 function _cupPDirtyDel(k){ const r=_cupPDirtyRaw(); if(r.corrupt||!r.list.includes(k)) return; try{ localStorage.setItem(_CUP_PDIRTY_LS, JSON.stringify(r.list.filter(x=>x!==k))); }catch(e){} }
-function _cupProductsLastPushedGet(shop){   // {選項ID:簽名} 或 null（不存在／損毀 ⇒ bootstrap）
-  try{ const raw=localStorage.getItem(cupProductsLastPushedKey(shop)); if(raw===null) return null; const m=JSON.parse(raw); return (m&&typeof m==='object'&&!Array.isArray(m))?m:null; }catch(e){ return null; } }
+// C3 補修：lastpushed 存成 LZ1（同主檔；好麻吉純 JSON 約 99 萬字元）。讀得懂舊的純 JSON（legacy），下次寫入或載入時自動換成 LZ1。
+//   內容（{選項ID: 整筆序列化}）跟以前一模一樣，只是存法不同 → 合併計畫完全不變。純函式 cupLpEncode／cupLpDecode 在 CUP-PS-PURE 區塊。
+const _cupLpCache={};   // shop → { raw, res }：raw 沒變就不再解壓（同一份 1MB 簽名表 sweep／預覽／推送會讀好幾次）
+function _cupProductsLastPushedRead(shop){   // { state:'none'|'ok'|'bad', sig, legacy }
+  let raw; try{ raw=localStorage.getItem(cupProductsLastPushedKey(shop)); }catch(e){ return { state:'bad', sig:null, legacy:false }; }
+  if(raw===null) return { state:'none', sig:null, legacy:false };
+  const c=_cupLpCache[shop]; if(c&&c.raw===raw) return c.res;
+  const res=cupLpDecode(raw); _cupLpCache[shop]={ raw, res };
+  if(res.state==='bad'){ try{ console.error('[酷澎商品主檔] lastpushed 讀不懂（'+shop+'），當作沒有 lastpushed：合併走 bootstrap（不刪雲端），本機主檔算待推、雲端不會蓋過來'); }catch(e){} }
+  return res;
+}
+function _cupProductsLastPushedGet(shop){ const r=_cupProductsLastPushedRead(shop); return r.state==='ok'?r.sig:null; }   // {選項ID:簽名} 或 null（不存在／讀不懂 ⇒ bootstrap）
+// 寫入：LZ1（壓不了退回純 JSON）→ 讀回比對。失敗不丟錯：console 紅字、回 false（呼叫端照舊：enforce 寫不進去就不清 dirty）。
+function _cupLpWriteRaw(shop, enc, json){
+  const k=cupProductsLastPushedKey(shop);
+  const tryW=v=>{ try{ if(localStorage.getItem(k)===v) return true; localStorage.setItem(k,v); return localStorage.getItem(k)===v; }catch(e){ return false; } };
+  if((enc && tryW(enc)) || (json && tryW(json))){ delete _cupLpCache[shop]; return true; }
+  try{ console.error('%c[酷澎商品主檔] lastpushed 寫不進去（'+shop+'，本機空間不足？），dirty 不會清，下次同步會再推一次（內容相同、無害）','color:#dc2626;font-weight:700'); }catch(e){}
+  return false;
+}
 function _cupProductsLastPushedSet(shop, items){
-  try{ localStorage.setItem(cupProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); return true; }catch(e){ try{ console.error('[酷澎商品主檔] lastpushed 寫不進去：',shop,e); }catch(_){} return false; } }
+  let json=null; try{ json=JSON.stringify(_momoProductsBuildSig(items)); }catch(e){}
+  if(json===null){ try{ console.error('[酷澎商品主檔] lastpushed 產生失敗：'+shop); }catch(e){} return false; }
+  return _cupLpWriteRaw(shop, _lz1Encode(json), json);
+}
+// 舊格式（純 JSON）→ LZ1：內容原封不動，只換存法
+function _cupLpMigrate(shop){
+  const r=_cupProductsLastPushedRead(shop); if(r.state!=='ok'||!r.legacy) return false;
+  let json; try{ json=JSON.stringify(r.sig); }catch(e){ return false; }
+  const enc=_lz1Encode(json); if(!enc) return false;
+  const ok=_cupLpWriteRaw(shop, enc, null);
+  if(ok){ try{ console.log('[酷澎商品主檔] lastpushed 已換成壓縮格式：'+shop+'（'+json.length+' → '+enc.length+' 字元）'); }catch(e){} }
+  return ok;
+}
 // 每次重讀 localStorage（不經、也不改模組快取 _cupProdMem）：{ state:'ok'|'absent'|'bad', doc }
 function _cupProductsReadLs(shop){
   let raw=null; try{ raw=localStorage.getItem(cupProductsKey(shop)); }catch(e){ return { state:'bad', doc:null }; }
@@ -30585,12 +30615,20 @@ function _cupProductsReadLs(shop){
 }
 // 同步要推的本機值（預覽與推送共用）：主檔 key → doc 或 null（讀不到／沒有）
 function cupPendingProducts(key){ if(!cupIsProductsKey(key)) return null; const r=_cupProductsReadLs(key.split('|')[1]); return r.state==='ok'?r.doc:null; }
-// sweep 判準（E）：dirty，或本機有主檔（含讀不到的，讓分派列成問題）而且沒有 lastpushed
+// sweep／載入撿回／雲端套用共用的判準（E）：
+//   dirty ⇒ 待推；但 C3 補修：dirty 而且本機簽名＝lastpushed（例如重傳同一份檔）⇒ 清掉 dirty、不算待推（已經卡住的也會自己解開）。
+//   不是 dirty ⇒ 本機有主檔（含讀不到的，讓分派列成問題）而且 lastpushed 不存在或讀不懂 ⇒ 待推（從沒推過；雲端套用不會蓋它）。
 function _cupProductsNeedsPush(k){
   if(!cupIsProductsKey(k)) return false;
-  if(_cupPDirtyHas(k)) return true;
-  let has=false, lp=null; try{ has=localStorage.getItem(k)!==null; lp=localStorage.getItem(cupProductsLastPushedKey(k.split('|')[1])); }catch(e){ return false; }
-  return has && lp===null;
+  const shop=k.split('|')[1];
+  let has=false; try{ has=localStorage.getItem(k)!==null; }catch(e){ return false; }
+  const lpr=_cupProductsLastPushedRead(shop);
+  if(_cupPDirtyHas(k)){
+    if(has && lpr.state==='ok'){ const rd=_cupProductsReadLs(shop);
+      if(rd.state==='ok' && cupSigEqual(_momoProductsBuildSig(rd.doc.items), lpr.sig)){ _cupPDirtyDel(k); try{ console.log('[酷澎商品主檔] '+shop+' 本機內容跟上次同步的一樣，清掉 dirty（不需要同步）'); }catch(e){} return false; } }
+    return true;
+  }
+  return has && lpr.state!=='ok';
 }
 async function _cupDelGuardPreflight(shop){
   const rd=_cupProductsReadLs(shop); if(rd.state!=='ok') return null;
@@ -30601,7 +30639,7 @@ async function _cupDelGuardPreflight(shop){
 function _cupProductsTaskRun(shop, approved){
   return cupSyncProductsMerge(shop, approved instanceof Set?{approvedDeletes:approved}:undefined).then(r=>{ if(!r||r.ok!==true) throw new Error((r&&r.why)||'酷澎商品主檔寫入未確認'); return r; });
 }
-window.__CUP_PRODUCTS_ENFORCE=false;   // 🟡 試跑：酷澎商品主檔同步只算合併計畫、只印 log、不寫雲端。切 true 的條件見 CLAUDE.md（C3）
+window.__CUP_PRODUCTS_ENFORCE=true;   // 🟢 C3（2026-11-18）：酷澎商品主檔同步真寫（setShop＋讀回確認）。2026-11-18 正式站兩館 enforce 驗過（露營館 485、麻吉 3724，寫後 shadow 推 0 刪 0）。要退回只算不寫改 false
 // 推送（opts.shadow＝只算不寫；opts.approvedDeletes＝syncToCloud 預檢已確認的刪除清單）。
 //   回 { ok:true, shadow, shop, plan } 或 { ok:false, shadow, shop, why, plan?, unconfirmed?, written? }；不丟錯（讀雲端失敗也回 ok:false）。
 async function cupSyncProductsMerge(shop, opts){
@@ -30678,10 +30716,39 @@ function _cupApplyCloud(latest){
     _cupProdCloud[shop]={ items:Array.isArray(v.items)?v.items:[], latestExport:String(v.latestExport||''), fromCache, shardsSeen:seen,
       complete:!fromCache && (seen===CUP_PRODUCTS_SHARDS || seen===0), mock:!!v.mock };
   });
-  try{ window.dispatchEvent(new CustomEvent('coupangProductsCloudReady', { detail:{ shops:Object.keys(src) } })); }catch(e){}
+  const applied={};
+  Object.keys(src).forEach(shop=>{ try{ applied[shop]=_cupCloudToLocal(shop); }catch(e){ applied[shop]='error'; try{ console.error('[酷澎商品主檔] 雲端套用到本機失敗',shop,e); }catch(_){} } });
+  try{ window.__cupLastCloudApply={ at:Date.now(), result:applied }; }catch(e){}
+  try{ window.dispatchEvent(new CustomEvent('coupangProductsCloudReady', { detail:{ shops:Object.keys(src), applied } })); }catch(e){}
 }
 window.__cupApplyCloudProducts=function(latest){ _cupApplyCloud(latest); };
+// C3（2026-11-18）：雲端主檔 → 本機（回音守衛照 MOMO __momoShouldSkipCloudOverwrite：有未推的就不蓋、5 秒內剛存過不蓋）。
+//   只在「到齊的伺服器快照、而且雲端有主檔（≥1 片）」時寫；雲端確定沒有（0 片）不動本機。
+//   不寫的情況（回傳原因、記在 window.__cupLastCloudApply）：
+//     'pending'＝本機有待推（dirty，或本機有主檔但沒有 lastpushed＝從沒推過，例如 C1 時期上傳的）→ 保住本機，等使用者按同步（合併時逐筆保留較新）
+//     'recent'＝5 秒內剛存過；'local-bad'＝本機那份解不開（不覆蓋，同 C1 讀壞不覆蓋）；'same'＝本機已經跟雲端一樣（只補 lastpushed）
+//   寫的格式同 cupSaveProductsLocal（fromSync：不標 dirty、不進待同步），lastpushed＝雲端內容的簽名 → 之後同步推 0。
+const _cupProdJustSaved={};   // shop → 使用者最後一次存本機的時間（ms）
+function _cupCloudToLocal(shop){
+  const c=_cupProdCloud[shop];
+  if(!c||!c.complete) return 'not-complete';
+  if(c.shardsSeen===0) return 'cloud-empty';
+  const k=cupProductsKey(shop);
+  if(_cupProductsNeedsPush(k)) return 'pending';
+  if(_cupProdJustSaved[shop] && Date.now()-_cupProdJustSaved[shop]<5000) return 'recent';
+  const rd=_cupProductsReadLs(shop);
+  if(rd.state==='bad') return 'local-bad';
+  const sameItems=rd.state==='ok' && String(rd.doc.latestExport||'')===c.latestExport && _momoStableStr(rd.doc.items)===_momoStableStr(c.items);
+  if(sameItems){ if(_cupProductsLastPushedGet(shop)===null) _cupProductsLastPushedSet(shop, c.items); return 'same'; }
+  const doc={ schema:1, shop, latestExport:c.latestExport, items:c.items.slice(), rejected:(rd.doc&&rd.doc.rejected)||0,
+    file:{ name:'', exportTime:c.latestExport, appliedAt:Date.now(), by:'', fromCloud:true } };
+  if(!cupSaveProductsLocal(shop, doc, { fromSync:true })){ try{ console.error('[酷澎商品主檔] 雲端主檔存不進本機（空間不足？）：'+shop); }catch(e){} return 'save-fail'; }
+  _cupProductsLastPushedSet(shop, c.items);
+  try{ console.log('[酷澎商品主檔] 已從雲端同步到本機：'+shop+'（'+c.items.length+' 個選項，最新匯出 '+c.latestExport+'）'); }catch(e){}
+  return 'applied';
+}
 // 載入時撿回待同步（_pendingSyncKeys 只活在這個分頁；重新整理後酷澎鈕、離開警告要靠這裡才看得到 dirty／沒有 lastpushed 的主檔）。判準同 sweep（_cupProductsNeedsPush）。
+try{ ['麻吉','露營館'].forEach(s=>{ try{ _cupLpMigrate(s); }catch(e){} }); }catch(e){}   // C3 補修：舊的純 JSON lastpushed → LZ1
 try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(cupIsProductsKey(k) && _cupProductsNeedsPush(k)) _pendingSyncKeys.add(k); } }catch(e){}
 // 讀雲端（強制伺服器）：預覽、推送、預檢共用。假雲端開著時回假資料（形狀同 __cloudCoupangProducts.getDoc）。
 function _cupCloudGetDoc(shop, src){
@@ -30697,7 +30764,11 @@ function _cupPmRef(shop, S){
   const ref=cloudLatest>local?cloudLatest:local;
   return { ready, ref, src:(cloudLatest&&cloudLatest>=local)?'cloud':'local', older:!!(S&&S.exportTime&&ref&&S.exportTime<ref), cloudLatest };
 }
-window.addEventListener('coupangProductsCloudReady', ()=>{ try{ ['麻吉','露營館'].forEach(s=>{ if(_cupPmStage[s]) cupRenderProductsPreview(s); }); }catch(e){} });
+window.addEventListener('coupangProductsCloudReady', ()=>{ try{ ['麻吉','露營館'].forEach(s=>{
+  if(_cupPmStage[s]) cupRenderProductsPreview(s);
+  const a=_cupStArgs[s]; if(a) cupRenderSellThrough(s, a.rows, a.hasReport);   // C3：動銷率卡（只重畫這一格）
+  if(s===_cupShop && _cupSub[s]==='sync' && !_cupPmStage[s] && typeof cupRenderShop==='function') cupRenderShop(s);   // 商品同步分頁顯示的主檔跟著更新（正在預覽時不動）
+}); }catch(e){} });
 // 同步預覽「狀態」格（酷澎商品主檔）
 function _cupProductsPreviewCell(it){
   if(it._cupLocalBad) return '<span class="cup-ps-bad">本機主檔讀不到，這次不會推（請通知 Keani）</span>';
@@ -30811,7 +30882,6 @@ function cupRenderProductsPreview(shop){
         ${unk.length?`<div style="color:#dc2626">不認得的銷售狀態（照原文存）：${unk.map(([k,v])=>'<b>'+esc(k)+'</b> '+v+' 筆').join('、')}</div>`:''}
         ${P.dupSku?`<div style="color:#d97706">同一個選項 ID 重複 ${P.dupSku} 列，只取第一列</div>`:''}
         <div>跟這台電腦的主檔比：新增 <b>${st.added}</b> · 有變動 <b>${st.updated}</b> · 沒變 <b>${st.unchanged}</b>${S.prevLatest?` · 原本在清單、這份沒有 <b>${st.leftLatest}</b>（會變成不在架）`:''}${st.olderKept?` · <span style="color:#d97706">主檔較新、保留原樣 ${st.olderKept}</span>`:''}</div>
-        <div style="color:#6b7280">商品主檔目前只存在這台電腦，不會同步雲端（換電腦、其他人看不到）。</div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
         <button class="mm-btn-primary" onclick="cupApplyProductsMaster('${esc(shop)}')"${RF.ready?'':' disabled title="雲端主檔載入中"'}>✓ 套用到這台電腦的商品主檔</button>
@@ -30832,20 +30902,24 @@ function cupApplyProductsMaster(shop){
   if(_cupProdBad[shop]){ if(typeof showToast==='function') showToast('這台電腦的商品主檔讀不到，這次不套用','error'); return; }
   const m=cupProductsMerge(prev, S.parsed.items, S.exportTime);
   const doc=Object.assign(m.doc, { shop, rejected:S.parsed.rejected, file:{ name:S.fileName, exportTime:S.exportTime||'', appliedAt:Date.now(), by:(window.App&&App.currentUser&&App.currentUser.username)||'' } });
-  if(!cupSaveProductsLocal(shop, doc)){
+  const _lpr=_cupProductsLastPushedRead(shop);
+  const _same=_lpr.state==='ok' && cupSigEqual(_momoProductsBuildSig(doc.items), _lpr.sig);   // C3 補修：跟上次同步的一樣 ⇒ 不需要同步
+  if(!cupSaveProductsLocal(shop, doc, _same?{fromSync:true}:undefined)){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔沒有存',message:'這台電腦的瀏覽器空間不夠，商品主檔沒有存進去。可以先用左下角「釋出空間」再試一次。',kind:'error'});
     return; }
   _cupPmStage[shop]=null;
-  if(typeof showToast==='function') showToast('已存本機（'+doc.items.length+' 個選項），按「☁ 同步雲端」上傳（目前為試跑，不會真的寫入）','success');
+  if(_same){ const _k=cupProductsKey(shop); _cupPDirtyDel(_k); try{ _pendingSyncKeys.delete(_k); }catch(e){} try{ cupRefreshSyncBtn(shop); }catch(e){} try{ _showSyncBtn(); }catch(e){}
+    if(typeof showToast==='function') showToast('內容跟雲端一樣，不需要同步','success'); }
+  else if(typeof showToast==='function') showToast('已存本機（'+doc.items.length+' 個選項），按「☁ 同步雲端」上傳','success');
   cupRenderShop(shop);
 }
 function cupCancelProductsMaster(shop){ _cupPmStage[shop]=null; cupRenderShop(shop); }
-// 「商品同步」分頁（C1：只有本機主檔）
+// 「商品同步」分頁（C3 起：本機主檔＝上傳的或從雲端同步來的）
 function cupRenderProductsTab(shop){
   const esc=_momoEsc, nm=esc(cupShopDisplay(shop)), d=cupLoadProducts(shop);
   let cur;
   if(_cupProdBad[shop]) cur=`<div style="color:#dc2626">這台電腦的${nm}商品主檔讀不到（可能損毀），請通知 Keani。</div>`;
-  else if(!d) cur=`<div style="color:#6b7280">這台電腦還沒有${nm}的商品主檔。</div>`;
+  else if(!d){ const c=_cupProdCloud[shop]; cur=(c&&c.complete)?`<div style="color:#6b7280">還沒有${nm}的商品主檔（雲端也沒有）。</div>`:`<div style="color:#6b7280">正在讀雲端的${nm}商品主檔…</div>`; }
   else{
     const L=cupProductsListed(d), f=d.file||{};
     const at=f.appliedAt?new Date(f.appliedAt):null, z=x=>String(x).padStart(2,'0');
@@ -30855,12 +30929,11 @@ function cupRenderProductsTab(shop){
         <div>選項 <b>${d.items.length.toLocaleString()}</b> 個</div>
         <div>上架中商品頁 <b>${L.listed.size.toLocaleString()}</b> · 整頁停售 <b>${L.stopped.size.toLocaleString()}</b> · 不在最新清單 <b>${(L.all.size-L.listed.size-L.stopped.size).toLocaleString()}</b></div>
       </div>
-      <div style="color:#9ca3af;font-size:12px;margin-top:4px">上次套用：${esc(atTxt)}${f.name?' · '+esc(f.name):''}</div>`;
+      <div style="color:#9ca3af;font-size:12px;margin-top:4px">${f.fromCloud?'從雲端同步：'+esc(atTxt):'上次套用：'+esc(atTxt)+(f.name?' · '+esc(f.name):'')}</div>`;
   }
   return `<div style="max-width:760px">
     <div class="mm-note" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#92400e">
-      上傳 Wing「商品管理 → 管理商品 → 在 Excel 中大量編輯 → 下載」的 <b>price_inventory</b>（價格／庫存／銷售狀態），建立${nm}的商品主檔，用來算動銷率與庫存；會同步到雲端（目前試跑中，按「☁ 同步雲端」只計算、不會真的寫入）。<br>
-      <b>目前只存在這台電腦</b>，不會同步雲端；換電腦或其他人要看，得在那台電腦也上傳一次。
+      上傳 Wing「商品管理 → 管理商品 → 在 Excel 中大量編輯 → 下載」的 <b>price_inventory</b>（價格／庫存／銷售狀態），建立${nm}的商品主檔，用來算動銷率與庫存。上傳後按「☁ 同步雲端」，大家都會看到。
     </div>
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:12px 16px;margin-bottom:14px">${cur}</div>
     <div class="mm-uprow"><div class="mm-uplbl">price_inventory <span class="mm-code">商品清單</span><div class="mm-hint">選檔後先預覽，確認才套用</div></div>
@@ -30869,20 +30942,25 @@ function cupRenderProductsTab(shop){
   </div>`;
 }
 // 總表動銷率卡（商品頁口徑）。沒有本機主檔 ⇒ 維持「待商品同步」佔位。
+const _cupStArgs={};   // shop → 最近一次畫動銷率卡的 {rows, hasReport}（雲端主檔到了只重畫這一格）
 function cupRenderSellThrough(shop, rows, hasReport){
+  _cupStArgs[shop]={ rows, hasReport };
   const v=document.getElementById('cup-kv-st-'+shop), dEl=document.getElementById('cup-kv-st-d-'+shop), tip=document.getElementById('cup-kv-st-tip-'+shop);
   if(!v||!dEl) return;
   const d=cupLoadProducts(shop);
-  if(!d||_cupProdBad[shop]){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='待商品同步'; dEl.style.color='#9ca3af';
-    if(tip) tip.title='動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。'; return; }
+  if(!d||_cupProdBad[shop]){
+    const c=_cupProdCloud[shop], loading=!_cupProdBad[shop] && !(c&&c.complete);   // 本機沒有、雲端還沒到齊 ⇒ 載入中
+    v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent=loading?'商品主檔載入中…':'待商品同步'; dEl.style.color='#9ca3af';
+    if(tip) tip.title=loading?'正在讀雲端的商品主檔，讀到後自動算出動銷率。':'動銷率需要商品主檔（上架中的商品頁＝分母）。到「商品同步」分頁上傳 price_inventory 並按「☁ 同步雲端」後，大家都會看到。'; return; }
   const L=cupProductsListed(d);
   if(!hasReport){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='這個月沒有訂單報表'; dEl.style.color='#9ca3af';
-    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 頁（清單 '+_cupFmtExport(L.latest)+'）。\n⚠ 商品主檔目前只存在上傳的這台電腦，換電腦看不到。'; return; }
+    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 頁（清單 '+_cupFmtExport(L.latest)+'）。\n'+_cupStSrcTip(L.latest); return; }
   const r=cupSellThroughCalc(rows, L.listed);
   v.textContent=r.pct!=null?r.pct.toFixed(1)+'%':'—'; v.style.color='';
   dEl.textContent=r.num.toLocaleString()+' / '+r.den.toLocaleString()+' 頁 · 清單 '+_cupFmtExport(L.latest).slice(5,10).replace('-','/'); dEl.style.color='#6b7280';
-  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 頁。\n分母＝目前上架 '+r.listedN+' 頁 ∪ 本月有賣出 ⇒ '+r.den+' 頁（其中 '+r.soldNotListed+' 頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n⚠ 商品主檔目前只存在上傳的這台電腦，換電腦看不到。';
+  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 頁。\n分母＝目前上架 '+r.listedN+' 頁 ∪ 本月有賣出 ⇒ '+r.den+' 頁（其中 '+r.soldNotListed+' 頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n'+_cupStSrcTip(L.latest);
 }
+function _cupStSrcTip(latest){ return '主檔來自雲端（最新匯出 '+_cupFmtExport(latest)+'），任何一台上傳並同步後大家都會看到。'; }
 // Console 只讀：本機主檔狀態（不回傳內容）
 window.__cupProductsState=function(){ const out={}; ['麻吉','露營館'].forEach(s=>{ const d=cupLoadProducts(s); let chars=0; try{ chars=(localStorage.getItem(cupProductsKey(s))||'').length; }catch(e){}
   const L=d?cupProductsListed(d):null; const c=_cupProdCloud[s];
@@ -32389,6 +32467,26 @@ function cupProductsWriteConfirmed(ret, back, shardCounts, mergedCount, latestEx
   if(total!==mergedCount) return { ok:false, why:'讀回合計 '+total+' 筆，合併結果是 '+mergedCount+' 筆' };
   if(String(back.latestExport||'')!==String(latestExport||'')) return { ok:false, why:'讀回的 latestExport（'+back.latestExport+'）跟寫的（'+latestExport+'）不同' };
   return { ok:true, why:'' };
+}
+// C3 補修：lastpushed 簽名表的存法。依賴 _lz1Encode／_lz1Unwrap（LZString）。
+//   cupLpEncode(items)＝LZ1(JSON(_momoProductsBuildSig(items)))；壓不了回 null（呼叫端退回純 JSON）。
+//   cupLpDecode(raw)＝{ state:'none'|'ok'|'bad', sig, legacy }：LZ1 或舊的純 JSON（legacy:true）都讀得懂；不是物件、解不開 ⇒ bad。
+function cupLpEncode(items){ let json; try{ json=JSON.stringify(_momoProductsBuildSig(items)); }catch(e){ return null; } return _lz1Encode(json); }
+function cupLpDecode(raw){
+  const u=_lz1Unwrap(raw);
+  if(u.kind==='none') return { state:'none', sig:null, legacy:false };
+  if(u.kind!=='json'&&u.kind!=='lz') return { state:'bad', sig:null, legacy:false };
+  let m; try{ m=JSON.parse(u.json); }catch(e){ return { state:'bad', sig:null, legacy:false }; }
+  if(!m||typeof m!=='object'||Array.isArray(m)) return { state:'bad', sig:null, legacy:false };
+  for(const k in m){ if(typeof m[k]!=='string') return { state:'bad', sig:null, legacy:false }; }
+  return { state:'ok', sig:m, legacy:u.kind==='json' };
+}
+// 兩份簽名表是否完全相同（選項集合一樣、每筆簽名一樣）
+function cupSigEqual(a, b){
+  if(!a||!b||typeof a!=='object'||typeof b!=='object') return false;
+  const ka=Object.keys(a); if(ka.length!==Object.keys(b).length) return false;
+  for(const k of ka){ if(!Object.prototype.hasOwnProperty.call(b,k) || a[k]!==b[k]) return false; }
+  return true;
 }
 /* ═══ CUP-PS-PURE-END ═══ */
 window.__cloudDrainLatest('__cupProductsCloudLatest','__cupApplyCloudProducts');   // PR-C2：profit.js 動態載入，補套已緩存的雲端主檔快照（要在 CUP_PRODUCTS_SHARDS 定義之後）

@@ -39,11 +39,14 @@ function consts(s, prefix) {
   return out.join('\n') + '\n';
 }
 const PS_BLOCK = between(src, '/* ═══ CUP-PS-PURE-BEGIN', 'CUP-PS-PURE-END ═══ */');
-const DEPS = consts(src, 'MOMO_DEL_GUARD_') + fnMulti(src, '_momoStableStr') + fnLine(src, '_momoProductsBuildSig')
-  + fnMulti(src, 'momoProductsPlanMerge') + fnMulti(src, '_momoDelGuardLevel');
+// LZString（瀏覽器端 vendor 檔）與 LZ1 包裝：C3 補修的 lastpushed 壓縮用
+const LZ_SRC = fs.readFileSync(path.join(ROOT, 'js/vendor/lz-string-1.5.0.min.js'), 'utf8');
+const LZString = new Function(LZ_SRC + '\nreturn LZString;')();
+const DEPS = 'const window={LZString:__LZ};\n' + consts(src, 'MOMO_DEL_GUARD_') + fnMulti(src, '_momoStableStr') + fnLine(src, '_momoProductsBuildSig')
+  + fnMulti(src, 'momoProductsPlanMerge') + fnMulti(src, '_momoDelGuardLevel') + fnMulti(src, '_lz1Unwrap') + fnMulti(src, '_lz1Encode');
 const NAMES = ['CUP_PRODUCTS_SHARDS', 'CUP_PRODUCTS_SHARD_WARN_KB', 'cupProductsPidOk', 'cupProductsShardOf', 'cupProductsSplitShards',
-  'cupProductsShardBytes', 'cupProductsCloudMerge', 'cupProductsWriteConfirmed', 'momoProductsPlanMerge', '_momoDelGuardLevel'];
-function load(block) { return new Function(DEPS + block + '\nreturn {' + NAMES.join(',') + '};')(); }
+  'cupProductsShardBytes', 'cupProductsCloudMerge', 'cupProductsWriteConfirmed', 'cupLpEncode', 'cupLpDecode', 'cupSigEqual', '_momoProductsBuildSig', 'momoProductsPlanMerge', '_momoDelGuardLevel'];
+function load(block) { return new Function('__LZ', DEPS + block + '\nreturn {' + NAMES.join(',') + '};')(LZString); }
 
 // ── 假資料 ──
 let skuSeq = 85000000000;
@@ -215,6 +218,39 @@ console.log('── 2. 合成 3,724 筆切 4 片 ──');
   ok(kb.every(x => x < P.CUP_PRODUCTS_SHARD_WARN_KB), '每片都 < 700 KB 警告線');
   ok(sp.badPid === 0, '合成資料 badPid＝0');
   global.__shardReport = { counts: sp.shards.map(a => a.length), kb: kb.map(x => +x.toFixed(1)) };
+
+  // ── C3 補修：lastpushed 壓縮往返 ──
+  console.log('── 2b. lastpushed 壓縮（C3 補修）──');
+  const sig = P._momoProductsBuildSig(all), rawJson = JSON.stringify(sig);
+  const enc = P.cupLpEncode(all);
+  ok(typeof enc === 'string' && enc.startsWith('LZ1:'), '壓縮成 LZ1');
+  console.log('   合成 3,724 筆 lastpushed：純 JSON ' + rawJson.length.toLocaleString() + ' 字元 → LZ1 ' + enc.length.toLocaleString() + ' 字元');
+  const dec = P.cupLpDecode(enc);
+  ok(dec.state === 'ok' && dec.legacy === false, '壓縮格式讀得回來（state ok、不是 legacy）');
+  ok(JSON.stringify(dec.sig) === rawJson, '壓縮往返後簽名表逐字相同');
+  const leg = P.cupLpDecode(rawJson);
+  ok(leg.state === 'ok' && leg.legacy === true && JSON.stringify(leg.sig) === rawJson, '舊的純 JSON 格式讀得回來（legacy:true、內容相同）');
+  ok(P.cupSigEqual(dec.sig, sig) && P.cupSigEqual(leg.sig, sig), 'cupSigEqual：往返與舊格式都＝原簽名表');
+  // 合併計畫：用原簽名表／壓縮往返／舊 JSON 三種 lastpushed，結果逐欄相同（幾種情境）
+  const local = JSON.parse(JSON.stringify(all));
+  local[5].price += 1; local[6].stock += 1; local.splice(9, 1);   // 改 2 筆、本機少 1 筆（lastpushed 有 ⇒ 會刪）
+  local.push({ sku: '99999999999', pid: '7999999999', sid: '1', code: 'NEW-01', price: 1, base: 2, status: '판매중', stock: 3, firstSeen: T2, lastSeen: T2 });
+  const cloudNewer = JSON.parse(JSON.stringify(all)); cloudNewer[20] = Object.assign({}, cloudNewer[20], { lastSeen: '2099-01-01 00:00:00', price: 7 });
+  const scen = [ ['雲端＝上次推的', all, T2], ['雲端有一筆較新', cloudNewer, '2099-01-01 00:00:00'], ['雲端空', [], ''] ];
+  scen.forEach(([name, cloud, cl]) => {
+    const ld = { latestExport: T2, items: local };
+    const a = JSON.stringify(P.cupProductsCloudMerge(cloud, cl, ld, sig));
+    const b = JSON.stringify(P.cupProductsCloudMerge(cloud, cl, ld, dec.sig));
+    const c = JSON.stringify(P.cupProductsCloudMerge(cloud, cl, ld, leg.sig));
+    ok(a === b && a === c, '合併計畫逐欄相同（' + name + '）：原簽名表＝壓縮往返＝舊 JSON');
+  });
+  const r0 = P.cupProductsCloudMerge(all, T2, { latestExport: T2, items: local }, dec.sig);
+  ok(r0.mode === 'lastpushed' && r0.pushSkus.length === 3 && r0.deleteSkus.length === 1, '往返後的計畫數字合理（推 3＝改 2＋增 1、刪 1）', JSON.stringify({ push: r0.pushSkus.length, del: r0.deleteSkus.length }));
+  // 讀不懂 ⇒ bad；沒有 ⇒ none
+  [['LZ1:abc:xx', '長度欄不是數字'], ['LZ1:10:garbage', '解不開'], ['{not json', 'JSON 壞掉'], ['[]', '陣列'], ['{"a":1}', '值不是字串']].forEach(([raw, why]) => ok(P.cupLpDecode(raw).state === 'bad', '讀不懂 ⇒ bad（' + why + '）'));
+  ok(P.cupLpDecode(null).state === 'none' && P.cupLpDecode('').state === 'none', '沒有 ⇒ none');
+  ok(!P.cupSigEqual(sig, Object.assign({}, sig, { x: 'y' })) && !P.cupSigEqual(sig, Object.assign({}, sig, { [all[0].sku]: 'changed' })) && !P.cupSigEqual(null, sig), 'cupSigEqual：多一筆／改一筆／null 都不相等');
+  global.__lpReport = { json: rawJson.length, lz: enc.length };
 }
 
 // ── 3. 反向：把「lastSeen 較新保留」關掉，測試要失敗 ──
