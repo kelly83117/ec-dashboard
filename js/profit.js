@@ -34812,24 +34812,100 @@ function pchomeSaveOrders(map){ var k=pchomeOrdersKey();
   try{ _markPending(k); }catch(e){}   // 訂單明細上雲（app/pchome_orders 獨立 doc）：標待同步，按「☁ 同步雲端」才推（不自動推）
   try{ pchomeDirtyAdd(k); }catch(e){}   // 持久 dirty（跨重整）→ 待推數撐得住、重整後撿得回
 }
+// PCHOME_ORDERS_NEWER_PURE_BEGIN（node 測試 scripts/pchome-orders-newer.test.cjs 會擷取這一段，只能放純函式）
+// 2026-11-18 #491 修法 3：同一筆訂單（同 key＝訂單編號-序號）推送與訂閱用同一條規則——本機「匯入時間」≥ 雲端才用本機的，雲端較新就用雲端的。
+//   匯入時間有兩種寫法：檔名來的「2026/11/18 14 時」（只到小時，當成該小時 0 分）、沒有檔名時的 toLocaleString()（看瀏覽器語系，
+//   zh-TW「2026/11/18 下午7:16:00」、en-US「11/18/2026, 7:16:00 PM」）。讀不懂＝缺。
+//   缺漏規則：缺（或讀不懂）的那邊視為較舊；兩邊都缺 ⇒ 用本機（＝改版前的行為，沒有資訊可判斷時不改變結果）。
+function pchomeOrderImportTs(s){
+  var t=String(s==null?'':s).trim(); if(!t) return null; var m;
+  if((m=t.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2})\s*時$/))) return new Date(+m[1],+m[2]-1,+m[3],+m[4],0,0).getTime();
+  if((m=t.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s*(上午|下午)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?$/))){
+    var h=+m[5]; if(m[4]==='下午'&&h<12) h+=12; if(m[4]==='上午'&&h===12) h=0;
+    return new Date(+m[1],+m[2]-1,+m[3],h,+m[6],+(m[7]||0)).getTime(); }
+  if((m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i))){
+    var h2=+m[4], ap=(m[7]||'').toUpperCase(); if(ap==='PM'&&h2<12) h2+=12; if(ap==='AM'&&h2===12) h2=0;
+    return new Date(+m[3],+m[1]-1,+m[2],h2,+m[5],+(m[6]||0)).getTime(); }
+  var d=Date.parse(t); return isFinite(d)?d:null;
+}
+// 本機這筆要不要用（true＝用本機、false＝用雲端）。只在兩邊都有這筆時呼叫。
+function pchomeOrderLocalWins(localO, cloudO){
+  var lt=pchomeOrderImportTs(localO&&localO.匯入時間), ct=pchomeOrderImportTs(cloudO&&cloudO.匯入時間);
+  if(lt==null&&ct==null) return true;    // 兩邊都缺 → 本機（同改版前）
+  if(lt==null) return false;             // 本機缺 → 視為較舊
+  if(ct==null) return true;              // 雲端缺 → 視為較舊
+  return lt>=ct;                         // 相同 → 本機
+}
+// cloudFlat / localMap：{ key: order }。回 { merged, keptCloud:[{key,localAt,cloudAt}], usedLocal:[key], localOnly:[key], cloudOnly:[key] }。
+//   merged＝雲端全部 ∪ 本機全部，同 key 依上面規則；usedLocal＝兩邊都有、用本機的；localOnly 也是用本機的（雲端沒有）。
+function pchomeOrdersPickNewer(cloudFlat, localMap){
+  var c=cloudFlat||{}, l=localMap||{}, has=Object.prototype.hasOwnProperty;
+  var out={ merged:{}, keptCloud:[], usedLocal:[], localOnly:[], cloudOnly:[] };
+  Object.keys(c).forEach(function(k){ out.merged[k]=c[k]; if(!has.call(l,k)) out.cloudOnly.push(k); });
+  Object.keys(l).forEach(function(k){
+    if(!has.call(c,k)){ out.merged[k]=l[k]; out.localOnly.push(k); return; }
+    if(pchomeOrderLocalWins(l[k], c[k])){ out.merged[k]=l[k]; out.usedLocal.push(k); }
+    else out.keptCloud.push({ key:k, localAt:(l[k]&&l[k].匯入時間)||'', cloudAt:(c[k]&&c[k].匯入時間)||'' });
+  });
+  return out;
+}
+// 跟鍵順序無關的序列化（Firestore 讀回的 map 順序不保證）。
+function pchomeOrdersCanon(v){
+  if(v===undefined||v===null) return 'null';
+  if(Array.isArray(v)) return '['+v.map(pchomeOrdersCanon).join(',')+']';
+  if(typeof v==='object') return '{'+Object.keys(v).sort().map(function(k){ return JSON.stringify(k)+':'+pchomeOrdersCanon(v[k]); }).join(',')+'}';
+  return JSON.stringify(v);
+}
+// 寫入讀回比對：expect＝{ 帳務月: { key: 寫出去的訂單 } }（只放這次真的推的那幾筆）；read＝讀回的 doc data（null＝讀不到／來自快取）。
+//   回 ''＝確認；否則白話原因。
+function pchomeOrdersWriteConfirmed(expect, read){
+  if(!read) return '寫入後讀不到雲端訂單（或只讀到本機快取）';
+  var bad=[];
+  Object.keys(expect||{}).forEach(function(bm){ var e=expect[bm]||{}, r=(read[bm]&&typeof read[bm]==='object')?read[bm]:{};
+    Object.keys(e).forEach(function(k){ if(pchomeOrdersCanon(e[k])!==pchomeOrdersCanon(r[k])) bad.push(k); }); });
+  return bad.length?('讀回後 '+bad.length+' 筆訂單跟寫出去的不一樣：'+bad.slice(0,5).join('、')):'';
+}
+// PCHOME_ORDERS_NEWER_PURE_END
+window.__pchomeOrdersPickNewer=pchomeOrdersPickNewer;   // 純函式，Console 測試用
+// 雲端較新、本機被略過的訂單 → Console 一行一筆（同一筆同一組時間只記一次，訂閱每個快照都會跑）。
+var _pchomeOrdersKeptLogged={};
+function _pchomeOrdersLogKept(where, kept){
+  (kept||[]).forEach(function(x){ var sig=x.key+'|'+x.localAt+'|'+x.cloudAt; if(_pchomeOrdersKeptLogged[sig]) return; _pchomeOrdersKeptLogged[sig]=1;
+    console.warn('[pchome orders] '+where+'：雲端較新，用雲端的（略過本機）訂單 '+x.key+'｜本機匯入 '+(x.localAt||'（無）')+'｜雲端匯入 '+(x.cloudAt||'（無）')); });
+}
 // ── 訂單明細 → app/pchome_orders（獨立 doc）：read-merge-write，按帳務月分欄位（日後可 removeFields 裁剪）──
-//   雲端該月為底 + 本機 upsert（同 key 本機覆蓋、窗口外不刪）→ 保留其他機器的訂單。冪等：逾時補送結果一致。
+//   雲端為底 + 本機 upsert（窗口外不刪）→ 保留其他機器的訂單。同一筆兩邊都有 → pchomeOrdersPickNewer（匯入時間較新的贏）。
+//   只寫內容有變的帳務月；寫完讀回逐筆比對這次推的訂單，對不上 ⇒ 丟錯（syncToCloud 列為同步失敗、dirty 不清）。
 //   🔴 走既有 syncToCloud task 迴圈呼叫（ec_pchome_orders 分支），不另開寫入路徑。
 async function pchomeSyncOrders(){
   if(!window.__cloudPchomeOrders) throw new Error('PChome 訂單明細雲端層未就緒');
   var local=pchomeLoadOrders()||{};
-  var byBM={};   // 帳務月 → {key:order}；欄位名只收 YYYY-MM，其餘落 _nodate（Firestore 欄位名不可為空）
-  Object.keys(local).forEach(function(k){ var o=local[k]||{}; var bm=pchomeBillingMonth(o['轉單日期']||''); if(!/^\d{4}-\d{2}$/.test(bm)) bm='_nodate'; (byBM[bm]=byBM[bm]||{})[k]=o; });
-  var months=Object.keys(byBM);
-  if(!months.length) return 0;   // 本機無訂單 → 不寫（不清空雲端）
+  if(!Object.keys(local).length) return 0;   // 本機無訂單 → 不寫（不清空雲端）
+  var bmOf=function(o){ var bm=pchomeBillingMonth((o||{})['轉單日期']||''); return /^\d{4}-\d{2}$/.test(bm)?bm:'_nodate'; };   // 欄位名只收 YYYY-MM，其餘落 _nodate（Firestore 欄位名不可為空）
   var snap=await window.__cloudPchomeOrders.getDoc();
+  if(snap&&snap.metadata&&snap.metadata.fromCache) throw new Error('讀不到雲端訂單現值（只拿到本機快取），這次不推，資料還在本機。');
   var cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  var cloudFlat={}, cloudBmOf={};
+  Object.keys(cloud).forEach(function(bm){ var b=cloud[bm]; if(b&&typeof b==='object') Object.keys(b).forEach(function(k){ cloudFlat[k]=b[k]; cloudBmOf[k]=bm; }); });
+  var pick=pchomeOrdersPickNewer(cloudFlat, local);
+  _pchomeOrdersLogKept('推送', pick.keptCloud);
   var mergedAll={};
   Object.keys(cloud).forEach(function(bm){ if(cloud[bm]&&typeof cloud[bm]==='object') mergedAll[bm]=Object.assign({}, cloud[bm]); });   // 先納入雲端全部月（含本機沒有的月，不動）
+  var expect={}, changedBM={};
+  pick.usedLocal.concat(pick.localOnly).forEach(function(k){ var bm=bmOf(local[k]);
+    var cur=(mergedAll[bm]||{})[k]; var v=momoFsSanitizeDeep(local[k]);
+    (mergedAll[bm]=mergedAll[bm]||{})[k]=local[k];
+    if(cur===undefined||pchomeOrdersCanon(momoFsSanitizeDeep(cur))!==pchomeOrdersCanon(v)){ changedBM[bm]=1; (expect[bm]=expect[bm]||{})[k]=v; }
+  });
+  var months=Object.keys(changedBM);
   for(var i=0;i<months.length;i++){ var bm=months[i];
-    var merged=Object.assign({}, (cloud[bm]&&typeof cloud[bm]==='object')?cloud[bm]:{}, byBM[bm]);   // 雲端底 + 本機 upsert（同 key 本機覆蓋）
-    await window.__cloudPchomeOrders.setField(bm, momoFsSanitizeDeep(merged));   // per-field（逐帳務月）→ 多人各推各月不互蓋
-    mergedAll[bm]=merged;
+    await window.__cloudPchomeOrders.setField(bm, momoFsSanitizeDeep(mergedAll[bm]));   // per-field（逐帳務月）→ 多人各推各月不互蓋
+  }
+  if(months.length){
+    var vs=await window.__cloudPchomeOrders.getDoc();
+    var vd=(vs&&vs.exists&&vs.exists()&&!(vs.metadata&&vs.metadata.fromCache))?(vs.data()||{}):null;
+    var why=pchomeOrdersWriteConfirmed(expect, vd);
+    if(why){ console.error('[pchome orders] 寫入未確認：'+why+'。dirty 沒有清，資料還在本機。'); throw new Error('PChome 訂單寫入未確認（'+why+'），資料還在本機，請稍後再按同步重試。'); }
   }
   // 回寫本機（含雲端其他機器的訂單）→ 下次同步無假差異、UI 立即反映合併結果
   var flat={}; Object.keys(mergedAll).forEach(function(bm){ var b=mergedAll[bm]||{}; Object.keys(b).forEach(function(kk){ flat[kk]=b[kk]; }); });
@@ -34839,7 +34915,7 @@ async function pchomeSyncOrders(){
   return 0;
 }
 // firebase.js app/pchome_orders 訂閱 → 套用雲端訂單（扁平化帳務月桶）。bounce-back 守衛：
-//   本機有未推（dirty）→ 雲端底 + 本機覆蓋（保住剛上傳未推的、也吸收雲端其他機器新訂單）；乾淨 → 採用雲端（換機/清快取讀回）。
+//   本機有未推（dirty）→ 雲端底 + 本機（同一筆兩邊都有時跟推送同一條規則 pchomeOrdersPickNewer：匯入時間較新的贏）；乾淨 → 採用雲端（換機/清快取讀回）。
 //   🔴 雲端空且本機有訂單 → 不覆蓋（首次上雲前／尚未推，避免把本機訂單洗掉）。
 // #491：訂單一次性遷移的唯一判斷（sweep、PChome 預覽、本訂閱三處共用）。旗標 ec_pchome_orders_migrated_v1 設了就不再判。
 //   本機沒有訂單 → 設旗標（不用遷移）；雲端快照是空的 → 這次不判、不設旗標（沒開 persistence，離線時可能先送空快照，不能當成「雲端沒有」）；
@@ -34868,7 +34944,8 @@ window.__pchomeApplyCloudOrders=function(monthBuckets){
     var localN=Object.keys(localMap).length, cloudN=Object.keys(cloudFlat).length;
     if(cloudN===0 && localN>0) return;   // 雲端空、本機有 → 保住本機（尚未上雲）
     var dirty=pchomeDirtyGet().indexOf('ec_pchome_orders')>=0;
-    var result = dirty ? Object.assign({}, cloudFlat, localMap) : cloudFlat;   // dirty：雲端底+本機覆蓋；乾淨：採雲端
+    var result = cloudFlat;   // 乾淨：採雲端
+    if(dirty){ var pk=pchomeOrdersPickNewer(cloudFlat, localMap); result=pk.merged; _pchomeOrdersLogKept('訂閱', pk.keptCloud); }   // dirty：雲端底＋本機，同一筆比匯入時間（2026-11-18 #491 修法 3；舊版一律本機蓋雲端）
     var prev=null; try{ prev=(Store._profitMem&&Store._profitMem['ec_pchome_orders'])||null; }catch(e){}
     if(prev && JSON.stringify(prev)===JSON.stringify(result)) return;   // 無變化 → 不動、不重繪（避免自身 echo 閃爍）
     try{ Store._profitMem=Store._profitMem||{}; Store._profitMem['ec_pchome_orders']=result; }catch(e){}
@@ -35548,11 +35625,15 @@ async function pchomeOpenSyncPreview(shop){
       Object.keys(co).forEach(function(bm){ var b=co[bm]; if(b&&typeof b==='object') Object.keys(b).forEach(function(k){ coFlat[k]=b[k]; }); }); }catch(e){}
     var localN=Object.keys(lo).length, cloudN=Object.keys(coFlat).length;
     var byBM={}; Object.keys(lo).forEach(function(k){ var o=lo[k]||{}; var bm=pchomeBillingMonth(o['轉單日期']||''); if(!/^\d{4}-\d{2}$/.test(bm)) bm='_nodate'; byBM[bm]=(byBM[bm]||0)+1; });
-    var needsPush=false; Object.keys(lo).forEach(function(k){ if(!coFlat[k] || JSON.stringify(coFlat[k])!==JSON.stringify(lo[k])) needsPush=true; });
+    // 跟推送同一條規則（pchomeOrdersPickNewer）：雲端較新的那幾筆不會推，不算「要推」，另外列出筆數。
+    var opick=pchomeOrdersPickNewer(coFlat, lo);
+    var needsPush=false; opick.usedLocal.concat(opick.localOnly).forEach(function(k){ if(!coFlat[k] || pchomeOrdersCanon(coFlat[k])!==pchomeOrdersCanon(lo[k])) needsPush=true; });
     var ost = cloudN===0 ? (localN>0?'new':'same') : (needsPush?'diff':'same');
     var cloudByBM={}; Object.keys((typeof co!=='undefined'&&co)||{}).forEach(function(bm){ cloudByBM[bm]=Object.keys(co[bm]||{}).length; });
     var osamples=Object.keys(byBM).sort().map(function(m){ return {item:m+' 期', desc:'本機 '+byBM[m]+' 筆（雲端此月 '+(cloudByBM[m]||0)+' 筆）'}; });
-    items.push({key:'ec_pchome_orders', kind:'PChome訂單明細', name:'訂單明細', localCount:localN, cloudCount:cloudN, status:ost, conflict:false, merge:true, conflictReasons:[], diffSamples:osamples, diffSummary:Object.keys(byBM).length+' 個帳務月 · upsert 合併（不覆蓋雲端）'});
+    var okept=opick.keptCloud.length;
+    if(okept) osamples.unshift({item:'雲端較新', desc:okept+' 筆略過本機、保留雲端（同事後來重傳過）：'+opick.keptCloud.slice(0,5).map(function(x){ return x.key+'（本機 '+(x.localAt||'無匯入時間')+'｜雲端 '+(x.cloudAt||'無匯入時間')+'）'; }).join('、')+(okept>5?'…':'')});
+    items.push({key:'ec_pchome_orders', kind:'PChome訂單明細', name:'訂單明細', localCount:localN, cloudCount:cloudN, status:ost, conflict:false, merge:true, conflictReasons:[], diffSamples:osamples, diffSummary:Object.keys(byBM).length+' 個帳務月 · upsert 合併（不覆蓋雲端）'+(okept?' · 雲端較新、略過本機 '+okept+' 筆':'')});
   }
   // 優化紀錄（每 shop 一 key；read-merge-write、不覆蓋雲端）
   keys.filter(function(k){return k.indexOf('ec_pchome_optlog|')===0;}).forEach(function(ok2){
