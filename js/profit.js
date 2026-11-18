@@ -22752,7 +22752,7 @@ function _optlogHydrateOnce(shop){
   }catch(e){ console.warn('[優化紀錄] 讀本機紀錄失敗：',shop,e); }
 }
 // 工作日誌只有在「所有家的紀錄都從雲端到位」才算次數（見 momoUpdateDailyProgress）。沒有雲端層（離線 fallback）照舊。
-function _optlogDpReady(){ return typeof window.__optlogReady!=='function' || MOMO_OPTLOG_DP_SHOPS.every(s=>window.__optlogReady(s)); }
+function _optlogDpReady(){ return typeof window.__optlogReady!=='function' || [...MOMO_OPTLOG_DP_SHOPS, ...CUP_OPTLOG_DP_SHOPS].every(s=>window.__optlogReady(s)); }   // 酷澎兩家也要到位（momoUpdateDailyProgress 一起算 coupang-summary）
 let _optlogDpWanted=null;   // 還沒到位時被要求重算的 { dates:Set, push:bool }；到位後補算一次
 function _optlogDpFlush(){
   if(!_optlogDpWanted||!_optlogDpReady()) return;
@@ -22951,11 +22951,17 @@ function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以�
   try{ const users=(window.Store&&Store.get)?(Store.get('ec.users',[])||[]):[]; const u=users.find(x=>x&&x.username===by); if(u&&u.name) return u.name; }catch(e){}
   return by;
 }
+// 酷澎（2026-11-18 第 2 塊）：優化紀錄跟 MOMO 同一套（ec_momo_optlog|麻吉／露營館 → app/optlog_*），工作日誌另成一張卡 coupang-summary。
+//   跟 momo-summary 在 momoUpdateDailyProgress 同一次算、同一次寫（不另開一個整份覆蓋 ec.dailyProgress 的寫入者）。
+//   counts key＝內部賣場名·類型（麻吉·補成本），顯示時用 cupShopDisplay 轉成「好麻吉·補成本」。
+const CUP_OPTLOG_DP_SHOPS=['麻吉','露營館'];
 // 掃當天 optlog → { 人名: { '甲配·調價':N, ... } }（type 動態、不寫死）
-function momoOptlogTodayCounts(date){
+function momoOptlogTodayCounts(date){ return _optlogDayCounts(MOMO_OPTLOG_DP_SHOPS, date); }
+function cupOptlogDayCounts(date){ return _optlogDayCounts(CUP_OPTLOG_DP_SHOPS, date); }
+function _optlogDayCounts(shops, date){
   const today=date||momoNowParts().date;
   const byPerson={};
-  MOMO_OPTLOG_DP_SHOPS.forEach(shop=>{
+  shops.forEach(shop=>{
     const map=momoLoadOptlog(shop)||{};
     Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
       if(!e || (e.date||'')!==today) return;
@@ -22990,13 +22996,16 @@ function momoUpdateDailyProgress(opts){
   const affected=new Set(); let anyContent=false;
   dates.forEach(date=>{
     const countsByPerson=momoOptlogTodayCounts(date);
+    const cupByPerson=cupOptlogDayCounts(date);   // 酷澎（coupang-summary），同一次寫入
     const day=Object.assign({}, all[date]||{});
-    // 受影響 = 該日有新 counts 的人 ∪ 該日已有 momo-summary 的人（後者要能在刪光後被清掉）
-    const dayAffected=new Set(Object.keys(countsByPerson));
-    Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&it.kind==='momo-summary')) dayAffected.add(person); });
+    // 受影響 = 該日有新 counts 的人 ∪ 該日已有 momo-summary／coupang-summary 的人（後者要能在刪光後被清掉）
+    const dayAffected=new Set([...Object.keys(countsByPerson), ...Object.keys(cupByPerson)]);
+    Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&(it.kind==='momo-summary'||it.kind==='coupang-summary'))) dayAffected.add(person); });
     if(dayAffected.size===0) return;
     dayAffected.forEach(person=>{
-      const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、待辦）只換掉 momo-summary
+      const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary'&&it.kind!=='coupang-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、PChome、待辦）只換掉 momo-summary 與 coupang-summary
+      const cc=cupByPerson[person];
+      if(cc&&Object.keys(cc).length){ kept.unshift({id:'auto-coupang-'+person, kind:'coupang-summary', counts:cc, done:false, auto:true}); anyContent=true; }
       const c=countsByPerson[person];
       if(c&&Object.keys(c).length){ kept.unshift({id:'auto-momo-'+person, kind:'momo-summary', counts:c, done:false, auto:true}); anyContent=true; }
       if(kept.length) day[person]=kept; else delete day[person];
@@ -23053,6 +23062,45 @@ function momoOpenDpDetail(person, date, combo){
   </div>`;
 }
 function momoCloseDpDetail(){ const ov=document.getElementById('momo-dp-detail-ov'); if(ov) ov.remove(); }
+// 工作日誌 coupang-summary chip 明細（照 momoOpenDpDetail；共用同一個 overlay 與 momoCloseDpDetail）。
+//   紀錄的 sku 是原廠編號（酷澎報表的 code；補成本也是原廠編號）→ 品名從酷澎報表找，最新月份優先。
+function cupOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; cupOpenDpDetail(el.getAttribute('data-cup-person')||'', el.getAttribute('data-cup-date')||'', el.getAttribute('data-cup-combo')||''); }
+function cupOpenDpDetail(person, date, combo){
+  try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}   // 品名要酷澎報表；優化紀錄本身開站就訂閱
+  const rows=[];
+  CUP_OPTLOG_DP_SHOPS.forEach(shop=>{
+    const map=momoLoadOptlog(shop)||{};
+    const hit=[];
+    Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
+      if(!e || (e.date||'')!==date) return;
+      if(momoOptlogUserToName(e.by)!==person) return;
+      if((shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
+      hit.push({shop, sku, name:'', type:e.type||'其他', note:e.note||'', time:e.time||''});
+    }); });
+    if(!hit.length) return;
+    const nameBy=new Map();
+    try{ cupAvailableMonths(shop).slice().reverse().forEach(m=>{ const d=cupLoadReport(shop,m); ((d&&d.rows)||[]).forEach(r=>{ if(r&&r.code&&r.name&&!nameBy.has(r.code)) nameBy.set(r.code, r.name); }); }); }catch(e){}
+    hit.forEach(h=>{ h.name=nameBy.get(h.sku)||''; rows.push(h); });
+  });
+  rows.sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+  const esc=_momoEsc;
+  const body = rows.length ? rows.map(r=>`<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start">
+      <span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">${esc(r.time)}</span>
+      <div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><b>${esc(r.name||r.sku)}</b> <span style="color:#9ca3af;font-family:monospace">${esc(r.sku)}</span></div>${r.note?`<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">${esc(r.note)}</div>`:''}</div>
+    </div>`).join('') : `<div style="padding:14px 2px;color:#9ca3af;font-size:12px">${_optlogDpReady()?'找不到對應紀錄（可能已刪除或改期）':'優化紀錄載入中，請稍後再開一次'}</div>`;
+  let ov=document.getElementById('momo-dp-detail-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-dp-detail-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseDpDetail(); };
+  const _sepi=String(combo).indexOf(MOMO_OPTLOG_DP_SEP);
+  const dispCombo=_sepi>=0?(cupShopDisplay(String(combo).slice(0,_sepi))+String(combo).slice(_sepi)):combo;
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div><div style="font-size:14px;font-weight:700;color:#0369a1">${esc(dispCombo)}　${rows.length} 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">${esc(person)}　${esc(date)}　·　酷澎優化紀錄</div></div>
+      <button onclick="momoCloseDpDetail()" style="border:0;background:none;color:#9ca3af;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
+    </div>
+    <div style="padding:6px 16px 14px;overflow:auto">${body}</div></div>`;
+}
 
 // 逐月序列（13 個月上限，實際由 momoAllPeriods 決定）：qty/margin/reconciled + S1103 瀏覽/成交均價 + 半月完整度。
 // 商品欄位模型（商品軸單一權威）：甲乙＝進價供應商、MO+＝代收代付。所有「依賣場的商品欄位假設」讀這裡，
@@ -34244,7 +34292,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,momoReconStoreDecide,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoAnaSwitchTab,momoPCInput,momoPCSel,momoPCSelAll,momoPCToggleMore,momoPCBulkApply,momoPCReset,momoPCToOptlog,momoPCSave,momoPCSaveConfirm,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoAnaSwitchTab,momoPCInput,momoPCSel,momoPCSelAll,momoPCToggleMore,momoPCBulkApply,momoPCReset,momoPCToOptlog,momoPCSave,momoPCSaveConfirm,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,cupOpenDpDetailFromEl,cupShopDisplay,momoShopDisplay,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoOptlogTypeToggle,momoOptlogTimeSet,momoOptlogBySet,momoOptlogSysToggle,
   momoSearchClear,momoSearchClearToggle,

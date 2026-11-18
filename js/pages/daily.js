@@ -313,6 +313,17 @@ Object.assign(App, {
           const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-pch-person="${escapeHtml(p.name)}" data-pch-date="${escapeHtml(viewDate)}" data-pch-combo="${escapeHtml(k)}" onclick="pchomeOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
           return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">PChome · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
         }
+        // 酷澎 optlog 今日調整（2026-11-18；momoUpdateDailyProgress 跟 momo-summary 一起寫）。key＝內部賣場名·類型（麻吉·補成本），顯示轉好麻吉；
+        //   data-cup-combo 仍用原始 key（明細回查靠它）。chip 點擊 → profit.js cupOpenDpDetailFromEl。
+        if (it && it.kind === 'coupang-summary') {
+          const counts = it.counts || {};
+          const keys = Object.keys(counts).filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const shopName = sh => (window.cupShopDisplay ? window.cupShopDisplay(sh) : (sh === '麻吉' ? '好麻吉' : sh));
+          const dispCombo = k => k.replace(/^([^·]+)·/, (m, sh) => shopName(sh) + '·');
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-cup-person="${escapeHtml(p.name)}" data-cup-date="${escapeHtml(viewDate)}" data-cup-combo="${escapeHtml(k)}" onclick="cupOpenDpDetailFromEl(this)"><span>${escapeHtml(dispCombo(k))}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">酷澎 · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
+        }
         return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
@@ -377,7 +388,7 @@ Object.assign(App, {
       _calRoster.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary') 不塞進月曆條列
+        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary' | 'pchome-summary' | 'coupang-summary') 不塞進月曆條列
         arr.forEach(it => {
           if (!it || it.kind) return;
           dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] || '#6b7280', light: PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' } });
@@ -420,6 +431,9 @@ Object.assign(App, {
         // PChome 優化紀錄計數（同 MOMO 口徑：該人 pchome-summary counts 總和）→ 併進當日處理商品數
         const ps = v.find(it => it && it.kind === 'pchome-summary');
         if (ps && ps.counts) { const s = Object.values(ps.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
+        // 酷澎優化紀錄計數（同口徑：該人 coupang-summary counts 總和，2026-11-18）
+        const cs = v.find(it => it && it.kind === 'coupang-summary');
+        if (cs && cs.counts) { const s = Object.values(cs.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
       });
       // 合併計數 + 名單聯集（同 personInfos：固定 4 人在前不變、其餘穩定排序）。固定 4 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
       const totalCalCount = {};
@@ -434,7 +448,7 @@ Object.assign(App, {
           const c = PERSON_COLORS[n] || '#6b7280';                          // 非名單人用 fallback 灰（跟頭像一致）
           const lt = PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' };
           const title = momoCountByPerson[n]
-            ? `${escapeHtml(n)} · ${adjCountByPerson[n] ? adjCountByPerson[n] + ' 個商品（含洞察表調整）、' : ''}${momoCountByPerson[n]} 筆 MOMO 優化`
+            ? `${escapeHtml(n)} · ${adjCountByPerson[n] ? adjCountByPerson[n] + ' 個商品（含洞察表調整）、' : ''}${momoCountByPerson[n]} 筆優化紀錄（MOMO／PChome／酷澎）`
             : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 固定 4 人(無 MOMO)：標題與原本逐字相同
           return `<div class="adj-cal-row" title="${title}" style="--adj-cal-c:${c};--adj-cal-bg:${lt.bg};--adj-cal-fg:${lt.text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${totalCalCount[n]}</span></span></div>`;
         })
