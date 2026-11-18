@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction, query, where, documentId, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction, query, where, documentId, getDocsFromServer, writeBatch } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -1120,6 +1120,10 @@ try {
           if (changed.length) { console.log('[coupang_note] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangNoteReady', { detail: { changed } })); }
         }, err => { console.error('[coupang_note subscribe 失敗]', err); });
       } catch (e) { console.warn('coupang_note subscribe failed', e); }
+      // PR-C2：coupang_products（商品主檔 4 片）→ 樣板先緩存到 window.__cupProductsCloudLatest；套用函式 __cupApplyCloudProducts 在 profit.js（C2-4 才有，在那之前只緩存）。
+      try {
+        window.__cloudSubscribeCached(window.__cloudCoupangProducts, '__cupProductsCloudLatest', '__cupApplyCloudProducts', err => { console.error('[coupang_products subscribe 失敗]', err); });
+      } catch (e) { console.warn('coupang_products subscribe failed', e); }
       __markSubsMaybeAllLoaded();
     };
 
@@ -1628,6 +1632,68 @@ try {
     getDoc:  (shop, month) => getDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month))),
     setNote: (shop, month, data) => setDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month)), data || {}),
     subscribe: (cb) => onSnapshot(coupangNoteColRef, cb),
+  };
+  // PR-C2（2026-11-18）：coupang_products collection — 酷澎商品主檔（price_inventory），每通路 4 片：{maji|luying}_{0..3}。
+  //   分片規則 BigInt(Product ID) % 4（profit.js cupProductsShardOf；同一商品頁的選項一定同一片），露營館也 4 片。
+  //   每片 { schema:1, shop, shard, shards:4, items:[{sku,pid,sid,code,price,base,status(韓文原文),stock,firstSeen,lastSeen}], latestExport, updatedAt }；不存商品名稱。
+  //   getDoc(shop[, 'server'])：讀 4 片、串起來 → { exists(任一片存在), items, latestExport(4 片最大), perShard:[{exists,n,latestExport}] }。
+  //   subscribe(cb, onErr)：整個 collection、includeMetadataChanges；cb 收 { 麻吉:{items,latestExport,fromCache,shardsSeen}, 露營館:{…} }，shardsSeen<4＝那個通路還沒到齊（呼叫端判斷）。
+  //   setShop(shop, shards)：唯一寫入。shards 長度一定要 4、每片 { items, latestExport }；writeBatch 一次寫 4 份（不會只寫一半）。成功回 { ok:true }；被唯讀／本機防護擋下回 undefined → 呼叫端 r && r.ok。
+  //   getDoc／subscribe 名稱落在讀取白名單；setShop 列在本機防護碼 MUST 清單（物件數 34 → 35）。
+  const COUPANG_PRODUCTS_SHARDS = 4;
+  const coupangProductsColRef = collection(db, 'coupang_products');
+  const coupangProductsRef = (shop, i) => {
+    const id = COUPANG_SHOP_DOCID[shop];
+    if (!id) throw new Error('[coupang_products] 不認得的通路：' + shop);
+    return doc(db, 'coupang_products', id + '_' + i);
+  };
+  const coupangProductsShardIdx = [0, 1, 2, 3];
+  window.__cloudCoupangProducts = {
+    getDoc: async (shop, src) => {
+      const refs = coupangProductsShardIdx.map(i => coupangProductsRef(shop, i));
+      const snaps = await Promise.all(refs.map(r => (src === 'server' ? getDocFromServer(r) : getDoc(r))));
+      let items = [], latestExport = '', exists = false;
+      const perShard = snaps.map(sn => {
+        const ex = sn.exists();
+        const d = ex ? (sn.data() || {}) : {};
+        const it = Array.isArray(d.items) ? d.items : [];
+        const le = String(d.latestExport || '');
+        if (ex) exists = true;
+        items = items.concat(it);
+        if (le > latestExport) latestExport = le;
+        return { exists: ex, n: it.length, latestExport: le };
+      });
+      return { exists, items, latestExport, perShard };
+    },
+    subscribe: (cb, onErr) => onSnapshot(coupangProductsColRef, { includeMetadataChanges: true }, snap => {
+      const fromCache = !!(snap.metadata && snap.metadata.fromCache);
+      const out = {}, seen = {};
+      Object.keys(COUPANG_SHOP_DOCID).forEach(shop => { out[shop] = { items: [], latestExport: '', fromCache, shardsSeen: 0 }; seen[shop] = new Set(); });
+      snap.forEach(d => {
+        const idStr = String(d.id), cut = idStr.lastIndexOf('_');
+        const shop = COUPANG_DOCID_SHOP[idStr.slice(0, cut)];
+        const nStr = idStr.slice(cut + 1), n = Number(nStr);
+        if (!shop || cut < 0 || String(n) !== nStr || !(n >= 0 && n < COUPANG_PRODUCTS_SHARDS)) { console.warn('[coupang_products] 略過不認得的文件：' + idStr); return; }
+        const data = d.data() || {};
+        const o = out[shop];
+        if (Array.isArray(data.items)) o.items = o.items.concat(data.items);
+        const le = String(data.latestExport || '');
+        if (le > o.latestExport) o.latestExport = le;
+        seen[shop].add(n);
+      });
+      Object.keys(out).forEach(shop => { out[shop].shardsSeen = seen[shop].size; });
+      cb(out);
+    }, onErr),
+    setShop: (shop, shards) => {
+      if (!COUPANG_SHOP_DOCID[shop]) throw new Error('[coupang_products] 不認得的通路：' + shop);
+      if (!Array.isArray(shards) || shards.length !== COUPANG_PRODUCTS_SHARDS) throw new Error('[coupang_products] shards 必須是長度 ' + COUPANG_PRODUCTS_SHARDS + ' 的陣列，這次沒有寫');
+      shards.forEach((sh, i) => { if (!sh || !Array.isArray(sh.items)) throw new Error('[coupang_products] 第 ' + i + ' 片沒有 items 陣列，這次沒有寫'); });
+      const batch = writeBatch(db);
+      shards.forEach((sh, i) => {
+        batch.set(coupangProductsRef(shop, i), { schema: 1, shop, shard: i, shards: COUPANG_PRODUCTS_SHARDS, items: sh.items, latestExport: String(sh.latestExport || ''), updatedAt: serverTimestamp() });
+      });
+      return batch.commit().then(() => ({ ok: true }));
+    },
   };
 
   // ============== KPI 月結表獨立文件 app/kpi（每格一條 FieldPath 寫入，多人同時填不互蓋） ==============
