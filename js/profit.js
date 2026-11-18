@@ -11248,17 +11248,19 @@ const KPI_GROUPS=[
     },
     order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','tax','_common','pure','pureRate']},
   // 2026-11-05：商城兩店「從淨利表帶入」（資料在淨利表 → 酷澎 → 訂單明細上傳；KPI 只讀同店同月合計，單向、不讀 KPI 任何格子）。
-  //   帶入四格：訂單數（該月訂單編號數，非件數）／營收（淨額＝Σ選項價格×量 − 該月掛回的 MSF 退貨）／商品成本（Σ莫筆克成本×量，缺成本可補）／平台費（Σ成交5.5%＋金流2%＋免運7%＋發票$2/訂單）。
+  //   帶入四格：訂單數（該月訂單編號數，非件數）／營收（淨額＝Σ選項價格×量 − 賣家券；DeliveryList 匯出時已排除退貨單，不扣 MSF 退貨，MSF 只算退貨率）／商品成本（Σ莫筆克成本×量，缺成本可補）／平台費（Σ成交5.5%＋金流2%＋免運7%＋發票$2/訂單）。
   //   只帶 2026-07 以後；2026-06 以前所有既有手填值一律保留、不帶入、不覆蓋。手續費只改顯示名「平台費」（存 key 仍 fee）。
-  //   稅金＝公式欄（營收×5/105，同 MOMO；既有手填值＝手動覆蓋保留、不算格數）。耗材＝autoFill（訂單數×2.5，商城兩店；灰底可覆蓋、不算格數；既有手填值保留）。
+  //   稅金＝公式欄（營收×5/105，同 MOMO；既有手填值＝手動覆蓋保留、不算格數）。耗材＝autoFill（訂單數×KPI_MATERIAL_PER_ORDER.coupang＝×3，商城兩店；灰底可覆蓋、不算格數；既有手填值保留）。
   //   退貨運費＝手填、不算格數（目前無資料源，留白不算缺格；空白在純利以 0 計）。酷澎買斷淨利表無資料源 → 全手填（耗材也手填、不 autoFill；退貨運費同樣不算格數）。
   {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-露營館','酷澎買斷'],
+    // shopSince（照 MOMO 組）：露營館 2026-10-21 開站，2026-10 起才算進填寫進度；之前的月份不列缺格。
+    shopSince:{'商城-露營館':'2026-10'},
     // desc＝填寫模式表頭 ⓘ「資料來源」（2026-11-16 補齊：每一欄都要有；改帶入口徑要同步改這裡）。
     manual:[
       {k:'qty',l:'訂單數',desc:'來源：淨利表 → 酷澎 → 訂單明細，該月訂單編號數（非件數）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
       {k:'rev',l:'營收',desc:'來源：淨利表酷澎訂單明細，Σ選項價格×量 − 賣家券（淨額，營收已是退貨後）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
       {k:'cost',l:'商品成本',desc:'來源：淨利表酷澎訂單明細 × 莫筆克成本表，Σ成本×量（缺成本的原廠編號可補）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
-      {k:'fee',l:'平台費',desc:'來源：淨利表酷澎訂單明細，營收 × (成交 5.5% ＋ 金流 2% ＋ 免運 7%) ＋ 發票 $2／訂單；按「從淨利表帶入」寫入，酷澎買斷手填。'},
+      {k:'fee',l:'平台費',desc:'來源：淨利表酷澎訂單明細，訂單商品淨額 × (成交 5.5% ＋ 金流 2% ＋ 免運 7%) ＋ 運費 × 金流 2% ＋ 發票 $2／訂單（依官方費率估算，不是實際帳單）；按「從淨利表帶入」寫入，酷澎買斷手填。'},
       {k:'ret',l:'退貨運費',desc:'來源：手填（目前沒有資料來源，留白不算缺格，純利以 0 計）。'},
       {k:'material',l:'耗材',desc:'商城兩店：訂單數 × 單價（自動，可手動覆蓋）；酷澎買斷：手填（留白不算缺格）。'}],
     order:['qty','rev','cost','fee','ret','tax','material'],   // 填寫模式欄序（tax 是公式欄、由 fillFormula 插在退貨運費後、耗材前）
@@ -15139,9 +15141,11 @@ async function kpiCoupangAutoFill(){
 }
 // 酷澎缺成本 → 補成本（照博客來 kpiBooksOpenMissingCostPanel；src '酷澎'）。商城兩店缺成本合併一張清單；補一次共用成本表全受惠。
 //   🔴 酷澎成本是 render / 帶入時 live 查成本表（不存在報表 doc），所以補完【重新按帶入即可，不需在淨利表重建報表】（和博客來寄倉不同）。
+// 補成本時優化紀錄要記在哪一家（淨利表酷澎的 key：'麻吉'／'露營館'）：開清單時記下每個原廠編號是哪幾家缺。
+const _kpiCupMissShops={};
 function kpiCoupangOpenMissingCostPanel(month){
   const cm=momoLoadCostByOrigin();const missAll={};
-  KPI_COUPANG_SHOPS.forEach(s=>{ const cp=coupangKpiFromProfit(KPI_COUPANG_PROFIT_SHOP[s],month,cm); (cp.missing||[]).forEach(e=>{ const m=missAll[e.code]||(missAll[e.code]={code:e.code,name:e.name,qty:0,amt:0}); m.qty+=e.qty; m.amt+=e.amt; }); });
+  KPI_COUPANG_SHOPS.forEach(s=>{ const cp=coupangKpiFromProfit(KPI_COUPANG_PROFIT_SHOP[s],month,cm); (cp.missing||[]).forEach(e=>{ const m=missAll[e.code]||(missAll[e.code]={code:e.code,name:e.name,qty:0,amt:0}); const ps=KPI_COUPANG_PROFIT_SHOP[s]; const a=_kpiCupMissShops[e.code]||(_kpiCupMissShops[e.code]=[]); if(ps&&a.indexOf(ps)<0) a.push(ps); m.qty+=e.qty; m.amt+=e.amt; }); });
   const list=Object.values(missAll).sort((a,b)=>b.amt-a.amt);
   let ov=document.getElementById('coupang-misscost-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='coupang-misscost-overlay'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
@@ -15166,7 +15170,9 @@ function kpiCoupangOpenMissingCostPanel(month){
 function kpiCoupangMissCostSave(month, code){
   const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('coupang-mc-'+oid);
   const c=inp?parseFloat(inp.value):NaN; if(!(c>=0)){ alert('成本需為 ≥0 的數字'); return; }
-  try{ momoSetCostByOrigin(code, c, {manual:true, shop:'酷澎', by:momoCurrentUserName(), note:'酷澎缺成本補填', src:'酷澎'}); }catch(e){ alert('補成本失敗：'+e.message); return; }
+  const _ps=_kpiCupMissShops[code]||[]; const _optShop=(_ps.indexOf('麻吉')>=0||!_ps.length)?'麻吉':_ps[0];   // 只有露營館缺 ⇒ 記在露營館；其他（含兩家都缺）⇒ 麻吉
+  // shop＝優化紀錄存哪一份：'麻吉'＝app/optlog_麻吉，跟淨利表好麻吉補成本同一份（原本寫 '酷澎' → app/optlog_酷澎，分兩處）
+  try{ momoSetCostByOrigin(code, c, {manual:true, shop:_optShop, by:momoCurrentUserName(), note:'酷澎缺成本補填', src:'酷澎'}); }catch(e){ alert('補成本失敗：'+e.message); return; }
   if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
   kpiCoupangOpenMissingCostPanel(month);
   if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiCoupangAutoFill();   // 帶入預覽開著 → 重開（商品成本 live 立即重算，不需重建報表）
@@ -17511,8 +17517,16 @@ function coupangSumShopCardHTML(shop){
     <div style="height:8px;border-radius:4px;background:#f3f4f6" id="cup-sum-${shop}-bar"></div>
   </div>`;
 }
+// 酷澎總表預設月份：最新一個「KPI 酷澎三家任一家有營收」或「淨利表有酷澎報表」的月份（只在 MONTHS 裡找）；都沒有才退回 2026/06。
+function _cupSummaryDefaultMonth(){
+  let best='';
+  try{ const rows=getKpiRows()||[]; MONTHS.forEach(mo=>{ const row=rows.find(r=>r.month===mo.replace('/','-')); if(!row) return;
+    if(['商城-好麻吉','商城-露營館','酷澎買斷'].some(s=>{ const d=_cupKpiShopData(row,s); return d&&(Number(d.rev)||0)>0; }) && mo>best) best=mo; }); }catch(e){}
+  try{ CUP_OVERLAP_SHOPS.forEach(s=>cupAvailableMonths(s).forEach(m=>{ const mo=String(m).replace('-','/'); if(MONTHS.indexOf(mo)>=0&&mo>best) best=mo; })); }catch(e){}
+  return best||'2026/06';
+}
 function coupangSummaryHTML(){
-  _cupPeriod['總表']=_cupPeriod['總表']||{month:'2026/06',half:'full'};
+  _cupPeriod['總表']=_cupPeriod['總表']||{month:_cupSummaryDefaultMonth(),half:'full'};
   const p=_cupPeriod['總表'];
   return`
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
@@ -17667,7 +17681,7 @@ function _cupKpiShopData(row,shop){
   return{qty:d.qty||0,rev,cost:d.cost||0,fee:d.fee||0,ret:d.ret||0,tax:d.tax||0,material:d.material||0,pure,rate:rev>0?pure/rev*100:null};
 }
 function syncCoupangSummaryFromKpi(){
-  const p=_cupPeriod['總表']||{month:'2026/06'};
+  const p=_cupPeriod['總表']||{month:_cupSummaryDefaultMonth()};
   const month=p.month.replace('/','-');
   const row=getKpiRows().find(r=>r.month===month);
   const majhi=_cupKpiShopData(row,'商城-好麻吉');
@@ -28245,6 +28259,13 @@ function setMomoShop(shop,btn){
 function setCoupangShop(shop,btn){
   // ⚡ 懶載酷澎組（coupang_reports/msf/note）。含總表：酷澎逐店表需要各店 coupang doc；切回同平台不重訂。
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
+  // 酷澎頁也要共用成本表：沒進過 MOMO 頁、本機又沒有成本表的電腦，整頁會變成缺成本。照 KPI _kpiEnsureCoupangData 的做法載 MOMO 組（含成本表訂閱，載過不重訂）。
+  try{ if(!Object.keys(momoLoadCostByOrigin()||{}).length && typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
+  // 換通路先清已選未處理的檔案（_cupFiles 是兩家共用的全域）：杜絕「好麻吉選的檔切到露營館直接產表」。同一家重畫不清（上傳分頁靠 _cupFiles 顯示已選檔名）。
+  if(_cupFilesShop && _cupFilesShop!==shop) cupClearStagedFiles();
+  //   另一家的畫面也清掉：兩家的上傳分頁用同一組 id（cup-order-status／cup-gen-btn…），舊的留在 DOM 裡，getElementById 會抓到隱藏那家的，
+  //   這家選了檔案狀態不更新、產生鈕也不會亮。切回來時 cupRenderShop 會整個重畫，清掉不會少東西。
+  CUP_OVERLAP_SHOPS.forEach(s=>{ if(s!==shop){ const o=document.getElementById('coupang-content-'+s); if(o) o.innerHTML=''; } });
   _saveProfitView('coupang',shop);   // 記錄當前檢視＝酷澎+此賣場（同上，供重建後還原）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
@@ -30471,9 +30492,11 @@ function cupShopDisplay(shop){ return CUP_SHOP_DISPLAY[shop] || shop; }
 // PR-3：上傳改為「訂單明細」子分頁 → 這兩個舊入口改為切到該子分頁 / no-op（相容殘留呼叫）
 function openCoupangUpload(shop){ _cupShop=shop; _cupSub[shop]='upload'; cupRenderShop(shop); }
 function closeCoupangUpload(){ /* 上傳已改子分頁，無 modal 可關 */ }
+let _cupFilesShop='';   // _cupFiles 是在哪一家選的（setCoupangShop 換到別家就清）
+function cupClearStagedFiles(){ _cupFiles.order=_cupFiles.msf=_cupFiles.pi=null; _cupFilesShop=''; }   // 照 MOMO momoClearStagedFiles：換通路先清已選未處理的檔案
 function onCoupangFile(e,type){
   const file=e.target.files[0];if(!file)return;
-  _cupFiles[type]=file;
+  _cupFiles[type]=file; _cupFilesShop=_cupShop;
   const statusId={order:'cup-order-status', pi:'cup-pi-status', msf:'cup-msf-status'}[type];
   const el=document.getElementById(statusId);
   if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
@@ -30497,10 +30520,31 @@ function _cupSplitIds(s){ return String(s||'').split('/').map(x=>x.trim()).filte
 function _cupShopIdSets(shop){ const disp=new Set(), code=new Set();
   cupAvailableMonths(shop).forEach(m=>{ const d=cupLoadReport(shop,m); ((d&&d.rows)||[]).forEach(r=>{ if(!r) return; if(r.code) code.add(String(r.code)); _cupSplitIds(r.dispId).forEach(x=>disp.add(x)); }); });
   return {disp, code}; }
+// 2026-11-18 酷澎小修：訂單檔改用「報表 ∪ 商品主檔 Product ID」比（_cupProductsOverlap，同商品主檔那套，含「所選通路太少、但跟另一通路重疊 ≥50% 也擋」）。
+//   露營館還沒有報表、但雲端主檔有 485 頁 → 第一次上傳也比得到。任一家本機還沒有主檔（雲端還沒同步下來）＝noMaster，只剩報表可比，畫面灰字註明。
+function _cupNoMaster(shop){ return CUP_OVERLAP_SHOPS.some(s=>{ const d=cupLoadProducts(s); return !(d&&d.items&&d.items.length); }); }
 function _cupShopOverlap(shop, parsed){
   const fDisp=new Set(), fCode=new Set();
   Object.values((parsed&&parsed.orders)||{}).forEach(o=>(o.items||[]).forEach(it=>{ if(it.code) fCode.add(String(it.code)); _cupSplitIds(it.dispId).forEach(x=>fDisp.add(x)); }));
-  return _cupOverlapCore(shop, fDisp, fCode, _cupShopIdSets); }
+  const ov=_cupProductsOverlap(shop, fDisp, fCode); if(ov) ov.noMaster=_cupNoMaster(shop); return ov; }
+// price_inventory（訂單明細分頁那份，只填報表庫存欄）：檔案本身有 Product ID（B 欄）→ 跟訂單檔同一套比對。
+function _cupPiOverlap(shop, piMaps){
+  if(!piMaps||!piMaps.pids) return null;
+  const ov=_cupProductsOverlap(shop, piMaps.pids, piMaps.codes||new Set()); if(ov) ov.noMaster=_cupNoMaster(shop); return ov; }
+// MSF：檔案裡沒有 Product ID，只有訂單編號（第 1 欄）→ 改比「訂單編號」：所選通路既有報表的 orderNos ∪ 這次一起上傳的訂單檔 vs 另一通路既有報表的 orderNos。
+//   規則比商品寬：只有「另一通路有足夠訂單紀錄、而且這份 MSF 跟另一通路重疊 ≥50%、又比跟所選通路高」才擋。
+//   理由：MSF 是銷售確認月，常含還沒上傳月份的訂單，所選通路對不到不代表選錯；只有明確對到另一家才算選錯。
+function _cupShopOrderSet(shop){ const s=new Set(); cupAvailableMonths(shop).forEach(m=>{ const d=cupLoadReport(shop,m); ((d&&d.orderNos)||[]).forEach(x=>s.add(String(x))); }); return s; }
+function _cupMsfOverlap(shop, msfRaw, fileOrderNos){
+  const other=CUP_OVERLAP_SHOPS.find(s=>s!==shop); if(CUP_OVERLAP_SHOPS.indexOf(shop)<0||!other||!msfRaw||!msfRaw.byOrder) return null;
+  const F=new Set(Object.keys(msfRaw.byOrder)), M=_cupShopOrderSet(shop), O=_cupShopOrderSet(other);
+  (fileOrderNos||[]).forEach(x=>M.add(String(x)));
+  const out={shop, other, key:'order', fileN:F.size, base:M.size, otherBase:O.size, hit:0, otherHit:0, pct:0, otherPct:null, skip:false, low:false};
+  if(!F.size||O.size<CUP_OVERLAP_MIN_BASE){ out.skip=true; return out; }
+  F.forEach(x=>{ if(M.has(x)) out.hit++; if(O.has(x)) out.otherHit++; });
+  out.pct=out.hit/F.size; out.otherPct=out.otherHit/F.size;
+  out.low=out.otherPct>=CUP_OVERLAP_LOW && out.otherPct>out.pct;
+  return out; }
 // 比對核心（訂單檔與商品主檔共用）：idSets(shop) 回 {disp,code}。訂單檔用 _cupShopIdSets（只看報表），商品主檔另外併入本機主檔的 Product ID。
 function _cupOverlapCore(shop, fDisp, fCode, idSets){
   const other=CUP_OVERLAP_SHOPS.find(s=>s!==shop); if(CUP_OVERLAP_SHOPS.indexOf(shop)<0||!other) return null;
@@ -30513,20 +30557,34 @@ function _cupOverlapCore(shop, fDisp, fCode, idSets){
   out.pct=out.hit/F.size; out.otherPct=O.size?out.otherHit/F.size:null;
   out.low=out.pct<CUP_OVERLAP_LOW && (out.otherPct==null || out.otherPct>out.pct);
   return out; }
+function _cupAnyOverlapLow(S){ return !!(S && ((S.overlap&&S.overlap.low)||(S.overlapMsf&&S.overlapMsf.low)||(S.overlapPi&&S.overlapPi.low))); }
+// 通路防呆提示：訂單檔／MSF／price_inventory 三份各自比，任一可能選錯 ⇒ 一個紅框列出是哪幾份、一個「我確定」勾選（generateCoupang 用 _cupAnyOverlapLow 擋）。
 function _cupOverlapHtml(shop, S){
-  const ov=S&&S.overlap; if(!ov) return '';
+  if(!S||!(S.overlap||S.overlapMsf||S.overlapPi)) return '';
   const esc=_momoEsc, nm=esc(cupShopDisplay(shop)), pc=p=>Math.floor(p*100)+'%';
   const gray=t=>`<div style="color:#9ca3af;font-size:12px;margin-bottom:8px">${t}</div>`;
-  if(ov.skip) return ov.fileN ? gray(`${nm}目前只有 ${ov.base} 個商品紀錄，太少，這次不做通路比對`) : '';
-  const byCode=ov.key==='code'?gray('以商品代碼比對（這份檔或既有報表沒有酷澎商品編號）'):'';
-  if(!ov.low) return byCode;
+  const grays=[], reds=[];
+  const one=(ov,label,unit)=>{ if(!ov) return;
+    if(ov.skip){ if(ov.fileN) grays.push(ov.key==='order'
+        ? `${label}：另一個通路的訂單紀錄太少（${ov.otherBase} 筆），這次不比對`
+        : `${label}：${nm}目前只有 ${ov.base} 個商品紀錄，太少，這次不做通路比對`); return; }
+    if(ov.key==='code') grays.push(`${label}：以商品代碼比對（沒有酷澎商品編號可比）`);
+    if(!ov.low) return;
+    const oth=ov.otherPct!=null?`；跟「${esc(cupShopDisplay(ov.other))}」重疊 <b>${pc(ov.otherPct)}</b>`:'';
+    reds.push(`<b>${label}</b>跟目前通路「<b>${nm}</b>」只重疊 <b>${pc(ov.pct)}</b>（檔案 ${ov.fileN} 個${unit}，對到 ${ov.hit} 個）${oth}`); };
+  one(S.overlap,'訂單檔','商品');
+  one(S.overlapMsf,'MSF 付款明細','訂單（MSF 沒有商品編號，用訂單編號比）');
+  one(S.overlapPi,'price_inventory','商品');
+  const noMaster=[S.overlap,S.overlapPi].some(o=>o&&o.noMaster);
+  if(noMaster) grays.push('商品主檔還沒同步到這台電腦，這次只用既有報表比對（到「商品同步」分頁等雲端主檔載入後再產生預覽，比對會更準）');
+  const grayHtml=grays.map(gray).join('');
+  if(!reds.length) return grayHtml;
   const ym=cupNormMonth(S.month), exists=!!cupLoadReport(shop, S.month);
-  const otherLine=ov.otherPct!=null?`；跟「${esc(cupShopDisplay(ov.other))}」重疊 <b>${pc(ov.otherPct)}</b>`:'';
   return `<div style="margin-bottom:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;color:#b91c1c;font-size:12px;line-height:1.7">
-      ⚠ <b>這份檔可能選錯通路</b>：這份訂單檔的商品，跟目前通路「<b>${nm}</b>」既有的商品只重疊 <b>${pc(ov.pct)}</b>（檔案 ${ov.fileN} 個商品，對到 ${ov.hit} 個）${otherLine}。<br>
+      ⚠ <b>這次上傳的檔案可能選錯通路</b>：<br>${reds.map(t=>'· '+t+'。').join('<br>')}<br>
       ${exists?`繼續寫入會把「${nm} ${ym}」的報表整份換成這份檔。`:`繼續寫入會把這份檔存成「${nm} ${ym}」的報表。`}請先確認上方的通路沒有選錯。
-      <label style="display:block;margin-top:6px;color:#7f1d1d;cursor:pointer"><input type="checkbox" id="cup-ovl-sure-${esc(shop)}"> 我確定這份是「${nm}」的訂單檔</label>
-    </div>${byCode}`; }
+      <label style="display:block;margin-top:6px;color:#7f1d1d;cursor:pointer"><input type="checkbox" id="cup-ovl-sure-${esc(shop)}"> 我確定這些是「${nm}」的檔案</label>
+    </div>${grayHtml}`; }
 
 // ══ PR-C1：酷澎商品主檔（price_inventory → 每通路一份、一筆＝一個選項 ID）══
 //   🔴 C1 是【純本機】：只存這台電腦的 localStorage（ec_coupang_products|<通路>，LZ1 壓縮）＋本模組記憶體快取。
@@ -30768,6 +30826,21 @@ function _cupPmRef(shop, S){
   const ref=cloudLatest>local?cloudLatest:local;
   return { ready, ref, src:(cloudLatest&&cloudLatest>=local)?'cloud':'local', older:!!(S&&S.exportTime&&ref&&S.exportTime<ref), cloudLatest };
 }
+// 雲端報表／MSF／備註／共用成本表晚到 → 目前看的酷澎通路（總表子分頁）重畫。訂閱是進酷澎頁才開，第一次進一定比資料早 render，
+//   沒有這段要再點一次才看得到。只重畫「總表」子分頁（上傳、商品同步分頁有暫存與預覽，不動）；正在輸入時不重畫；300ms 去抖。
+let _cupDataRedrawT=null;
+function _cupRedrawIfVisible(){
+  clearTimeout(_cupDataRedrawT);
+  _cupDataRedrawT=setTimeout(()=>{ try{
+    const shop=_cupShop; if(!shop) return;
+    const el=document.getElementById('coupang-content-'+shop);
+    if(!el||!el.classList.contains('active')||!el.offsetParent) return;   // 不在酷澎頁或這家沒在畫面上
+    if((_cupSub[shop]||'profit')!=='profit') return;
+    const ae=document.activeElement; if(ae&&el.contains(ae)&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+    cupRenderShop(shop);
+  }catch(e){ console.warn('[酷澎] 資料到達後重畫失敗',e); } }, 300);
+}
+['coupangReportReady','coupangMsfReady','coupangNoteReady','momoCostByOriginReady'].forEach(ev=>window.addEventListener(ev, _cupRedrawIfVisible));
 window.addEventListener('coupangProductsCloudReady', ()=>{ try{ ['麻吉','露營館'].forEach(s=>{
   if(_cupPmStage[s]) cupRenderProductsPreview(s);
   const a=_cupStArgs[s]; if(a) cupRenderSellThrough(s, a.rows, a.hasReport);   // C3：動銷率卡（只重畫這一格）
@@ -31013,7 +31086,7 @@ function cupGeneratePreview(){
     rows.forEach(r=>{ const has=(costMap[r.code]!=null&&!isNaN(+costMap[r.code])); if(has)st.costOk++; else if(/^\d+$/.test(r.code))st.costBar++; else st.costMiss++; });
     const sysHasMsf=cupListMsfDocs(shop).length>0;   // 系統既有 MSF doc（本次未帶時，總表仍會用既有 MSF 計退貨）→ 文案要區分
     const piStat = piMaps ? { rowN:piMaps.rowN, codeN:piMaps.codeN, covered:rows.filter(r=>r.stock!=null).length, total:rows.length } : null;   // PR-3b：庫存涵蓋率（本月幾個商品對到庫存）
-    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st, overlap:_cupShopOverlap(shop, parsed)};   // overlap＝PR-D 通路防呆（只讀）；hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 以 hasMsf&&msfRaw 為守衛）
+    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st, overlap:_cupShopOverlap(shop, parsed), overlapPi:_cupPiOverlap(shop, piMaps), overlapMsf:_cupMsfOverlap(shop, msfRaw, Object.keys(parsed.orders||{}))};   // overlap＝PR-D 通路防呆（只讀）；hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 以 hasMsf&&msfRaw 為守衛）
     cupRenderUploadPreview(shop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生預覽';}
   }).catch(err=>{ console.error(err); fail((err&&err.message)||err); });
@@ -31068,20 +31141,20 @@ function generateCoupang(shop){
   shop=shop||_cupShop;
   const S=_cupUpStage[shop];
   if(!S){ alert('請先按「▶ 產生預覽」'); return; }
-  if(S.overlap && S.overlap.low){ const chk=document.getElementById('cup-ovl-sure-'+shop);   // PR-D：可能選錯通路 ⇒ 沒勾「我確定」什麼都不寫
-    if(!chk||!chk.checked){ if(typeof showToast==='function') showToast('這份檔可能選錯通路，請先勾「我確定這份是「'+cupShopDisplay(shop)+'」的訂單檔」','warn'); return; } }
+  if(_cupAnyOverlapLow(S)){ const chk=document.getElementById('cup-ovl-sure-'+shop);   // PR-D：可能選錯通路（訂單／MSF／price_inventory 任一）⇒ 沒勾「我確定」什麼都不寫
+    if(!chk||!chk.checked){ if(typeof showToast==='function') showToast('這次的檔案可能選錯通路，請先勾「我確定這些是「'+cupShopDisplay(shop)+'」的檔案」','warn'); return; } }
   cupSaveReport(shop, S.month, S.rows, S.orderNos);                 // 報表 rows+orderNos → ec_coupang|<shop>|<month>（+ _markPending）
   if(S.hasMsf && S.msfRaw) cupSaveReturns(shop, S.msfMonth, S.msfRaw);   // MSF（byOrder + byConfirmMonth）→ ec_coupang_msf|<shop>|<MSF自身月>（同檔重傳＝覆蓋同 doc、不累加）；只供退貨率
   _cupSelMonth[shop]=cupNormMonth(S.month);
   _cupUpStage[shop]=null;
-  _cupFiles.order=_cupFiles.msf=_cupFiles.pi=null;
+  cupClearStagedFiles();
   if(typeof showToast==='function') showToast('已寫入本機（'+cupNormMonth(S.month)+'）。按「☁ 同步雲端」推上雲端。','success');
   _cupSub[shop]='profit';   // 寫完切回總表分頁
   cupRenderShop(shop);
 }
 function cupCancelUpload(shop){
   _cupUpStage[shop]=null;
-  _cupFiles.order=_cupFiles.msf=_cupFiles.pi=null;
+  cupClearStagedFiles();
   cupRenderShop(shop);   // 重繪上傳分頁（清檔案選取與預覽）
 }
 // 報表 doc → row 物件。只存原始 qty/rev/fee；cost/net 於 render 時 live 查 cost_by_origin（比照 MO+ 逐列 live→補成本後重繪即更新）
@@ -31318,11 +31391,11 @@ function cupRenderUploadTab(shop){
   const st=(f)=> _cupFiles[f]?`<span class="mm-ok">✓ ${_momoEsc(_cupFiles[f].name)}</span>`:`<span class="mm-muted">未選</span>`;
   return `<div style="max-width:760px">
     <div class="mm-note" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#075985">
-      酷澎報表<b>逐月上傳</b>（訂購日期單月）。營收＝選項價格×數量、費用照官方規則（成交5.5%+金流2%+免運7%+$2/單）、成本查莫筆克（原廠編號）。退貨掛<b>原始銷售期</b>（MSF 訂單編號 join 訂單檔下單月；查不到＝擱置、近似提示補傳）。
+      酷澎報表<b>逐月上傳</b>（訂購日期單月）。營收＝選項價格×數量 − 賣家優惠券（匯出時已排除退貨單，營收就是退貨後的淨額）、費用照官方規則估算（成交5.5%＋金流2%＋免運7%，基數是訂單商品淨額；金流另加運費×2%；發票$2/單）、成本查莫筆克（原廠編號）。MSF 付款明細<b>只用來看退貨率</b>（銷售確認月），不調整營收、成本、費用。
     </div>
     <div class="mm-uprow"><div class="mm-uplbl">我的訂單 <span class="mm-code">Delivery</span><span class="req">*必要</span><div class="mm-hint">營收/運費/成本對應·單月</div></div>
       <div class="mm-upctl"><input type="file" id="cup-order-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'order')"><span id="cup-order-status" style="font-size:12px">${st('order')}</span></div></div>
-    <div class="mm-uprow"><div class="mm-uplbl">MSF 付款明細 <span class="mm-code">VAT History</span><span class="opt">選填</span><div class="mm-hint">退貨金額歸期</div></div>
+    <div class="mm-uprow"><div class="mm-uplbl">MSF 付款明細 <span class="mm-code">VAT History</span><span class="opt">選填</span><div class="mm-hint">只用來算退貨率</div></div>
       <div class="mm-upctl"><input type="file" id="cup-msf-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'msf')"><span id="cup-msf-status" style="font-size:12px">${st('msf')}</span></div></div>
     <div class="mm-uprow"><div class="mm-uplbl">price_inventory <span class="mm-code">庫存</span><span class="opt">選填</span><div class="mm-hint">只填這份報表的庫存欄（同代碼多頁取最大值）；動銷率用的商品主檔請到「商品同步」分頁上傳</div></div>
       <div class="mm-upctl"><input type="file" id="cup-pi-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'pi')"><span id="cup-pi-status" style="font-size:12px">${st('pi')}</span></div></div>
@@ -32318,7 +32391,8 @@ async function cupReadPriceInventory(file){
   const xml=await coupangUnzipSheetXml(await file.arrayBuffer());
   const pi=coupangParsePriceInventoryXML(xml);
   const m=cupPiStockMaps(pi);
-  return { byCode:m.byCode, byBar:m.byBar, rowN:pi.length, codeN:Object.keys(m.byCode).length };
+  const pids=new Set(), codes=new Set(); (pi||[]).forEach(x=>{ if(x&&x.pid) pids.add(String(x.pid)); if(x&&x.code) codes.add(String(x.code)); });   // 通路防呆用（_cupPiOverlap）
+  return { byCode:m.byCode, byBar:m.byBar, rowN:pi.length, codeN:Object.keys(m.byCode).length, pids, codes };
 }
 /* ═══ CUP-PM-PURE-BEGIN：酷澎商品主檔（PR-C1）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage ═══ */
 // 庫存對照：key（代碼／條碼）→ 商品頁(pid) → 該頁內各列相加；再對各頁取最大值。沒有 pid 的列（舊格式）視為同一頁。
