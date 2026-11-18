@@ -23,18 +23,30 @@ const SS_DATA_KEYS = [
   '生活好麻吉|營收', '生活好麻吉|廣告費',
   '維克生活|營收', '維克生活|廣告費',
   '森之旅|營收', '森之旅|廣告費',
-  'MOMO|營收', 'MO+|營收', '酷澎|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
+  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎露營館|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
 ];
+// 選填欄（2026-12 起才有）：試算表回應可以有、也可以沒有（舊版 Apps Script、2026-11 以前的分頁都沒有）。
+//   沒有＝空白（不寫入）。整段空白時也不要求雲端 ec.platforms 已有這個通路（見 buildDiff）。
+const SS_OPTIONAL_KEYS = ['酷澎露營館|營收'];
 const SS_CHECK_KEYS = ['_shopeeTotal', '_momoTotal', '_coupangTotal', '_dayTotal'];
 const SS_ROW_KEYS = ['date'].concat(SS_DATA_KEYS, SS_CHECK_KEYS);
+const SS_REQUIRED_ROW_KEYS = SS_ROW_KEYS.filter(k => SS_OPTIONAL_KEYS.indexOf(k) < 0);
 const SS_REV_CHANNELS = SS_DATA_KEYS.filter(k => k.endsWith('|營收')).map(k => k.split('|')[0]);
-// 逐日驗算 4 項：[名稱, 相加的通路, 試算表加總欄]
+const SS_OPTIONAL_CHANNELS = [...new Set(SS_OPTIONAL_KEYS.map(k => k.split('|')[0]))];
+// 逐日驗算 4 項：[名稱, 相加的通路, 試算表加總欄]。試算表「酷澎」合計欄 2026-12 起＝好麻吉＋露營館（舊月份露營館空白＝0，照樣相符）
 const SS_DAY_CHECKS = [
   ['蝦皮四家', ['玩樂盒子', '生活好麻吉', '維克生活', '森之旅'], '_shopeeTotal'],
   ['MOMO + MO+', ['MOMO', 'MO+'], '_momoTotal'],
-  ['酷澎', ['酷澎'], '_coupangTotal'],
-  ['10 家合計', SS_REV_CHANNELS, '_dayTotal'],
+  ['酷澎', ['酷澎', '酷澎露營館'], '_coupangTotal'],
+  [SS_REV_CHANNELS.length + ' 家合計', SS_REV_CHANNELS, '_dayTotal'],
 ];
+// 選填欄沒出現＝空白（回新物件，不改傳入的 row）
+function ssNormalizeRow(row) {
+  if (!SS_OPTIONAL_KEYS.some(k => !(k in row))) return row;
+  const o = Object.assign({}, row);
+  SS_OPTIONAL_KEYS.forEach(k => { if (!(k in o)) o[k] = ''; });
+  return o;
+}
 const SS_FIELD = { '營收': 'daily', '廣告費': 'dailyAdSpend' };
 const SS_CELL_FIELDS = ['daily', 'dailyAdSpend'];
 const SS_MAX_DOC_BYTES = 950000;
@@ -91,20 +103,20 @@ function classifyCell(v) {
   return { kind: 'bad', raw: v, reason: '不明型別 ' + (v === null ? 'null' : typeof v) };
 }
 
-// 回應整包驗證：ok、rows 陣列、每列 key 集合剛好等於 date + 14 資料欄 + 4 底線欄、日期在範圍內且不重複
+// 回應整包驗證：ok、rows 陣列、每列 key 集合＝date + 必填資料欄 + 4 底線欄（選填欄可有可無）、日期在範圍內且不重複
+//   回傳的 rows 已補齊選填欄（沒有＝''）
 function validateResponse(resp, rng) {
   if (!resp || typeof resp !== 'object') return { ok: false, error: '回應不是物件' };
   if (resp.ok !== true) return { ok: false, error: '試算表回報錯誤：' + (resp.error || '（無訊息）') };
   if (!Array.isArray(resp.rows)) return { ok: false, error: '回應缺少 rows 陣列' };
-  const want = SS_ROW_KEYS.slice().sort().join('\n');
   const seen = {};
   for (let i = 0; i < resp.rows.length; i++) {
     const row = resp.rows[i];
     if (!row || typeof row !== 'object' || Array.isArray(row)) return { ok: false, error: '第 ' + (i + 1) + ' 列不是物件' };
     const keys = Object.keys(row);
-    if (keys.slice().sort().join('\n') !== want) {
-      const extra = keys.filter(k => SS_ROW_KEYS.indexOf(k) < 0);
-      const missing = SS_ROW_KEYS.filter(k => keys.indexOf(k) < 0);
+    const extra = keys.filter(k => SS_ROW_KEYS.indexOf(k) < 0);
+    const missing = SS_REQUIRED_ROW_KEYS.filter(k => keys.indexOf(k) < 0);
+    if (extra.length || missing.length) {
       return { ok: false, error: '第 ' + (i + 1) + ' 列欄位不符（多：' + (extra.join('、') || '無') + '；少：' + (missing.join('、') || '無') + '）' };
     }
     const d = row.date;
@@ -113,12 +125,13 @@ function validateResponse(resp, rng) {
     if (seen[d]) return { ok: false, error: '日期重複：' + d };
     seen[d] = true;
   }
-  return { ok: true, rows: resp.rows };
+  return { ok: true, rows: resp.rows.map(ssNormalizeRow) };
 }
 
 // 逐日驗算 4 項。空白當 0（試算表 SUM 也是）；無法讀取的格子讓該項直接不符
 function checkDayTotals(row) {
-  const n = v => (v === '' ? 0 : (typeof v === 'number' && isFinite(v) ? v : NaN));
+  row = ssNormalizeRow(row);
+  const n =v => (v === '' ? 0 : (typeof v === 'number' && isFinite(v) ? v : NaN));
   const fails = [];
   SS_DAY_CHECKS.forEach(([item, chs, totKey]) => {
     const sum = chs.reduce((s, ch) => s + n(row[ch + '|營收']), 0);
@@ -146,7 +159,16 @@ function buildDiff(rows, platforms, opts) {
   const byName = {}, dup = [];
   platforms.forEach((p, i) => { const nm = p && p.name; if (nm in byName) dup.push(nm); else byName[nm] = i; });
   if (dup.length) return { error: '雲端 ec.platforms 有重名通路：' + dup.join('、') };
-  const chs = [...new Set(SS_DATA_KEYS.map(k => k.split('|')[0]))];
+  rows = rows.map(ssNormalizeRow);
+  // 選填通路（露營館）：試算表整段空白、雲端也還沒有這個通路 ⇒ 整個略過（不計格數，結果跟沒有這欄時一樣）；
+  //   試算表有任何一格不是空白 ⇒ 雲端一定要有這個通路，否則擋下
+  const skipCh = {};
+  SS_OPTIONAL_CHANNELS.forEach(ch => {
+    const keys = SS_OPTIONAL_KEYS.filter(k => k.split('|')[0] === ch);
+    const allBlank = rows.every(row => keys.every(k => row[k] === ''));
+    if (allBlank && !(ch in byName)) skipCh[ch] = true;
+  });
+  const chs = [...new Set(SS_DATA_KEYS.map(k => k.split('|')[0]))].filter(ch => !skipCh[ch]);
   const missing = chs.filter(ch => !(ch in byName));
   if (missing.length) return { error: '試算表有、但雲端 ec.platforms 沒有的通路：' + missing.join('、') };
   const badAd = SS_DATA_KEYS.filter(k => k.endsWith('|廣告費')).map(k => k.split('|')[0]).filter(ch => !adSet.has(ch));
@@ -160,6 +182,7 @@ function buildDiff(rows, platforms, opts) {
     if (!dc.ok) dayFails[date] = dc.fails;
     SS_DATA_KEYS.forEach(key => {
       const [ch, metric] = key.split('|');
+      if (skipCh[ch]) return;
       const field = SS_FIELD[metric];
       const p = platforms[byName[ch]];
       const cur = cellVal(p, field, date);
@@ -356,8 +379,8 @@ function jsonp(url, params, env) {
 }
 
 const SheetSync = {
-  SHEET_SYNC_URL, SHEET_SYNC_USERS, SS_DATA_KEYS, SS_CHECK_KEYS,
-  range, classifyCell, validateResponse, buildDiff, ssSameSigner, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
+  SHEET_SYNC_URL, SHEET_SYNC_USERS, SS_DATA_KEYS, SS_OPTIONAL_KEYS, SS_CHECK_KEYS, SS_DAY_CHECKS,
+  range, ssNormalizeRow, classifyCell, validateResponse, buildDiff, ssSameSigner, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
   jsonp, taipeiToday, addDaysStr, utf8Len,
 };
 
