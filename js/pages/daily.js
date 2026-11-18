@@ -324,6 +324,15 @@ Object.assign(App, {
           const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-cup-person="${escapeHtml(p.name)}" data-cup-date="${escapeHtml(viewDate)}" data-cup-combo="${escapeHtml(k)}" onclick="cupOpenDpDetailFromEl(this)"><span>${escapeHtml(dispCombo(k))}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
           return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">酷澎 · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
         }
+        // 博客來／FriDay optlog 今日調整（2026-11-18 小修②；KPI 補成本寫的 ec_momo_optlog|博客來／FriDay，momoUpdateDailyProgress 一起寫）。
+        //   chip 點擊 → profit.js bkfdOpenDpDetailFromEl。
+        if (it && it.kind === 'bkfd-summary') {
+          const counts = it.counts || {};
+          const keys = Object.keys(counts).filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-bk-person="${escapeHtml(p.name)}" data-bk-date="${escapeHtml(viewDate)}" data-bk-combo="${escapeHtml(k)}" onclick="bkfdOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">博客來／FriDay · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
+        }
         return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
@@ -388,7 +397,7 @@ Object.assign(App, {
       _calRoster.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary' | 'pchome-summary' | 'coupang-summary') 不塞進月曆條列
+        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary' | 'pchome-summary' | 'coupang-summary' | 'bkfd-summary') 不塞進月曆條列
         arr.forEach(it => {
           if (!it || it.kind) return;
           dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] || '#6b7280', light: PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' } });
@@ -434,6 +443,9 @@ Object.assign(App, {
         // 酷澎優化紀錄計數（同口徑：該人 coupang-summary counts 總和，2026-11-18）
         const cs = v.find(it => it && it.kind === 'coupang-summary');
         if (cs && cs.counts) { const s = Object.values(cs.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
+        // 博客來／FriDay 補成本計數（同口徑：bkfd-summary counts 總和，2026-11-18 小修②）
+        const bs = v.find(it => it && it.kind === 'bkfd-summary');
+        if (bs && bs.counts) { const s = Object.values(bs.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
       });
       // 合併計數 + 名單聯集（同 personInfos：固定 4 人在前不變、其餘穩定排序）。固定 4 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
       const totalCalCount = {};
