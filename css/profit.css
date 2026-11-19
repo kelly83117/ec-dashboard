@@ -2311,3 +2311,10 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-ov-note{margin-bottom:12px;font-size:12px;line-height:1.6;color:var(--text-muted);}
 .cup-ov-banner{margin-bottom:10px;}
 .cup-ov-kpis{margin-bottom:16px;}
+/* 酷澎通路列的「買斷」（2026-11-19，準備中說明頁）：按鈕字級同旁邊兩顆（它們是 inline 15px；RWD 的 !important 照樣蓋得過這條），灰色圓點，說明框。 */
+.stab.stab-cup-buyout{font-size:15px;}
+.sdot-cup-buyout{background:var(--text-faint);}
+.cup-buyout-page{padding:16px 20px;}
+.cup-buyout-box{max-width:720px;padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);}
+.cup-buyout-title{margin-bottom:8px;font-size:15px;font-weight:700;color:var(--text);}
+.cup-buyout-text{font-size:13px;line-height:1.8;color:var(--text-muted);}

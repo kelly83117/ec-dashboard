@@ -100,6 +100,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>好麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#1d4ed8"></span>露營館</button>
+            <button class="stab stab-cup-buyout" onclick="setCoupangShop('買斷',this)"><span class="sdot sdot-cup-buyout"></span>買斷</button>
           </div>
         </div>
         <div class="pf-tabgrp">
@@ -357,6 +358,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
+  <div id="coupang-content-買斷" class="shop-content cup-buyout-page"></div>
   <div id="pchome-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="pchome-content-轉單" class="shop-content" style="padding:16px 20px"></div>
   <div id="pchome-content-寄倉" class="shop-content" style="padding:16px 20px"></div>
@@ -28195,7 +28197,24 @@ function setMomoShop(shop,btn){
   if(kpiBlock)kpiBlock.style.display='none';
 }
 
+// 酷澎「買斷」準備中說明頁（2026-11-19）。🔴 只是空殼：買斷【不是】酷澎通路清單的一員（不在 CUP_OVERLAP_SHOPS 等任何清單），
+//   這裡不開訂閱、不讀寫任何資料 key、不進同步／KPI 帶入／健檢／工作日誌／總表合計。唯一寫的是 ec_profitView（停留位置，跟其他分頁同一支 _saveProfitView）。
+//   之後真的做買斷淨利表時，把 setCoupangShop 開頭的攔截與這支函式整個拿掉即可，不必沿用這裡的任何東西。
+const CUP_BUYOUT_TAB='買斷';
+function cupShowBuyoutPlaceholder(btn){
+  _saveProfitView('coupang', CUP_BUYOUT_TAB);
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  const b=btn||document.querySelector("button.stab[onclick*=\"setCoupangShop('"+CUP_BUYOUT_TAB+"'\"]");
+  if(b) b.classList.add('active');
+  document.querySelectorAll('.shop-content').forEach(x=>x.classList.remove('active'));
+  const el=document.getElementById('coupang-content-'+CUP_BUYOUT_TAB);
+  if(el){ el.classList.add('active');
+    el.innerHTML='<div class="cup-buyout-box"><div class="cup-buyout-title">酷澎買斷｜淨利表準備中</div>'
+      +'<div class="cup-buyout-text">買斷（供應商後台）的淨利表要用每月帳單明細來算，目前還在等 11 月帳單明細（預計 12/7 前取得），拿到後才會開放上傳與報表。在那之前，買斷的數字請看 KPI 月結表。</div></div>'; }
+  const kpiBlock=document.getElementById('header-kpi-row'); if(kpiBlock) kpiBlock.style.display='none';
+}
 function setCoupangShop(shop,btn){
+  if(shop===CUP_BUYOUT_TAB){ cupShowBuyoutPlaceholder(btn); return; }   // 買斷＝說明頁：在開訂閱、清其他通路畫面之前就攔下
   // ⚡ 懶載酷澎組（coupang_reports/msf/note）。含總表：酷澎逐店表需要各店 coupang doc；切回同平台不重訂。
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
   // 酷澎頁的成本一律接雲端成本表：不看本機有沒有（本機有舊表也要訂閱，不然一直用舊表算）。momoCostEnsureCloud 會開 MOMO 組訂閱（載過不重訂），
@@ -31351,7 +31370,8 @@ function cupOvAnlzCardHTML(it, span){
   const head=(muted)=>'<div class="mm-anlz-head"><span class="mm-anlz-dot '+(CUP_OV_DOTCLS[shop]||'cup-ov-dot-none')+'"></span><span class="mm-anlz-name'+(muted?' muted':'')+'">'+esc(disp)+'</span></div>';
   if(it.buyout){   // 買斷：沒有淨利表資料，空卡、不放按鈕
     return '<div class="mm-anlz-card empty'+spanCls+'"><div class="mm-anlz-head"><span class="mm-anlz-dot cup-ov-dot-none"></span><span class="mm-anlz-name muted">買斷</span></div>'
-      +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">買斷還沒有淨利表資料，數字請看 KPI 月結表。</div></div></div>'; }
+      +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">買斷還沒有淨利表資料，數字請看 KPI 月結表。</div></div>'
+      +'<button class="mm-anlz-btn" onclick="setCoupangShop(\'買斷\')">查看 買斷</button></div>'; }
   if(!it.anlz.hasProducts){   // 這一館這個月沒有訂單報表
     return '<div class="mm-anlz-card empty'+spanCls+'">'+head(true)
       +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">這個月沒有訂單報表</div></div>'
