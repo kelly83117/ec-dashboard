@@ -3765,22 +3765,35 @@ let __profitCapRedShown = false;   // 紅卡：每次開站（每個分頁）一
 // 商品調整、優化紀錄的獨立文件（app/growth_*、app/optlog_*）門檻比 app/profit 低：這些文件會一直長，要早點知道。
 const PROFIT_CAP_DOC_WARN = 0.70;
 const PROFIT_CAP_DOC_RED = 0.90;
-// 回 [{ name, label, ratio, idxRatio, bytes, idx, level }]，只列到門檻的文件，紅的排前面。
-function __profitCapDocs(s) {
+// PROFIT_CAP_DOCS_BEGIN（node 測試 scripts/cap-docs.test.cjs 會擷取這段）
+// groups＝[{ map:{ key:{ratio,idxRatio,bytes,idx,…} }, name:(key,d)=>文件路徑, label:(key,d)=>畫面上的名字 }]：文件名稱與標籤由呼叫端給。
+// 回 [{ name, label, ratio, idxRatio, bytes, idx, level }]，只列到門檻的文件，紅的排前面（同級照 groups 的順序）。沒有數字的（還沒訂閱到）不列。
+function __profitCapDocs(groups) {
   const out = [];
-  const add = (group, shop, d) => {
+  (groups || []).forEach(g => Object.keys((g && g.map) || {}).forEach(k => {
+    const d = g.map[k];
     if (!d || typeof d.ratio !== 'number') return;
     const w = Math.max(d.ratio, typeof d.idxRatio === 'number' ? d.idxRatio : 0);
     const level = w >= PROFIT_CAP_DOC_RED ? 'red' : (w >= PROFIT_CAP_DOC_WARN ? 'warn' : '');
-    if (level) out.push(Object.assign({}, d, { name: 'app/' + group + '_' + shop, label: (group === 'growth' ? '商品調整' : '優化紀錄') + '（' + shop + '）', level }));
-  };
-  Object.keys(s.growth || {}).forEach(k => add('growth', k, s.growth[k]));
-  Object.keys(s.optlog || {}).forEach(k => add('optlog', k, s.optlog[k]));
+    if (level) out.push(Object.assign({}, d, { name: g.name(k, d), label: g.label(k, d), level }));
+  }));
   return out.sort((a, b) => (a.level === b.level ? 0 : (a.level === 'red' ? -1 : 1)));
 }
+// 管理員容量提醒涵蓋的獨立文件（s＝firebase.js __profitDocStats 的結果）。2026-11-19 加 MOMO 商品主檔、洞察表資料：
+//   這兩類只有「已經訂閱到的」才有數字（firebase.js capDocSnaps），沒有就不出現在提醒裡。
+function __profitCapGroups(s) {
+  s = s || {};
+  return [
+    { map: s.growth, name: k => 'app/growth_' + k, label: k => '商品調整（' + k + '）' },
+    { map: s.optlog, name: k => 'app/optlog_' + k, label: k => '優化紀錄（' + k + '）' },
+    { map: s.momoProducts, name: k => 'momo_products/' + k, label: (k, d) => 'MOMO 商品主檔（' + ((d && d.shop) || k) + '）' },
+    { map: s.insight, name: k => 'app/insight_' + k, label: k => '洞察表資料（' + k + '）' },
+  ];
+}
+// PROFIT_CAP_DOCS_END
 function __profitCapLevel(s) {
   const main = Math.max(typeof s.ratio === 'number' ? s.ratio : 0, typeof s.idxRatio === 'number' ? s.idxRatio : 0);
-  const docs = __profitCapDocs(s);
+  const docs = __profitCapDocs(__profitCapGroups(s));
   if (main >= PROFIT_CAP_RED || docs.some(d => d.level === 'red')) return 'red';
   if (main >= PROFIT_CAP_WARN || docs.length) return 'warn';
   return '';
@@ -3824,7 +3837,7 @@ function __profitCapShow(s, level) {
   el.className = 'ls-warn profit-cap-warn' + (level === 'red' ? ' profit-cap-warn--red' : '');
   el.setAttribute('role', level === 'red' ? 'alert' : 'status');
   const t = document.createElement('div'); t.className = 'ls-warn-title';
-  const docs = __profitCapDocs(s);
+  const docs = __profitCapDocs(__profitCapGroups(s));
   const mainHit = Math.max(s.ratio, typeof s.idxRatio === 'number' ? s.idxRatio : 0) >= PROFIT_CAP_WARN;
   // 文案只在 app/profit 到門檻時講「淨利表雲端檔」；只有獨立文件到門檻時標題換成通用的。
   t.textContent = mainHit ? (level === 'red' ? '淨利表雲端檔快滿了' : '淨利表雲端檔空間偏高') : (level === 'red' ? '雲端文件快滿了' : '雲端文件空間偏高');
@@ -3847,7 +3860,7 @@ function __profitCapShow(s, level) {
   const a = document.createElement('div'); a.className = 'ls-warn-actions';
   const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '知道了';
   later.addEventListener('click', __profitCapHide);
-  // #436 ⑤：管理員可以直接打開廣告調整一鍵封存（profit.js 要先載入）。只有 app/profit 到門檻才放：封存幫不到 growth／optlog 文件。
+  // #436 ⑤：管理員可以直接打開廣告調整一鍵封存（profit.js 要先載入）。只有 app/profit 到門檻才放：封存幫不到 growth／optlog／MOMO 商品主檔／洞察表文件。
   const go =document.createElement('button'); go.type = 'button'; go.className = 'ls-warn-go'; go.textContent = '開啟封存工具';
   go.addEventListener('click', () => {
     __profitCapHide();

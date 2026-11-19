@@ -17843,7 +17843,28 @@ function momoLoadProducts(shop){
   try{ const r=_momoLsReadNote(k,'array'); if(r.state==='ok') return r.value; }catch{}   // 讀壞 → 記錄後一樣回 []（存檔會被擋，見 momoSaveProducts）
   return [];
 }
-const MOMO_DOC_WARN_KB=700;   // Firestore 單 doc 1MB 上限；此 doc 每月長 periods → 700KB 畫面預警（撞牆前遷移比撞牆後便宜）
+const MOMO_DOC_WARN_KB=700;   // Firestore 單 doc 1MB 上限；此 doc 每月長 periods → 700KB 預警（撞牆前遷移比撞牆後便宜）。2026-11-19 起彈窗只有管理員看得到，其他人只留 console
+function _momoIsAdminUser(){ try{ return !!(window.App&&App.currentUser&&App.currentUser.role==='admin'); }catch(e){ return false; } }
+/* ═══ MOMO-DOC-CAP-PURE-BEGIN：推 momo_products 前的單檔上限防線（2026-11-19）純函式，node 測試用標記抽取 ═══ */
+// 合併結果寫上去的實際大小（Firestore 規則，firebase.js __momoDocMeasure）超過這個比例 ⇒ 不推、dirty 保留。
+const MOMO_DOC_BLOCK_RATIO=0.95;
+// bytes＝這一包寫上去的大小；limit＝單檔上限（1,048,576）。回 { ok, pct, msg }；pct＝百分比（一位小數）。量不到（bytes 不是數字）⇒ 放行。
+function momoDocCapVerdict(shopLabel, bytes, limit, blockRatio){
+  if(typeof bytes!=='number'||!isFinite(bytes)||!(limit>0)) return { ok:true, pct:null, msg:'' };
+  const ratio=bytes/limit, pct=Math.round(ratio*1000)/10;
+  if(ratio<=blockRatio) return { ok:true, pct, msg:'' };
+  return { ok:false, pct, msg:shopLabel+'商品資料已接近雲端單檔上限（目前 '+pct+'%），這次沒有推上去，資料還在這台電腦。請通知 Keani 處理。' };
+}
+/* ═══ MOMO-DOC-CAP-PURE-END ═══ */
+// 呼叫 __cloudMomo.setShop 之前一律先過這支：超過上限就 throw（中文訊息），呼叫端不推、dirty 不清。量測函式不存在＝放行並在 console 留一行。
+function _momoDocCapGuard(shop, items){
+  let m=null; try{ if(typeof window.__momoDocMeasure==='function') m=window.__momoDocMeasure(shop, items); }catch(e){ m=null; }
+  if(!m){ try{ console.warn('[MOMO size] '+shop+' 量不到這次要推的大小（__momoDocMeasure 不存在或失敗），照常推'); }catch{} return { ok:true, pct:null }; }
+  const v=momoDocCapVerdict(momoShopDisplay(shop), m.bytes, m.limit, MOMO_DOC_BLOCK_RATIO);
+  try{ window.__momoLastDocCap={shop, at:Date.now(), bytes:m.bytes, pct:v.pct, ok:v.ok}; }catch{}   // 唯讀觀測
+  if(!v.ok){ try{ console.error('[MOMO size] '+v.msg+'（'+m.bytes+' bytes）'); }catch{} throw new Error(v.msg); }
+  return v;
+}
 // 回 true＝存了；false＝本機那份讀不到（解不開／JSON 壞）而且鏡像都沒值 → 拒存（見 _momoProductsSaveBlocked）。今天的呼叫端都沒用回傳值。
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
@@ -17859,8 +17880,10 @@ function momoSaveProducts(shop,products){
   try{ const _kb=(new TextEncoder().encode(_json).length)/1024; if(_kb>MOMO_DOC_WARN_KB){
     const msg='⚠ '+shop+' 商品資料 '+_kb.toFixed(0)+'KB，已過 '+MOMO_DOC_WARN_KB+'KB 警戒（Firestore 單 doc 上限 1MB、每月還會長）→ 需精簡欄位或分片，勿再塞非必要資料。';
     try{ console.error('%c[MOMO size] '+msg,'color:#dc2626;font-weight:700'); }catch{}
+    if(_momoIsAdminUser()){   // 非管理員：不跳彈窗、不跳 toast，只留上面那行 console
     try{ if(typeof showToast==='function') showToast(msg,'error'); }catch{}
     try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料接近容量上限',message:msg+'\n\n（此警告在每次寫入超過 '+MOMO_DOC_WARN_KB+'KB 時出現）',kind:'error'}); }catch{}
+    }
     try{ window.__momoSizeWarn={shop, kb:Math.round(_kb), at:Date.now()}; }catch{}
   } else { try{ if(window.__momoSizeWarn&&window.__momoSizeWarn.shop===shop) delete window.__momoSizeWarn; }catch{} } }catch(e){}
   // last-pushed 模型（2026-09-08 取代 A0 品號註冊表）：dirty 純即時算 diff(本機, 上次成功推的版本)，
@@ -18110,7 +18133,9 @@ async function momoSyncProductsMerge(shop, opts){
       if(!ok){ const msg='要從雲端刪除 '+guard.n+' 筆，你按了取消，這次沒推'; try{ console.warn('[products merge] '+shop+' '+msg); }catch{} throw new Error(msg); }
     }
   }
-  await window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(plan.merged));   // 整包寫回 merged（已保留雲端獨有、只覆蓋 dirty、bootstrap 不刪）
+  const _outItems=momoFsSanitizeDeep(plan.merged);
+  _momoDocCapGuard(shop, _outItems);   // 🛡 單檔上限：合併結果超過 95% ⇒ throw、不推（lastpushed 不更新、dirty 留著）
+  await window.__cloudMomo.setShop(shop, _outItems);   // 整包寫回 merged（已保留雲端獨有、只覆蓋 dirty、bootstrap 不刪）
   _momoProductsLastPushedSet(shop, plan.merged);   // 🔴 推成功才更新 baseline → 下輪 dirty 歸零
   return { shadow:false, plan };
 }
@@ -18501,7 +18526,7 @@ async function momoMigrateProductsToCollection(){
     const k='ec_momo_products|'+shop;
     const oldItems=appProfit[k];
     if(!Array.isArray(oldItems)||oldItems.length===0){ report.push({shop, 狀態:'app/profit 無此欄位或空 → 略過（不需遷移）'}); continue; }
-    try{ await window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(oldItems)); }
+    try{ const _it=momoFsSanitizeDeep(oldItems); _momoDocCapGuard(shop, _it); await window.__cloudMomo.setShop(shop, _it); }
     catch(e){ report.push({shop, 狀態:'❌ 寫入 collection 失敗：'+((e&&e.message)||e)}); continue; }
     let cloudCount='?', ok=false;
     try{ const cs=await window.__cloudMomo.getDoc(shop); const cd=cs.exists()?(cs.data()||{}):{}; cloudCount=(cd.items||[]).length; ok=(cloudCount===oldItems.length); }
@@ -20259,7 +20284,7 @@ function momoMoPlusCleanDirty(shop, idxList){
   const cleaned=products.filter((_,i)=>!toRemove.has(i));
   momoSaveProducts(shop, cleaned);   // ① 本機（localStorage + _profitMem + _mem + _markPending）
   let cloud='(未推)';                 // ② 雲端整包取代：momo_products 每賣場一 doc、setDoc 全取代 → 刪掉的不會下次載入 sync 回來
-  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(cleaned)); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
+  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ const _it=momoFsSanitizeDeep(cleaned); _momoDocCapGuard(shop, _it); window.__cloudMomo.setShop(shop, _it); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
   return { ok:true, removed:toRemove.size, remaining:cleaned.length, cloud, scope:shop };
 }
 /* ═══════════════ MO+ 逐列成本資料層（momo_moplus_origins collection）P3b-1 ═══════════════
