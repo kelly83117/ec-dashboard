@@ -31496,6 +31496,105 @@ function renderCoupangReturnsBanner(shop, hasMsf){
   box.innerHTML=`<div class="mm-banner mm-banner-warn" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">退貨率（銷售確認月）<b>${rr.rate.toFixed(2)}%</b> <span style="color:#6b7280;font-size:12px">退貨 NT$${rr.retNet.toLocaleString()} ÷ 銷售 NT$${rr.saleNet.toLocaleString()}</span> <span class="mm-info" title="${_momoEsc(tip)}">?</span></div>`;
 }
 
+/* ═══ CUP-OV-PURE-BEGIN：酷澎｜總表（2026-11-19，Vanessa）資料層純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage ═══
+   口徑＝淨利表（跟個別通路頁上方五張卡同一套：cupEnrichRows → cupKpi；動銷率 cupProductsListed → cupSellThroughCalc），不讀 KPI 月結表。 */
+// 一個通路一個月的合計。rows＝cupEnrichRows 過的列（null＝這個月沒有報表）；listedSet＝cupProductsListed().listed（null＝沒有主檔）。
+//   rate＝cupKpi 的加權淨利率（%；分母 cRev 只算有成本的列，同個別通路頁那張卡）。
+function cupOvCalc(rows, listedSet){
+  const has=Array.isArray(rows), R=has?rows:[], k=cupKpi(R);
+  const cRev=R.filter(r=>r.costStatus==='ok').reduce((s,r)=>s+(r.rev||0),0);
+  const st=(has&&listedSet)?cupSellThroughCalc(R, listedSet):null;
+  return { has, rev:k.rev, net:k.net, cRev, rate:k.rate, qty:k.qty, stNum:st?st.num:null, stDen:st?st.den:null, stPct:st?st.pct:null, rows:R };
+}
+// 商品主檔 → 原廠編號的庫存：同一個原廠編號在【最新清單】的所有選項庫存加總。不在最新清單、或任一選項庫存不明 ⇒ 不放進表（不判）。
+function cupOvStockByCode(doc){
+  const latest=(doc&&doc.latestExport)||'', acc={};
+  ((doc&&doc.items)||[]).forEach(p=>{ if(!p||!p.code||!latest||p.lastSeen!==latest) return;
+    const o=acc[p.code]=acc[p.code]||{sum:0, unknown:false};
+    if(p.stock==null||isNaN(+p.stock)) o.unknown=true; else o.sum+=Number(p.stock); });
+  const by={}; Object.keys(acc).forEach(c=>{ if(!acc[c].unknown) by[c]=acc[c].sum; });
+  return { by, latest };
+}
+// 各通路分析（照 momoShopAnalysis／pchomeShopAnalysis 規則 1～5；門檻＝MOMO_ANALYSIS_CFG）。每條最多一則、依影響金額排序、只取前 2 則。
+//   curRows／prevRows＝cupEnrichRows 過的列（null＝沒有報表）。opt＝{ incomplete, isLatest, stock:cupOvStockByCode() }。
+//   規則 3：酷澎的成本沒有歷史版本，上月淨利率是用目前成本回算的 → 小字只寫售價／賣家券／平台費，不寫成本上升。
+//   規則 4：只在 opt.isLatest（這個通路最新一個有報表的月份）產出；庫存是清單當下的數字，不是月底庫存。
+//   counts＝五條規則各自的筆數與金額（不受「只取前 2 則」影響；驗收與 node 測試用）。
+function cupOvAnalysisCalc(shop, curRows, prevRows, opt){
+  opt=opt||{};
+  const cfg=MOMO_ANALYSIS_CFG, money=momoMoney, esc=_momoEsc;
+  const out={ shop, hasProducts:Array.isArray(curRows), suggestions:[], missN:0, missRev:0, noAnomaly:false, topImpact:-1,
+    counts:{ r1:{n:0,amt:0}, r2:{n:0,amt:0}, r3:{n:0,amt:0}, r4:{n:0,amt:0}, r5:{n:0,amt:0} } };
+  if(!out.hasProducts) return out;
+  const prevBy={}; (prevRows||[]).forEach(x=>{ if(x&&x.code) prevBy[x.code]=x; });
+  const rows=[]; let missN=0, missRev=0;
+  curRows.forEach(x=>{ if(!x) return;
+    const rev=Number(x.rev)||0, qty=Number(x.qty)||0;
+    if(!(qty>0 || Math.abs(rev)>0.5)) return;                       // 本期無動＝不納入
+    const covered=(x.costStatus==='ok');
+    if(x.costStatus==='missing'){ missN++; missRev+=rev; }          // 純數字條碼本來就沒有成本表對應，不算缺成本
+    const px=prevBy[x.code], pOk=!!(px&&px.costStatus==='ok'&&px.netRate!=null);
+    rows.push({ sku:String(x.code), rev, qty, covered, marginR:(covered&&x.netRate!=null)?x.netRate*100:null, profitR:(x.net==null?null:Number(x.net)),
+      prevMarginR:pOk?px.netRate*100:null, prevRev:px?(Number(px.rev)||0):0, prevQty:px?(Number(px.qty)||0):0 }); });
+  out.missN=missN; out.missRev=missRev;
+  const revSorted=rows.map(r=>r.rev).filter(v=>v>0).sort((a,b)=>b-a);
+  const revThreshold=revSorted.length?revSorted[Math.max(0,Math.floor(revSorted.length*cfg.topRevPctile)-1)]:Infinity;
+  const sugg=[];
+  // 規則1 賠錢
+  const losers=rows.filter(r=>r.covered&&r.marginR!=null&&r.marginR<0);
+  if(losers.length){ const totalLoss=losers.reduce((a,r)=>a+Math.max(0,-(r.profitR||0)),0), worst=losers.slice().sort((x,y)=>(x.profitR||0)-(y.profitR||0))[0];
+    out.counts.r1={n:losers.length, amt:totalLoss};
+    sugg.push({impact:totalLoss, html:'<b>'+losers.length+' 項賠錢商品</b>，合計虧 '+money(totalLoss)+'<span class="mm-anlz-d">最慘 '+esc(worst.sku)+'：淨利率 '+worst.marginR.toFixed(1)+'%、虧 '+money(-(worst.profitR||0))+'</span>'}); }
+  // 規則2 低淨利高營收（0 ≤ 淨利率 < 門檻，營收進前 20%）
+  const lowHi=rows.filter(r=>r.covered&&r.marginR!=null&&r.marginR>=0&&r.marginR<cfg.lowMarginPct&&r.rev>=revThreshold);
+  if(lowHi.length){ const sumRev=lowHi.reduce((a,r)=>a+r.rev,0), w2=lowHi.slice().sort((x,y)=>y.rev-x.rev)[0];
+    out.counts.r2={n:lowHi.length, amt:sumRev};
+    sugg.push({impact:sumRev, html:'<b>'+lowHi.length+' 項低淨利高營收</b>，合計營收 '+money(sumRev)+'<span class="mm-anlz-d">最大 '+esc(w2.sku)+'：淨利率 '+w2.marginR.toFixed(1)+'%、營收 '+money(w2.rev)+'</span>'}); }
+  // 規則3 淨利率惡化（兩月都有賣；當月未完／沒有上月報表不產出）
+  if(!opt.incomplete && Array.isArray(prevRows)){
+    const wor=rows.filter(r=>r.covered&&r.marginR!=null&&r.prevMarginR!=null&&r.rev>0&&r.qty>0&&r.prevRev>0&&r.prevQty>0&&(r.prevMarginR-r.marginR)>cfg.marginDropPt)
+      .map(r=>({r, drop:r.prevMarginR-r.marginR, impact:r.rev*((r.prevMarginR-r.marginR)/100)})).sort((x,y)=>y.impact-x.impact);
+    if(wor.length){ const w=wor[0], r=w.r, avgPc=r.rev/r.qty, avgPp=r.prevRev/r.prevQty, ch=avgPp>0?(avgPc-avgPp)/avgPp:0;
+      const cause=(ch<-0.02)?('成交均價下降 '+money(avgPp)+'→'+money(avgPc)+'（售價或賣家券變動）'):'售價、賣家券或平台費變動';
+      const sumImp=wor.reduce((a,x)=>a+x.impact,0);
+      out.counts.r3={n:wor.length, amt:sumImp};
+      sugg.push({impact:w.impact, html:'<b>'+wor.length+' 項淨利率惡化</b>，影響約 '+money(w.impact)+'<span class="mm-anlz-d">最嚴重 '+esc(r.sku)+'：'+r.prevMarginR.toFixed(1)+'%→'+r.marginR.toFixed(1)+'%（跌 '+w.drop.toFixed(1)+'pt）· '+cause+'；上月用目前成本回算</span>'}); }
+  }
+  // 規則4 斷貨（最新清單庫存加總 0 且本月有賣）：只在這個通路最新一個有報表的月份產出
+  if(opt.isLatest && opt.stock && opt.stock.by){
+    const by=opt.stock.by, outs=rows.filter(r=>Object.prototype.hasOwnProperty.call(by,r.sku)&&by[r.sku]===0&&r.qty>0);
+    if(outs.length){ const sumO=outs.reduce((a,r)=>a+r.rev,0), w4=outs.slice().sort((x,y)=>y.rev-x.rev)[0];
+      const day=String(opt.stock.latest||'').slice(5,10).replace('-','/');
+      out.counts.r4={n:outs.length, amt:sumO};
+      sugg.push({impact:sumO, html:'<b>'+outs.length+' 項斷貨</b>（庫存 0 仍有銷量），影響營收 '+money(sumO)+'<span class="mm-anlz-d">最大 '+esc(w4.sku)+'：本期營收 '+money(w4.rev)+'、銷量 '+Math.round(w4.qty).toLocaleString()+' · 庫存為 '+esc(day||'—')+' 清單當下</span>'}); }
+  }
+  // 規則5 缺成本
+  if(missN){ out.counts.r5={n:missN, amt:missRev};
+    sugg.push({impact:missRev, html:'<b>缺成本 '+missN+' 項商品</b>，影響營收 '+money(missRev)+'<span class="mm-anlz-d">補齊即計入加權淨利率</span>'}); }
+  sugg.sort((x,y)=>y.impact-x.impact);
+  out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
+  return out;
+}
+/* ═══ CUP-OV-PURE-END ═══ */
+// 讀取端包裝（讀報表、成本表、本機商品主檔；不寫任何東西）
+function cupOvShopData(shop, month){
+  const rep=month?cupLoadReport(shop, month):null;
+  const rows=rep?cupEnrichRows(rep.rows||[]):null;
+  let listed=null; try{ const d=cupLoadProducts(shop); if(d&&!_cupProdBad[shop]) listed=cupProductsListed(d).listed; }catch(e){}
+  return Object.assign(cupOvCalc(rows, listed), { shop, month });
+}
+function cupShopAnalysis(shop, month, prevMonth, incomplete){
+  const cur=cupOvShopData(shop, month), prev=prevMonth?cupOvShopData(shop, prevMonth):null;
+  const months=cupAvailableMonths(shop), isLatest=months.length>0 && months[months.length-1]===cupNormMonth(month);
+  let stock=null; try{ const d=cupLoadProducts(shop); if(d&&!_cupProdBad[shop]) stock=cupOvStockByCode(d); }catch(e){}
+  return cupOvAnalysisCalc(shop, cur.has?cur.rows:null, (prev&&prev.has)?prev.rows:null, { incomplete:!!incomplete, isLatest, stock });
+}
+// Console 只讀：兩館某個月的合計與五條規則筆數（驗收用；不以 __cloud 開頭、不寫任何東西）
+window.__cupOvSnap=function(month){ const o={ month };
+  CUP_OVERLAP_SHOPS.forEach(s=>{ const d=cupOvShopData(s, month), a=cupShopAnalysis(s, month, cupPrevMonth(month), false);
+    o[s]={ has:d.has, rev:d.rev, net:d.net, cRev:d.cRev, rate:d.rate, qty:d.qty, stNum:d.stNum, stDen:d.stDen, stPct:d.stPct, counts:a.counts, suggestions:a.suggestions.map(x=>x.html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()) }; });
+  return o; };
+
 /* ═══════════════ 酷澎 PR-3 介面對齊（比照 MO+ momoRenderShop）：子分頁殼 + 總表 + 訂單明細（上傳）═══════════════ */
 const _cupSub={};   // shop → 'profit'|'upload'|'sync'
 const CUP_SUBTABS=[['總表','profit'],['訂單明細','upload'],['商品同步','sync']];   // 商品同步＝PR-3b 佔位（需 price_inventory 提供上架/庫存）
