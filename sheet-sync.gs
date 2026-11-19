@@ -28,6 +28,7 @@ const MAX_SPAN_DAYS = 31;
 const TOTAL_ROW_LABEL = '總計';
 const DATE_HEADER = '日期';
 
+// 第 4 版（2026-11-19）：酷澎支援「第 1 列酷澎（合併）＋第 2 列 好麻吉／露營館」的表頭。
 // 15 個資料欄（14 個必填＋1 個選填）。key（通路|指標）就是回傳 JSON 的欄位名。
 const DATA_KEYS = [
   '玩樂盒子|營收', '玩樂盒子|廣告費',
@@ -36,14 +37,23 @@ const DATA_KEYS = [
   '森之旅|營收', '森之旅|廣告費',
   'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎露營館|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
 ];
-// 選填欄：2026 十二月分頁起才有（表頭第 1 列「酷澎露營館」、第 2 列「營收」）。
-//   分頁沒有這欄不算缺少，回傳值一律 ''（空白）；有這欄就照常讀。舊分頁永遠不會有，所以不能做成必填。
+// 選填欄：2026 十二月分頁起才有。分頁沒有這欄不算缺少，回傳值一律 ''（空白）；有這欄就照常讀。
+//   舊分頁永遠不會有，所以不能做成必填。表頭兩種寫法都認得（見 SUB_HEADER_KEY）：
+//   ・第 1 列「酷澎露營館」、第 2 列「營收」
+//   ・第 1 列「酷澎」（跟好麻吉那欄合併）、第 2 列「露營館」
 const OPTIONAL_KEYS = ['酷澎露營館|營收'];
 // 有 ROAS 欄的通路（ROAS 欄只略過、不讀）
 const AD_CHANNELS = ['玩樂盒子', '生活好麻吉', '維克生活', '森之旅'];
 const METRICS = ['營收', '廣告費'];
 // 第 2 列直接寫子通路名的情況：子通路 → 第 1 列必須是的群組名
 const SUB_CHANNEL_PARENT = { 'MOMO': 'MOMO', 'MO+': 'MOMO' };
+// 第 1 列是群組名（合併儲存格）、第 2 列寫店名的情況：群組 → { 第 2 列 → 回傳 key }。回傳 key 不變，前端不用改。
+//   2026 十二月起的排法：「酷澎」合併兩欄，第 2 列「好麻吉」「露營館」。
+//   舊排法（第 1 列「酷澎」、第 2 列「營收」）仍然認得；同一個分頁兩種寫法指到同一個 key ⇒「資料欄重複」。
+const SUB_HEADER_KEY = { '酷澎': { '好麻吉': '酷澎|營收', '露營館': '酷澎露營館|營收' } };
+// 這個月（含）以後的分頁如果沒有任何露營館欄，在 layout.notices 提醒（不擋同步）
+const LUYING_NOTICE_FROM = '2026-12';
+const LUYING_NOTICE_TEXT = '這個分頁沒有酷澎露營館欄';
 // 分隔欄右側的加總欄：表頭 → 回傳名（加底線前綴）
 const CHECK_KEYS = {
   '蝦皮總營收': 'shopeeTotal',
@@ -109,7 +119,7 @@ function readMonth_(ss, ym) {
   const header = readHeader_(sh, values, lastCol);
   const layout = classify_(header.r1, header.r2);
   if (layout.problems.length) {
-    return { ok: false, sheet: name, header: headerTable_(header), layout: publicLayout_(layout),
+    return { ok: false, sheet: name, header: headerTable_(header), layout: publicLayout_(layout, ym),
       error: name + ' 表頭檢查失敗：' + layout.problems.join('；') };
   }
 
@@ -129,15 +139,21 @@ function readMonth_(ss, ym) {
     rows.push(Object.assign({ date: date }, pick_(row, layout)));
   }
   if (!total) return { ok: false, sheet: name, error: name + ' 找不到 A 欄為「' + TOTAL_ROW_LABEL + '」的列' };
-  return { ok: true, sheet: name, rows: rows, total: total, layout: publicLayout_(layout) };
+  return { ok: true, sheet: name, rows: rows, total: total, layout: publicLayout_(layout, ym) };
 }
 
 // 第 1～2 列表頭。水平合併只有左上角有值 → 在合併範圍內往右補；垂直合併（U1:U2 等）值在第 1 列，第 2 列為空。
 function readHeader_(sh, values, lastCol) {
-  const r1 = values[0].map(norm_), r2 = values[1].map(norm_);
-  sh.getRange(1, 1, 1, lastCol).getMergedRanges().forEach(mr => {
-    if (mr.getRow() !== 1) return;
-    const c0 = mr.getColumn() - 1, n = mr.getNumColumns();
+  const merges = sh.getRange(1, 1, 1, lastCol).getMergedRanges()
+    .map(mr => ({ row: mr.getRow(), col: mr.getColumn(), numCols: mr.getNumColumns() }));
+  return headerRows_(values[0], values[1], merges);
+}
+// 純函式（node 測試用）：merges＝[{ row, col, numCols }]，row / col 從 1 起算；只處理從第 1 列開始的合併範圍。
+function headerRows_(row1, row2, merges) {
+  const r1 = row1.map(norm_), r2 = row2.map(norm_);
+  (merges || []).forEach(mr => {
+    if (mr.row !== 1) return;
+    const c0 = mr.col - 1, n = mr.numCols;
     for (let c = c0 + 1; c < c0 + n && c < r1.length; c++) r1[c] = r1[c0];
   });
   return { r1: r1, r2: r2 };
@@ -155,6 +171,7 @@ function classify_(r1, r2) {
     return res;
   }
   res.separator = colLetter_(sep + 1);
+  let subOnly = '';
 
   // 左側：資料欄
   for (let c = 1; c < sep; c++) {
@@ -167,6 +184,7 @@ function classify_(r1, r2) {
     let key = null;
     if (a && METRICS.indexOf(b) >= 0) key = a + '|' + b;                         // 玩樂盒子+營收、酷澎+營收…
     else if (SUB_CHANNEL_PARENT[b] && a === SUB_CHANNEL_PARENT[b]) key = b + '|營收'; // MOMO+MOMO、MOMO+MO+
+    else if (SUB_HEADER_KEY[a] && SUB_HEADER_KEY[a][b]) key = SUB_HEADER_KEY[a][b];   // 酷澎+好麻吉、酷澎+露營館
     if (!key || DATA_KEYS.indexOf(key) < 0) {
       P.push('無法辨識的資料欄 ' + L + '（第 1 列「' + a + '」／第 2 列「' + b + '」）');
       continue;
@@ -174,9 +192,14 @@ function classify_(r1, r2) {
     if (key in res.cols) { P.push('資料欄重複：' + label_(key) + '（' + res.data[key] + '、' + L + '）'); continue; }
     res.cols[key] = c;
     res.data[key] = L;
+    if (b === '露營館') subOnly = L;
   }
   const missing = DATA_KEYS.filter(k => !(k in res.cols) && OPTIONAL_KEYS.indexOf(k) < 0);
   if (missing.length) P.push('缺少 ' + missing.length + ' 個資料欄：' + missing.map(label_).join('、'));
+  // 只有「酷澎／露營館」、沒有好麻吉那一欄：上面已列為缺少「酷澎 營收」，這裡補一句原因
+  if (subOnly && missing.indexOf('酷澎|營收') >= 0) {
+    P.push(subOnly + ' 欄是「酷澎／露營館」，但找不到「酷澎／好麻吉」（或「酷澎／營收」）那一欄');
+  }
 
   // 右側：加總欄
   for (let c = sep + 1; c < r1.length; c++) {
@@ -232,12 +255,23 @@ function headersOnly_(ss, month) {
   const layout = classify_(header.r1, header.r2);
   const ok = layout.problems.length === 0;
   return { ok: ok, sheet: name, a1: String(values[0][0]), a2: String(values[1][0]),
-    layout: publicLayout_(layout), header: headerTable_(header),
+    layout: publicLayout_(layout, month), header: headerTable_(header),
     error: ok ? null : layout.problems.join('；') };
 }
 
-function publicLayout_(l) {
-  return { separator: l.separator, data: l.data, totals: l.totalCols, ignoredRoas: l.ignored, problems: l.problems };
+// notices：不擋同步的提醒；沒有提醒時不帶這個欄位（舊月份的輸出跟改版前逐字相同）。
+function publicLayout_(l, ym) {
+  const o = { separator: l.separator, data: l.data, totals: l.totalCols, ignoredRoas: l.ignored, problems: l.problems };
+  const notices = layoutNotices_(l, ym);
+  if (notices.length) o.notices = notices;
+  return o;
+}
+function layoutNotices_(l, ym) {
+  const out = [];
+  if (l.separator && /^\d{4}-\d{2}$/.test(String(ym || '')) && ym >= LUYING_NOTICE_FROM && !('酷澎露營館|營收' in l.cols)) {
+    out.push(LUYING_NOTICE_TEXT);
+  }
+  return out;
 }
 function headerTable_(h) {
   return h.r1.map((v, i) => ({ col: colLetter_(i + 1), r1: v, r2: h.r2[i] }));
@@ -285,5 +319,6 @@ function testSync() {
   Logger.log(JSON.stringify(headersOnly_(ss, '2026-09'), null, 1));
   Logger.log(JSON.stringify(headersOnly_(ss, '2026-07')));
   Logger.log(JSON.stringify(headersOnly_(ss, '2026-11')));
+  Logger.log(JSON.stringify(headersOnly_(ss, '2026-12')));
   Logger.log(JSON.stringify(readRange_(ss, '2026-09-22', '2026-09-28')).slice(0, 3000));
 }
