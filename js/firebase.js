@@ -601,6 +601,16 @@ try {
       const m = profitDocMeasure({ shop, items: items || [], updatedAt: 0 }, 'momo_products/' + (MOMO_SHOP_DOCID[shop] || shop));
       return { bytes: m.bytes, ratio: m.bytes / PROFIT_DOC_LIMIT_BYTES, limit: PROFIT_DOC_LIMIT_BYTES };
     };
+    // 洞察表上傳前量「這個欄位換掉之後整份文件會多大」（marketing.js _insDocCapGuard 用）：純計算、不讀不寫。刻意不以 __cloud 開頭。
+    //   用既有訂閱最近一次的快照（capDocSnaps.insight，app.js 開站就訂閱四個通路）；還沒收到快照、文件不存在 ⇒ 回 null（呼叫端放行）。
+    window.__insightDocMeasure = (shop, key, value) => {
+      const snap = capDocSnaps.insight[shop];
+      if (!snap || typeof key !== 'string' || !key) return null;
+      const data = Object.assign({}, snap.data() || {});
+      data[key] = value;
+      const m = profitDocMeasure(data, 'app/insight_' + shop);
+      return { bytes: m.bytes, ratio: m.bytes / PROFIT_DOC_LIMIT_BYTES, limit: PROFIT_DOC_LIMIT_BYTES };
+    };
     // 唯讀觀測點：回快取（還沒算過＝null）。opts.compute＝快取過期時當場算一次（只限管理員；app.js 登入後的檢查用）。
     window.__profitDocStats = (opts) => {
       if (opts && opts.compute && profitDocStatsDirty && _pdIsAdmin()) { try { _pdCompute(); } catch (e) { console.warn('[profit 容量] 計算失敗', e); } }
