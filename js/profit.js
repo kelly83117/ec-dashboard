@@ -3019,7 +3019,36 @@ async function _momoFullPushDeleteGuard(taskKeys){
   }
   return skip;
 }
+// ══════ #501 唯讀帳號同步總閘（2026-11-19）══════
+//  起因：唯讀帳號（role==='view'）的雲端寫入被 app.js __installReadonlyCloudGuard 換成 Promise.resolve()，
+//    推送端分不出「沒寫進去」→ 當成功、清掉 dirty／待同步，有些還把合併結果寫回本機 → 本機那筆之後被雲端舊值蓋掉。
+//  做法：每個會推雲端的入口最前面呼叫 _roSyncBlocked()。唯讀 ⇒ 顯示提示、回 true，呼叫端立刻 return：
+//    不推、不清任何 dirty／待同步、不回寫本機、不動 lastpushed。非唯讀 ⇒ 回 false，沒有任何副作用。
+//  判斷只用 App.isReadOnly()（app.js __isReadOnly；跟 __installReadonlyCloudGuard、_reportPushedClean 同一支），不另做開關。
+//  app.js 那道防護照舊留著當最後一道。新增推送入口時要記得接這支。
+// RO_SYNC_GATE_PURE_BEGIN（node 測試 scripts/ro-sync-gate.test.cjs 會擷取這一段，只能放純函式與常數）
+const RO_SYNC_MSG='這個帳號是唯讀，不能同步到雲端。你在這台電腦改的內容還留在本機，請找有權限的同事處理。';
+// app＝window.App。回 { blocked, msg }。isReadOnly 不存在或丟錯 ⇒ 不擋（跟改版前一樣照常同步，最後一道仍是 app.js 的防護）。
+function _roSyncDecide(app){
+  let ro=false;
+  try{ ro=!!(app && typeof app.isReadOnly==='function' && app.isReadOnly()); }catch(e){ ro=false; }
+  return ro ? { blocked:true, msg:RO_SYNC_MSG } : { blocked:false, msg:'' };
+}
+// RO_SYNC_GATE_PURE_END
+function _roSyncBlocked(where){
+  const d=_roSyncDecide(window.App);
+  if(!d.blocked) return false;
+  try{ console.warn('[唯讀] 已擋下同步（'+(where||'')+'）：不推、不清待同步、本機資料不動'); }catch(e){}
+  try{
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'唯讀帳號不能同步',message:d.msg,kind:'warn'});
+    else if(typeof showToast==='function') showToast(d.msg,'error',6000);
+  }catch(e){}
+  return true;
+}
+window.__roSyncDecide=_roSyncDecide;   // 純函式，Console／node 測試用
 async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中的 key（逐項勾選）；不傳=全推
+  // #501：唯讀帳號一律不同步（放在最前面：不碰按鈕、不 sweep、不讀雲端）。__lastSyncReport 照樣留一筆，呼叫端（MO+ 自動推）才不會讀到上一次的結果。
+  if(_roSyncBlocked('syncToCloud')){ window.__lastSyncReport={ts:Date.now(),mode:'aborted',reason:'唯讀帳號',readOnly:true,ok:[],failed:[],skippedProblem:[],skippedByDesign:[],skippedNotDirty:[],archivedDropped:[],archivedDeferred:[],archiveErrors:null}; return; }
   const btn=document.getElementById('global-sync-btn');
   // 斷掉上一次同步埋的「2 秒後還原徽章」重畫，免得它在這次的進度顯示中途引爆蓋掉進度
   clearTimeout(_syncBtnRepaintTimer);
@@ -18089,7 +18118,7 @@ window.__momoMergeShadow=function(shop){ return momoSyncProductsMerge(shop,{shad
 // 🔴 單賣場【真寫】enforce 入口（stage-1 逐賣場啟用用；不動全域閘門 __MOMO_MERGE_ENFORCE，其他人維持 shadow）。
 //   用法：先 await __momoMergeShadow('甲配') 看 __momoLastMergePlan 的保留/刪除數，確認後才 await __momoMergeEnforce('甲配')。
 //   內含 momoSyncProductsMerge 的「本機空+雲端有→中止」防呆；寫的是 merged（保留雲端獨有、只覆蓋 dirty）。
-window.__momoMergeEnforce=function(shop){ return momoSyncProductsMerge(shop); };
+window.__momoMergeEnforce=function(shop){ if(_roSyncBlocked('__momoMergeEnforce')) return Promise.resolve({ shadow:false, blocked:true, why:RO_SYNC_MSG }); return momoSyncProductsMerge(shop); };   // #501：Console 入口不經 syncToCloud，自己擋唯讀
 // ══════ origins（momo_moplus_origins）衝突防護（2026-08-14）：比照 products 的持久化 dirty + updatedAt base ══════
 //  根因：origins 原本只有 in-memory _pendingSyncKeys，重整就空 → 訂閱無版本比對、舊雲端灌回本機（Vanessa 同步後回退實例）。
 //  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
@@ -20219,6 +20248,7 @@ function momoMoPlusScanDirty(shop){
 // 清理（本機+雲端、只限本賣場、只刪 hasData=false 的安全筆）。idxList＝要刪的 product 陣列 index（由 scan 挑）。
 //  ⚠ 任一筆 hasData=true（掛 periods）→ 整批擋下、一筆都不刪（先處理資料合併）。回報步驟：本機 momoSaveProducts → 雲端 __cloudMomo.setShop 整包取代（不留殘留）。
 function momoMoPlusCleanDirty(shop, idxList){
+  if(_roSyncBlocked('momoMoPlusCleanDirty')) return { ok:false, removed:0, note:'唯讀帳號不能執行（本機與雲端都沒動）' };   // #501：這支會直接整包推雲端
   if(!momoIsMoPlus(shop)) return { ok:false, note:'此工具只限 MO+ 賣場' };
   const products=momoLoadProducts(shop);
   const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
@@ -21115,6 +21145,7 @@ function _momoCollectPending(shop){
   return items;
 }
 async function momoOpenSyncPreview(shop, opts){
+  if(_roSyncBlocked('momoOpenSyncPreview')) return;   // #501：唯讀帳號不開同步預覽（MOMO 鈕、酷澎鈕共用這支）
   if(!window.__cloudProfit){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理後再同步。',kind:'warn'});
     else if(typeof showToast==='function') showToast('雲端未連線','error');
@@ -21504,6 +21535,7 @@ function momoSyncUpdateCount(){
 }
 function momoCloseSyncPreview(){ const ov=document.getElementById('momo-sync-overlay'); if(ov) ov.remove(); }
 function momoConfirmSync(shop){
+  if(_roSyncBlocked('momoConfirmSync')) return;   // #501
   const checkedEls=[...document.querySelectorAll('.mm-sync-chk')].filter(c=>c.checked);
   // 【2】二次攔截：使用者手動勾回「雲端較新」的衝突項 → 明確再確認一次（避免手滑覆蓋同事更新）
   const conflictKeys=checkedEls.filter(c=>c.getAttribute('data-conflict')==='1').map(c=>c.getAttribute('data-key'));
@@ -25648,6 +25680,7 @@ function momoSaveMoPlusUnreg(shop,parsed){
 function momoMoPlusKpiOnlyToggle(shop,v){ _moPlusKpiOnly=!!v; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
 // 只推指定的 key（KPI 訂單數用；不檢查商品主檔 dirty——這條路本來就不碰商品主檔）
 async function momoMoPlusPushKeys(shop, keys){
+  if(_roSyncBlocked('momoMoPlusPushKeys')) return { ok:false, okN:0, failedN:0, err:RO_SYNC_MSG };   // #501：唯讀 ⇒ 沒推，不能回 ok
   let err=null; try{ await syncToCloud(shop, new Set(keys)); }catch(e){ err=e; }
   const rep=window.__lastSyncReport||{}; const failedN=(rep.failed&&rep.failed.length)||0;
   return { ok:!err&&failedN===0, okN:(rep.ok&&rep.ok.length)||0, failedN, err:err&&(err.message||String(err)) }; }
@@ -25882,7 +25915,8 @@ function momoMoPlusMasterApply(shop){
   // 即刻直推雲端（sanitize 後）——主檔就算 localStorage 失敗也能在雲端存活；成功/失敗都以真實結果回報。
   let cloudNote='';
   try{
-    if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function'){
+    if(_roSyncBlocked('MO+ 商品主檔直推')){ cloudNote='（唯讀帳號，沒有推雲端）'; }   // #501：唯讀 ⇒ 不直推（主檔的待同步標記照舊留著）
+    else if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function'){
       cloudNote='（同時直推雲端保存中…）';
       const _pushedMaster=momoSanitizeMoPlusDoc(check);   // 實際送出的內容（讀回比對用）
       Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',_pushedMaster))
@@ -26001,6 +26035,10 @@ function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
 //     上傳流程不自動推、又沒警示。回傳 { ok, okN, failedN, prodDirty, preserved, err }：
 //     ok = 真的都上雲了（無 failed、products SKU 級已無 diff、無例外）。prodDirty 以【SKU 級 count】為準（非整份殘留標記）。
 async function momoMoPlusAutoPushUploaded(shop, keys){
+  if(_roSyncBlocked('momoMoPlusAutoPushUploaded')){   // #501：唯讀 ⇒ 沒推，不能回 ok（prodDirty 照原本的算法）
+    let pd=true; try{ pd=(momoProductsDirtySkus(shop).count||0)>0; }catch{}
+    return { ok:false, okN:0, failedN:0, prodDirty:pd, preserved:0, err:RO_SYNC_MSG };
+  }
   const allow=new Set(keys);
   let err=null, report=null;
   try{ await syncToCloud(shop, allow); }catch(e){ err=e; }
@@ -27398,6 +27436,7 @@ function momoPersistStockByOrigin(stockByOrigin){   // 覆蓋為最新快照（�
 //     撞 app/profit 的 40,000 索引項上限（S1103 前車之鑑）。cost 這批不碰（要不要推 cost 另評估索引影響）。
 //   best-effort：失敗不擋、資料留本機、可重新上傳再試。
 async function momoAutoPushStock(){
+  if(_roSyncBlocked('momoAutoPushStock')) return;   // #501：唯讀 ⇒ 不推，也不會跳「已自動同步庫存到雲端」
   if(!window.__cloudStock || typeof window.__cloudStock.setSnapshot!=='function') return;
   let v=null; try{ v=(Store._mem&&Store._mem[_MOMO_STOCK_LS]!==undefined)?Store._mem[_MOMO_STOCK_LS]:(Store._profitMem&&Store._profitMem[_MOMO_STOCK_LS]); }catch{}
   if(v==null) return;
@@ -30723,7 +30762,7 @@ async function cupSyncProductsMerge(shop, opts){
 }
 // Console：單通路試跑／真寫（不看閘門）。真寫只在要驗收時用；本機防護碼下會被攔、回「寫入未確認」。
 window.__cupProductsMergeShadow=function(shop){ return cupSyncProductsMerge(shop,{shadow:true}); };
-window.__cupProductsMergeEnforce=function(shop){ return cupSyncProductsMerge(shop); };
+window.__cupProductsMergeEnforce=function(shop){ if(_roSyncBlocked('__cupProductsMergeEnforce')) return Promise.resolve({ ok:false, shadow:false, shop, why:RO_SYNC_MSG }); return cupSyncProductsMerge(shop); };   // #501：Console 入口不經 syncToCloud，自己擋唯讀
 // ══ PR-C2 第 4 塊：雲端主檔緩存（只給預覽比對／上傳比雲端／Console 用；不碰 _cupProdMem、localStorage、動銷率卡）══
 //   window.__cupProductsCloudLatest 由 firebase.js 訂閱樣板寫入；這裡的套用只把它整理進 _cupProdCloud，再發 coupangProductsCloudReady。
 //   complete（到齊）＝伺服器快照（fromCache:false）而且 4 片都到、或確定 0 片（雲端沒有）。1～3 片＝沒到齊。
@@ -31830,6 +31869,7 @@ function clearAffRpt(shop){
   showToast('已清除，可以重新上傳','success');
 }
 function syncAffRptToCloud(shop){
+  if(_roSyncBlocked('syncAffRptToCloud')) return;   // #501：唯讀 ⇒ 不推，按鈕不動（不會變成「✓ 已同步」）
   const btn=document.getElementById('aff-sync-'+shop);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
   // 守衛要檢查 __cloudAff（我們真正要用的那顆），不是 __cloudProfit：
@@ -35696,6 +35736,7 @@ function pchomeReconConflict(local, cloud){ local=local||{}; cloud=cloud||{}; va
 }
 // 同步預覽（完全照 momo momoRenderSyncPreviewModal：class/內聯樣式/用字/警示 box/全選計數/confirm() 二次攔截；確認鈕綠 #10b981；差異走 .mm-sync-diff）
 async function pchomeOpenSyncPreview(shop){
+  if(_roSyncBlocked('pchomeOpenSyncPreview')) return;   // #501：唯讀帳號不開同步預覽
   if(!window.__cloudProfit){ if(typeof showToast==='function') showToast('雲端未連線','error'); return; }
   // #491：確認同步時 syncToCloud 會跑 sweep（含訂單一次性遷移）。先在這裡判一次，真的有本機獨有的訂單時預覽就會列出來，
   //   不會發生「預覽沒列、確認後才標 dirty、這次又不推」的殘留標記。
@@ -35813,6 +35854,7 @@ function pchomeSyncUpdateCount(){
   var all=document.getElementById('pchome-sync-all'); if(all){ all.checked=(main.length>0&&mn===main.length); all.indeterminate=(mn>0&&mn<main.length); }
 }
 function pchomeConfirmSync(shop){
+  if(_roSyncBlocked('pchomeConfirmSync')) return;   // #501
   var checkedEls=[].slice.call(document.querySelectorAll('.pchome-sync-chk')).filter(function(c){return c.checked;});
   // 二次攔截：勾了「雲端較新／拿不準」的衝突項 → 原生 confirm 再確認一次（照 momoConfirmSync）
   var conflictKeys=checkedEls.filter(function(c){return c.getAttribute('data-conflict')==='1';}).map(function(c){return c.getAttribute('data-key');});
