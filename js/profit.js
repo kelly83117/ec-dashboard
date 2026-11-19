@@ -28261,6 +28261,7 @@ function setCoupangShop(shop,btn){
   try{ momoCostEnsureCloud().then(ok=>{ if(ok) _cupRedrawIfVisible(); else console.warn('[酷澎] 成本表 20 秒內沒有接上雲端，暫用本機成本表'); cupOvCostSettled(ok); }); }catch(e){}
   // 換通路先清已選未處理的檔案（_cupFiles 是兩家共用的全域）：杜絕「好麻吉選的檔切到露營館直接產表」。同一家重畫不清（上傳分頁靠 _cupFiles 顯示已選檔名）。
   if(_cupFilesShop && _cupFilesShop!==shop) cupClearStagedFiles();
+  cupPageResetOpen();   // 切通路：合併商品頁的展開狀態重設（全部收合）
   //   另一家的畫面也清掉：兩家的上傳分頁用同一組 id（cup-order-status／cup-gen-btn…），舊的留在 DOM 裡，getElementById 會抓到隱藏那家的，
   //   這家選了檔案狀態不更新、產生鈕也不會亮。切回來時 cupRenderShop 會整個重畫，清掉不會少東西。
   CUP_OVERLAP_SHOPS.forEach(s=>{ if(s!==shop){ const o=document.getElementById('coupang-content-'+s); if(o) o.innerHTML=''; } });
@@ -31563,10 +31564,11 @@ function cupProfitTabHTML(shop){
     <div id="cup-returns-${shop}"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       ${momoSearchBox(shop,'cup-search-'+shop,_cupSearch[shop]||'','搜尋商品名／原廠編號／酷澎編號','cupOnSearch','width:260px;max-width:48vw')}
+      ${cupPageModeHtml(shop)}
       <span style="display:flex;gap:8px;align-items:center"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">階層分布</button></span></div>
     <div id="cup-tbl-${shop}"><div class="empty"><div class="empty-hint">到「訂單明細」上傳我的訂單（＋選填 MSF）後產表</div></div></div>`;
 }
-function cupSelectMonth(shop, month){ _cupSelMonth[shop]=month; cupRenderSub(shop); }
+function cupSelectMonth(shop, month){ _cupSelMonth[shop]=month; cupPageResetOpen(shop); cupRenderSub(shop); }   // 切月份：合併商品頁的展開狀態重設
 // 總表本體：載入選定月份的報表 → live 補成本 → KPI(較上期) → 費率規則 → 缺成本 chip → 退貨橫幅 → 表格
 function cupRenderProfitBody(shop){
   const month=_cupSelMonth[shop];
@@ -32286,10 +32288,128 @@ function cupSortRows(shop,rows){
     return s.dir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
   });
 }
+/* ═══ CUP-PG-PURE-BEGIN：酷澎淨利表「合併商品頁」（2026-11-19，Inna）純函式；node 測試用標記抽取，不碰 DOM／Store／localStorage ═══
+   只管表格怎麼排：同一個酷澎商品頁（dispId）底下的規格（原廠編號）收成一列合計，點開看各規格。
+   上方五張卡、動銷率、階層分布、缺成本橫幅、匯出、酷澎｜總表、商品彈窗都不經過這裡（仍以原廠編號為單位，讀 _cupMergedRows）。 */
+function cupPageIdsOf(r){ return String((r&&r.dispId)||'').split('/').map(x=>x.trim()).filter(Boolean); }
+// 一個商品頁的合計（形狀跟一列一樣，表格同一套欄位直接畫）。
+//   數量、定價、賣家券、營收、平台費用、庫存＝全部成員相加；成本、毛利、營業稅、淨利只加有成本的成員（同 cupKpi），
+//   毛利率／淨利率＝加總後 ÷ 有成本成員的營收（同 cupKpi 的 cRev）。全部成員都沒有成本 ⇒ 成本／毛利／淨利是 null（畫面顯示缺成本）。
+function cupPageAgg(pageId, members){
+  const M=members||[], sum=(arr,k)=>arr.reduce((s,r)=>s+(Number(r[k])||0),0);
+  const cov=M.filter(r=>r.costStatus==='ok'), has=cov.length>0;
+  const cRev=sum(cov,'rev'), gross=has?sum(cov,'gross'):null, net=has?sum(cov,'net'):null;
+  const st=M.filter(r=>r.stock!=null);
+  let top=M[0]; M.forEach(r=>{ if((Number(r.rev)||0)>(Number(top.rev)||0)) top=r; });   // 名稱＝營收最高的成員（同額取前面那個）
+  return { isGroup:true, pageId, n:M.length, code:String((M[0]&&M[0].code)||''), name:(top&&top.name)||'', dispId:pageId,
+    qty:sum(M,'qty'), grossRev:M.reduce((s,r)=>s+(Number(r.grossRev!=null?r.grossRev:r.rev)||0),0), sellerCoupon:sum(M,'sellerCoupon'), rev:sum(M,'rev'), fee:sum(M,'fee'),
+    cost:has?sum(cov,'cost'):null, costStatus:has?'ok':(M.length&&M.every(r=>r.costStatus==='barcode')?'barcode':'missing'),
+    gross, grossRate:(has&&cRev>0)?gross/cRev:null, tax:sum(cov,'tax'), net, netRate:(has&&cRev>0)?net/cRev:null,
+    stock:st.length?sum(st,'stock'):null, missN:M.length-cov.length, cRev, cFee:sum(cov,'fee') };
+}
+// 成員的調整內容是不是全部一樣（含全部空白）。filled＝有填內容的成員數（「各規格不同（N 筆）」的 N）。
+function cupPageNoteState(members){
+  const v=(members||[]).map(r=>String(r.note==null?'':r.note));
+  const same=v.every(x=>x===v[0]);
+  return { same, value:same?(v[0]||''):'', filled:v.filter(x=>x!=='').length, n:v.length };
+}
+// rows＝cupEnrichRows 過的列。回 { items, multi, stats }：
+//   items＝[{type:'single',row} | {type:'group',pageId,members:[列…],agg}]，順序＝各自第一個成員在 rows 裡的位置。
+//   歸屬：dispId 只有一個 ⇒ 那一頁；有多個（"A/B"，報表分不出各頁各賣多少）⇒ 整筆歸到其中「本月掛在它底下的列最多」的那一頁、同數取寫在前面的；
+//         沒有 dispId ⇒ 自成一列。只有一個成員 ⇒ 不成組（type:'single'）。
+//   multi＝{ 原廠編號: 另外還掛幾頁 }（只列 dispId 有多個的）。同一份報表一個原廠編號只有一列（cupBuildRows 已彙總）。
+function cupGroupByPage(rows){
+  const R=(rows||[]).filter(Boolean), cnt={}, multi={};
+  R.forEach(r=>{ cupPageIdsOf(r).forEach(id=>{ cnt[id]=(cnt[id]||0)+1; }); });
+  const order=[], byPage=new Map();
+  R.forEach(r=>{
+    const ids=cupPageIdsOf(r);
+    if(!ids.length){ order.push({type:'single',row:r}); return; }
+    let pick=ids[0]; ids.forEach(id=>{ if(cnt[id]>cnt[pick]) pick=id; });
+    if(ids.length>1) multi[String(r.code)]=ids.length-1;
+    let g=byPage.get(pick); if(!g){ g={type:'group',pageId:pick,members:[]}; byPage.set(pick,g); order.push(g); }
+    g.members.push(r);
+  });
+  const items=order.map(it=>{
+    if(it.type!=='group') return it;
+    if(it.members.length<2) return {type:'single',row:it.members[0]};
+    return {type:'group',pageId:it.pageId,members:it.members,agg:cupPageAgg(it.pageId,it.members)};
+  });
+  const gs=items.filter(it=>it.type==='group');
+  return { items, multi, stats:{ rows:R.length, groups:gs.length, grouped:gs.reduce((s,g)=>s+g.members.length,0), singles:items.length-gs.length,
+    maxMembers:gs.reduce((m,g)=>Math.max(m,g.members.length),0), multiRows:Object.keys(multi).length } };
+}
+// 排序：外層用合計值比、組內成員用同一欄比。比法跟 cupSortRows 一樣（數字欄 null 當 0；文字欄 localeCompare）。sort＝{col,dir}|null（null＝原順序）。
+function cupGroupSort(items, sort, isNum){
+  if(!sort) return items;
+  const c=sort.col, asc=sort.dir==='asc';
+  const cmp=(a,b)=>{ if(isNum){ const va=Number(a[c])||0, vb=Number(b[c])||0; return asc?va-vb:vb-va; }
+    const va=String(a[c]||''), vb=String(b[c]||''); return asc?va.localeCompare(vb):vb.localeCompare(va); };
+  const key=it=>it.type==='group'?it.agg:it.row;
+  return items.map(it=>it.type==='group'?Object.assign({},it,{members:[...it.members].sort(cmp)}):it).sort((x,y)=>cmp(key(x),key(y)));
+}
+// 搜尋：比對商品名／原廠編號／酷澎編號（同 _cupSearchFilter）。任一成員符合 ⇒ 留下該組、只列符合的成員（shown）、自動展開（forceOpen）；
+//   外層合計仍是整個商品頁（不隨搜尋變）。q 空白 ⇒ 原樣。
+function cupGroupFilter(items, q){
+  q=String(q||'').trim().toLowerCase(); if(!q) return items;
+  const hit=r=>String(r.name||'').toLowerCase().includes(q)||String(r.code||'').toLowerCase().includes(q)||String(r.dispId||'').toLowerCase().includes(q);
+  const out=[];
+  items.forEach(it=>{
+    if(it.type!=='group'){ if(hit(it.row)) out.push(it); return; }
+    const shown=it.members.filter(hit); if(shown.length) out.push(Object.assign({},it,{shown,forceOpen:true}));
+  });
+  return out;
+}
+/* ═══ CUP-PG-PURE-END ═══ */
+// 檢視模式（合併商品頁｜全部規格）：純本機的畫面偏好，兩館共用一份，照欄位顯示偏好（ec_hcols_coupang）的存法直接寫 localStorage。
+//   🔴 不經 Store、不進待同步；key 不是 ec|／ec_coupang／ec_momo_ 開頭，同步的 sweep 掃不到。
+const _CUP_PAGEMODE_LS='ec_pagemode_coupang';
+function cupPageMode(){ try{ return localStorage.getItem(_CUP_PAGEMODE_LS)==='all'?'all':'merge'; }catch{ return 'merge'; } }
+function cupSetPageMode(shop,mode){
+  try{ localStorage.setItem(_CUP_PAGEMODE_LS, mode==='all'?'all':'merge'); }catch{}
+  document.querySelectorAll('#cup-pm-seg-'+shop+' .cup-pm-btn').forEach(b=>b.classList.toggle('on', b.getAttribute('data-mode')===cupPageMode()));
+  renderCoupangTableBody(shop);
+}
+function cupPageModeHtml(shop){
+  const m=cupPageMode(), b=(k,t)=>`<button type="button" class="cup-pm-btn${m===k?' on':''}" data-mode="${k}" onclick="cupSetPageMode('${shop}','${k}')">${t}</button>`;
+  return `<span class="cup-pm-seg" id="cup-pm-seg-${shop}" title="合併商品頁：同一個酷澎商品頁的規格收成一列合計，點開看各規格。全部規格：一個原廠編號一列。">${b('merge','合併商品頁')}${b('all','全部規格')}</span>`;
+}
+// 展開狀態只放記憶體：切月份、切通路就清掉（全部收合）。_cupPageGroups＝目前畫面上各商品頁的成員（原廠編號），外層列的調整欄用。
+const _cupPageOpen={}, _cupPageGroups={};
+function cupPageResetOpen(shop){ if(shop) delete _cupPageOpen[shop]; else Object.keys(_cupPageOpen).forEach(k=>delete _cupPageOpen[k]); }
+function cupTogglePage(shop,pageId,openOnly){
+  const s=_cupPageOpen[shop]||(_cupPageOpen[shop]=new Set());
+  if(s.has(pageId)){ if(openOnly) return; s.delete(pageId); } else s.add(pageId);
+  renderCoupangTableBody(shop);
+}
+function _cupPageMembers(shop,pageId){
+  const codes=(_cupPageGroups[shop]||{})[pageId]||[], rows=_cupMergedRows[shop]||[];
+  return codes.map(c=>rows.find(r=>r.code===c)).filter(Boolean);
+}
+function _cupPageDomId(shop,pageId){ return 'cup-pg-note-'+shop+'-'+String(pageId).replace(/[^A-Za-z0-9]/g,'_'); }
+// 外層列調整欄的內容（td 裡面）：成員內容全部一樣 ⇒ 輸入框；不一樣 ⇒「各規格不同（N 筆）」，點了展開。
+function cupPageNoteCellHtml(shop,pageId,members){
+  const ns=cupPageNoteState(members), esc=_momoEsc(ns.value), pid=_momoEsc(String(pageId));
+  if(ns.same) return `<input type="text" class="cup-pg-note-inp" value="${esc}" placeholder="輸入調整…" title="存到這個商品頁的 ${ns.n} 個規格" oninput="onCupPageNoteChange('${shop}','${pid}',this.value)" onclick="event.stopPropagation()">`;
+  return `<span class="cup-pg-note-mixed" title="各規格的調整內容不一樣，點開逐一修改" onclick="event.stopPropagation();cupTogglePage('${shop}','${pid}',true)">各規格不同（${ns.filled} 筆）</span>`;
+}
+// 成員的調整欄改了之後，只重畫外層列那一格（不整表重畫，輸入框才不會掉焦點）。
+function cupPageNoteSync(shop,pageId){
+  const td=document.getElementById(_cupPageDomId(shop,pageId)); if(!td) return;
+  td.innerHTML=cupPageNoteCellHtml(shop,pageId,_cupPageMembers(shop,pageId));
+}
+// 外層列的調整欄：對每個成員各存一筆同樣的內容。🔴 一律呼叫單筆的 onCupNoteChange（同一套 dirty、合併、同步），這裡不另寫寫入路徑。
+function onCupPageNoteChange(shop,pageId,value){
+  const mem=_cupPageMembers(shop,pageId);
+  mem.forEach(r=>{ onCupNoteChange(shop, r.code, value); });
+  const v=String(value==null?'':value);
+  document.querySelectorAll('#cup-tbl-'+shop+' input[data-cup-pg="'+String(pageId).replace(/"/g,'')+'"]').forEach(inp=>{ inp.value=v; });   // 已展開的成員列跟著更新
+}
 // 表格本體：跟蝦皮好麻吉共用同一套 table/th/td 全站樣式（width:100%、統一內距），
 // 欄位可拖曳排序，順序另外存一份（欄位集合跟好麻吉不同）。
 function renderCoupangTableBody(shop){
-  const rows=cupSortRows(shop,_cupSearchFilter(shop,_cupMergedRows[shop]||[]));
+  const _mode=cupPageMode();
+  const rows=_mode==='merge'?[]:cupSortRows(shop,_cupSearchFilter(shop,_cupMergedRows[shop]||[]));
   const tbl=document.getElementById('cup-tbl-'+shop);
   if(!tbl)return;
   const fmtFns={
@@ -32313,9 +32433,29 @@ function renderCoupangTableBody(shop){
     const infoHtml=c.info?`<span class="mm-th-q"><span class="mm-info" title="${_momoEsc(c.info)}" onclick="event.stopPropagation()">?</span></span>`:`<span class="mm-th-q"></span>`;
     return `<th class="mm-th${isLeft?' tl':''}" style="${stk(c.k,true)}cursor:pointer;text-align:${isLeft?'left':'right'}" ${dragAttrs(c.k)} onclick="cupSetSort('${shop}','${c.k}')"><span class="mm-th-wrap"><span class="mm-th-name">${c.label}</span>${infoHtml}<span class="mm-th-arrow">${sortIcon(c.k)}</span></span><span class="mm-col-grip" onmousedown="cupColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
   }).join('');
-  const tbody=rows.map(r=>{
-    const tds=cols.map(c=>{
+  // tdsOf(r)＝一列的儲存格（「全部規格」與合併模式裡不成組的列都走這條，字串跟改版前一樣）。
+  //   kind==='group'：r＝cupPageAgg 的合計、g＝該組；kind==='member'：r＝組內成員。只有原廠編號／名稱／調整／淨利提示不一樣，其餘欄位共用下面同一套。
+  const tdsOf=(r,kind,g)=>cols.map(c=>{
       const v=r[c.k];
+      if(kind==='group'){
+        if(c.k==='code') return `<td class="tl cup-pg-stk-code"><span class="cup-pg-arrow">${g.open?'▾':'▸'}</span>${g.members.length} 個規格</td>`;
+        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), did=_momoEsc(String(g.pageId));
+          const flag=r.missN>0?`<div class="cup-pg-flag" title="淨利、淨利率只算有成本的規格（同上方大數字卡）">含 ${r.missN} 個缺成本</div>`:'';
+          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div><div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>${flag}</td>`; }
+        if(c.k==='note') return `<td class="tl" id="${_cupPageDomId(shop,g.pageId)}" onclick="event.stopPropagation()">${cupPageNoteCellHtml(shop,g.pageId,g.members)}</td>`;
+        if(c.fmt==='netCell' && r.costStatus==='ok' && v!=null){
+          const nTip=`商品頁合計（${g.members.length} 個規格${r.missN>0?'，其中 '+r.missN+' 個缺成本不計':''}）：淨利 ${momoMoney(v)} ＝ 營收 ${momoMoney(r.cRev||0)} − 營業稅 ${momoMoney(r.tax||0)}（營收×5/105）− 成本 ${momoMoney(r.cost||0)} − 平台費用 ${momoMoney(r.cFee||0)}`;
+          return `<td title="${_momoEsc(nTip)}">${momoMoney(v)}</td>`; }
+      }
+      if(kind==='member'){
+        if(c.k==='code') return `<td class="tl cup-pg-stk-code cup-pg-mem-code">${_momoEsc(String(v==null?'':v))}</td>`;
+        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), did=_momoEsc(String(r.dispId||'')), ex=g.multi[String(r.code)];
+          const sub=did?`<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>`:'';
+          const tag=ex?`<div class="cup-pg-tag" title="這個原廠編號同時掛在 ${ex+1} 個商品頁，報表分不出各頁各賣多少，整筆算在這一頁">另掛 ${ex} 頁</div>`:'';
+          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${sub}${tag}</td>`; }
+        if(c.k==='note'){ const esc=_momoEsc(String(v||'')), pid=_momoEsc(String(g.pageId));
+          return `<td class="tl" onclick="event.stopPropagation()"><input type="text" class="cup-pg-note-inp" data-cup-pg="${pid}" value="${esc}" placeholder="輸入調整…" oninput="onCupNoteChange('${shop}','${r.code}',this.value);cupPageNoteSync('${shop}','${pid}')" onclick="event.stopPropagation()"></td>`; }
+      }
       if(c.k==='note'){
         const esc=String(v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         return`<td class="tl" onclick="event.stopPropagation()"><input type="text" value="${esc}" placeholder="輸入調整…" oninput="onCupNoteChange('${shop}','${r.code}',this.value)" onclick="event.stopPropagation()" style="width:120px;border:1px solid #e5e7eb;border-radius:5px;padding:2px 6px;font-size:12px;outline:none;background:#fff"></td>`;
@@ -32353,8 +32493,24 @@ function renderCoupangTableBody(shop){
       const extra=(c.k==='netRate'||c.k==='grossRate')&&v!=null?`font-weight:700;color:${(v*100)>=25?'#10b981':((v*100)<0?'#dc2626':'#374151')};`:'';
       return`<td class="${cls}" style="${stk(c.k,false)}${extra}">${disp}</td>`;
     }).join('');
-    return`<tr onclick="cupOpenAnalysis('${shop}','${r.code}')" style="cursor:pointer">${tds}</tr>`;
-  }).join('');
+  const rowTr=r=>`<tr onclick="cupOpenAnalysis('${shop}','${r.code}')" style="cursor:pointer">${tdsOf(r)}</tr>`;
+  let tbody;
+  if(_mode!=='merge'){ tbody=rows.map(rowTr).join(''); }
+  else{
+    // 合併商品頁：先分組（全部列）→ 排序（外層用合計）→ 搜尋（任一成員符合就留、只列符合的成員並展開）
+    const G=cupGroupByPage(_cupMergedRows[shop]||[]);
+    const reg=_cupPageGroups[shop]={}; G.items.forEach(it=>{ if(it.type==='group') reg[it.pageId]=it.members.map(r=>r.code); });
+    const colDef=curSort?CUP_TABLE_COLS.find(c=>c.k===curSort.col):null;
+    const items=cupGroupFilter(cupGroupSort(G.items, curSort||null, !!(colDef&&colDef.fmt)), _cupSearch[shop]);
+    const openSet=_cupPageOpen[shop]||new Set();
+    tbody=items.map(it=>{
+      if(it.type!=='group') return rowTr(it.row);
+      const open=!!it.forceOpen||openSet.has(it.pageId), g={pageId:it.pageId, members:it.members, multi:G.multi, open};
+      const pid=_momoEsc(String(it.pageId));
+      const head=`<tr class="cup-pg-row${open?' open':''}" onclick="cupTogglePage('${shop}','${pid}')">${tdsOf(it.agg,'group',g)}</tr>`;
+      return head+(open?(it.shown||it.members).map(r=>`<tr class="cup-pg-mem" onclick="cupOpenAnalysis('${shop}','${r.code}')">${tdsOf(r,'member',g)}</tr>`).join(''):'');
+    }).join('');
+  }
   // 照抄 MO+：mm-ptbl + table-layout:fixed + colgroup（欄寬權威）；寬度走 cupColW（使用者拖過的存 sessionStorage、否則用預設 c.w）；min-width=各欄寬總和 → 不壓縮、超出橫向捲動
   const colgroup=`<colgroup>${cols.map(c=>`<col style="width:${cupColW(shop,c.k,c.w||90)}px">`).join('')}</colgroup>`;
   const totalW=cols.reduce((s,c)=>s+cupColW(shop,c.k,c.w||90),0);
@@ -34520,7 +34676,7 @@ Object.assign(window, {
   renderCoupangTableBody,cupSetSub,cupSelectMonth,cupOpenMissingCostPanel,cupMissCostSave,cupExportExcel,cupRenderShop,
   toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
-  cupSetSort,cupOnSearch,cupOpenAnalysis,cupCloseAnalysis,cupAnaTab,cupAnaCostSave,cupPCInput,cupPCReset,cupPCToOptlog,
+  cupSetSort,cupOnSearch,cupSetPageMode,cupTogglePage,cupPageNoteSync,onCupPageNoteChange,cupOpenAnalysis,cupCloseAnalysis,cupAnaTab,cupAnaCostSave,cupPCInput,cupPCReset,cupPCToOptlog,
   setShopViewMode,
   momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoOpenColPicker,momoColToggle,momoColDragStart,momoColDragOver,momoColDragEnter,momoColDragLeave,momoColDrop,momoColDragEnd,momoColResetOrder,momoColShowAll,
