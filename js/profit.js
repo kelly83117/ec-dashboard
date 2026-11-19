@@ -35513,24 +35513,99 @@ function pchomeAddOptlog(shop, sku, entry){ if(!shop||!sku) return;
   pchomeSaveOptlog(shop, map);
   try{ pchomeUpdateDailyProgress({silent:true}); }catch(e){}   // optlog 新增 → 工作日誌 pchome-summary 即時更新（照 momoAddOptlog 16639；編輯/新增/手動優化都經此 pchomeAddOptlog）
 }
-async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_optlog 的 shop 欄 → 合併 → 寫回；本機鏡像成合併結果（不重 _markPending）
+// ══════ PChome 優化紀錄刪除墓碑（2026-11-19）══════
+//   為什麼：同步是「雲端 ∪ 本機」依 id 聯集，沒有墓碑的話，已經上過雲的紀錄在本機刪掉後，下次同步會被雲端併回來。
+//   存哪裡：雲端＝app/pchome_optlog 同一份文件的欄位 `_tomb_{通路}`＝{ 紀錄 id: { at:刪除時間(ms), by:帳號 } }（走既有的 __cloudPchomeOptlog.setField，沒有新增雲端物件或寫入方法）；
+//           本機＝localStorage `pchome_optlog_tomb|{通路}`（不是 ec_ 開頭：不進任何同步掃描；跟著 ec_pchome_optlog|{通路} 的待同步一起推）。
+//   🔴 只有使用者親手按刪除的那幾個 id 會進墓碑（pchomeDeleteOptlog）；沒有 id 的紀錄不記墓碑（不用內容比對去刪）。
+//   🔴 等價性：本機、雲端墓碑都空的時候，合併結果、寫雲端的內容、寫回本機的內容跟沒有墓碑功能時完全一樣（scripts/pchome-optlog-tomb.test.cjs）。
+//   舊分頁（沒重新整理）：只讀寫 cd[通路] 那一欄，不會動到 `_tomb_*`；它的訂閱會多放一把沒有人讀的記憶體 key，不影響畫面。
+//   但舊分頁的本機若還留著被刪的那筆、又剛好同步，會把它寫回雲端；新版程式套用雲端資料與下一次同步時都會再濾掉。
+// PCH-OLTOMB-PURE-BEGIN（純函式：不碰 DOM、Store、localStorage、雲端）
+var PCHOME_OL_TOMB_PREFIX='_tomb_';
+var PCHOME_OL_TOMB_KEEP_MS=180*24*60*60*1000;   // 墓碑保留 180 天（依刪除時間），過期只清墓碑本身、不動任何紀錄
+function pchomeOptlogTombField(shop){ return PCHOME_OL_TOMB_PREFIX+shop; }
+function pchomeOptlogIsTombField(k){ return String(k).indexOf(PCHOME_OL_TOMB_PREFIX)===0; }
+// 只留合法的墓碑（值是物件）；不是物件的整份當空的。回新物件。
+function pchomeOptlogTombClean(v){ var out={}; if(v&&typeof v==='object'&&!Array.isArray(v)) Object.keys(v).forEach(function(id){ var t=v[id]; if(t&&typeof t==='object'&&!Array.isArray(t)) out[id]=t; }); return out; }
+// 雲端墓碑 ∪ 本機墓碑（同 id 留雲端那筆），再拿掉超過 180 天的（at 不是數字的不會過期）。
+function pchomeOptlogTombUnion(cloudTomb, localTomb, now){
+  var c=pchomeOptlogTombClean(cloudTomb), l=pchomeOptlogTombClean(localTomb), out={};
+  Object.keys(c).forEach(function(id){ out[id]=c[id]; }); Object.keys(l).forEach(function(id){ if(!out[id]) out[id]=l[id]; });
+  Object.keys(out).forEach(function(id){ var at=out[id].at; if(typeof at==='number'&&isFinite(at)&&(now-at)>PCHOME_OL_TOMB_KEEP_MS) delete out[id]; });
+  return out;
+}
+function pchomeOptlogTombCanon(t){ var o={}; Object.keys(t||{}).sort().forEach(function(id){ var x=t[id]||{}, y={}; Object.keys(x).sort().forEach(function(k){ y[k]=x[k]; }); o[id]=y; }); return JSON.stringify(o); }
+// 把墓碑裡的 id 從 {料號:[紀錄]} 濾掉（只比 id；沒有 id 的紀錄永遠不會被濾）。
+//   🔴 墓碑是空的、或沒有任何一筆被濾掉 ⇒ 回傳【原本那個物件】（同一個參照），不重建。
+function pchomeOptlogTombApply(map, tomb){
+  var ids=tomb?Object.keys(tomb):[]; if(!ids.length||!map||typeof map!=='object'||Array.isArray(map)) return { map:map, removed:[] };
+  var removed=[], out={};
+  Object.keys(map).forEach(function(sku){ var arr=map[sku]; if(!Array.isArray(arr)){ out[sku]=arr; return; }
+    var keep=arr.filter(function(e){ var hit=!!(e&&e.id!=null&&Object.prototype.hasOwnProperty.call(tomb,String(e.id))); if(hit) removed.push(String(e.id)); return !hit; });
+    if(keep.length===arr.length) out[sku]=arr; else if(keep.length) out[sku]=keep; });   // 刪到 0 筆的料號整個拿掉（同 pchomeMergeByIdMap：空陣列不留）
+  return removed.length?{ map:out, removed:removed }:{ map:map, removed:[] };
+}
+// 一次同步要做什麼。cloudDoc＝app/pchome_optlog 整份文件的資料；local＝本機 {料號:[紀錄]}；localTomb＝本機墓碑。
+//   回 { merged（要寫進雲端通路欄、也寫回本機的）, added, tomb（合併後的墓碑）, hasTomb, writeTomb（墓碑欄要不要寫）, removed }。
+function pchomeOptlogSyncPlan(cloudDoc, shop, local, localTomb, now){
+  var cd=(cloudDoc&&typeof cloudDoc==='object')?cloudDoc:{};
+  var cloudOpt=(cd[shop]&&typeof cd[shop]==='object')?cd[shop]:{};
+  var res=pchomeMergeByIdMap(cloudOpt, local||{});
+  var tf=pchomeOptlogTombField(shop), cloudTombRaw=cd[tf], cloudTomb=pchomeOptlogTombClean(cloudTombRaw);
+  var tomb=pchomeOptlogTombUnion(cloudTomb, localTomb, now), hasTomb=Object.keys(tomb).length>0;
+  var ap=hasTomb?pchomeOptlogTombApply(res.merged, tomb):{ map:res.merged, removed:[] };
+  // 墓碑欄：內容跟雲端現值不同才寫（新增了墓碑，或有過期的被清掉）。雲端沒有這一欄、合併後也是空的 ⇒ 不寫。
+  var writeTomb=(cloudTombRaw===undefined)?hasTomb:(pchomeOptlogTombCanon(tomb)!==pchomeOptlogTombCanon(cloudTomb));
+  return { merged:ap.map, added:res.added, tomb:tomb, hasTomb:hasTomb, writeTomb:writeTomb, removed:ap.removed };
+}
+// 寫完讀回確認（A-347）：墓碑裡的 id 都不在雲端通路欄、而且都在雲端墓碑欄。回 ''＝確認；其他＝原因。
+function pchomeOptlogWriteConfirmed(plan, shop, vd){
+  if(!vd||typeof vd!=='object') return '讀不回雲端現值';
+  var ids=Object.keys(plan.tomb||{}), opt=(vd[shop]&&typeof vd[shop]==='object')?vd[shop]:{}, ct=pchomeOptlogTombClean(vd[pchomeOptlogTombField(shop)]);
+  var still={}; Object.keys(opt).forEach(function(sku){ (Array.isArray(opt[sku])?opt[sku]:[]).forEach(function(e){ if(e&&e.id!=null) still[String(e.id)]=1; }); });
+  var back=ids.filter(function(id){ return still[id]; }); if(back.length) return '刪除的 '+back.length+' 筆還在雲端';
+  var miss=ids.filter(function(id){ return !ct[id]; }); if(miss.length) return '刪除標記有 '+miss.length+' 筆沒寫進雲端';
+  return '';
+}
+// PCH-OLTOMB-PURE-END
+function pchomeOptlogTombKey(shop){ return 'pchome_optlog_tomb|'+shop; }
+function pchomeOptlogTombLoad(shop){ try{ var l=localStorage.getItem(pchomeOptlogTombKey(shop)); return l?pchomeOptlogTombClean(JSON.parse(l)):{}; }catch(e){ return {}; } }
+function pchomeOptlogTombSave(shop, tomb){ var k=pchomeOptlogTombKey(shop);
+  try{ if(Object.keys(tomb||{}).length) localStorage.setItem(k, JSON.stringify(tomb)); else localStorage.removeItem(k); return true; }catch(e){ console.error('[pchome optlog] 刪除標記存不進本機：',e); return false; } }
+// 還沒推上雲的刪除筆數（本機墓碑裡、雲端墓碑沒有的）。雲端現值看訂閱緩存，不另外讀。
+function pchomeOptlogPendingDeletes(shop){ try{ var l=pchomeOptlogTombLoad(shop), c=pchomeOptlogTombClean((window.__pchomeOptlogCloudLatest||{})[pchomeOptlogTombField(shop)]);
+  return Object.keys(l).filter(function(id){ return !c[id]; }).length; }catch(e){ return 0; } }
+async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_optlog 的 shop 欄 → 合併（濾掉墓碑）→ 寫回；本機鏡像成合併結果（不重 _markPending）
   if(!window.__cloudPchomeOptlog) throw new Error('PChome 優化紀錄雲端層未就緒');
   var snap=await window.__cloudPchomeOptlog.getDoc();
   var cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
-  var cloudOpt=(cd[shop]&&typeof cd[shop]==='object')?cd[shop]:{};
-  var res=pchomeMergeByIdMap(cloudOpt, pchomeLoadOptlog(shop)||{});
-  await window.__cloudPchomeOptlog.setField(shop, momoFsSanitizeDeep(res.merged));   // 每 shop 一欄
+  var localTomb=pchomeOptlogTombLoad(shop);
+  var plan=pchomeOptlogSyncPlan(cd, shop, pchomeLoadOptlog(shop)||{}, localTomb, Date.now());
+  if(plan.hasTomb&&snap&&snap.metadata&&snap.metadata.fromCache) throw new Error('讀不到雲端優化紀錄現值（只拿到本機快取），這次不推，資料還在本機。');   // 有刪除要處理時，不能拿快取當雲端現值
+  if(plan.writeTomb) await window.__cloudPchomeOptlog.setField(pchomeOptlogTombField(shop), momoFsSanitizeDeep(plan.tomb));   // 墓碑先寫：就算下一步失敗，雲端也只是「有墓碑、紀錄還在」，下次同步會再濾
+  await window.__cloudPchomeOptlog.setField(shop, momoFsSanitizeDeep(plan.merged));   // 每 shop 一欄
+  if(plan.hasTomb){   // A-347：讀回確認才算推成功（丟錯 ⇒ syncToCloud 列為失敗、待同步留著）
+    var vs=await window.__cloudPchomeOptlog.getDoc();
+    var vd=(vs&&vs.exists&&vs.exists()&&!(vs.metadata&&vs.metadata.fromCache))?(vs.data()||{}):null;
+    var why=pchomeOptlogWriteConfirmed(plan, shop, vd);
+    if(why){ console.error('[pchome optlog] 寫入未確認：'+why+'。dirty 沒有清，資料還在本機。'); throw new Error('PChome 優化紀錄寫入未確認（'+why+'），資料還在本機，請稍後再按同步重試。'); }
+    pchomeOptlogTombSave(shop, plan.tomb);   // 本機墓碑跟雲端對齊（含清掉過期的）
+  }else if(Object.keys(localTomb).length) pchomeOptlogTombSave(shop, plan.tomb);   // 墓碑全部過期：本機那份也清掉（本機原本就沒有墓碑時不會走到這裡）
   var k=pchomeOptlogKey(shop);
-  try{ localStorage.setItem(k,JSON.stringify(res.merged)); }catch(e){}
-  try{ if(Store._profitMem) Store._profitMem[k]=res.merged; }catch(e){}
-  try{ if(Store._mem) Store._mem[k]=res.merged; }catch(e){}
+  try{ localStorage.setItem(k,JSON.stringify(plan.merged)); }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=plan.merged; }catch(e){}
+  try{ if(Store._mem) Store._mem[k]=plan.merged; }catch(e){}
   try{ pchomeUpdateDailyProgress({silent:true}); }catch(e){}   // 合併後工作日誌 pchome-summary counts 跟著更新（照 momoSyncOptlog）
-  return res.added;
+  try{ PCHOME_OPTLOG_DP_SHOPS.forEach(function(s2){ pchomeOptlogCellsRefreshAll(s2); }); }catch(e){}   // 總表開著時「優化紀錄」欄跟上合併結果
+  return plan.added;
 }
 // firebase.js app/pchome_optlog 訂閱 → 攤平每 shop 欄回 Store._profitMem['ec_pchome_optlog|'+shop]。dirty 不覆蓋（保住未推）。
 window.__pchomeApplyCloudOptlog=function(docData){ try{ var data=docData||{};
-  Object.keys(data).forEach(function(shop){ var k='ec_pchome_optlog|'+shop; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
-    var v=data[shop]; if(v&&typeof v==='object'){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=v; Store._mem=Store._mem||{}; Store._mem[k]=v; } });
+  Object.keys(data).forEach(function(shop){ if(pchomeOptlogIsTombField(shop)) return;   // `_tomb_{通路}` 是墓碑欄，不是通路
+    var k='ec_pchome_optlog|'+shop; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
+    var v=data[shop]; if(v&&typeof v==='object') v=pchomeOptlogTombApply(v, pchomeOptlogTombClean(data[pchomeOptlogTombField(shop)])).map;   // 雲端墓碑裡的 id 不顯示（舊分頁寫回來的也濾掉）；沒有墓碑＝原物件
+    if(v&&typeof v==='object'){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=v; Store._mem=Store._mem||{}; Store._mem[k]=v; } });
   try{ PCHOME_OPTLOG_DP_SHOPS.forEach(function(s){ pchomeOptlogCellsRefreshAll(s); }); }catch(e){}   // 總表開著時只重畫「優化紀錄」欄（表格比雲端快照早畫好的情況）
 }catch(e){ console.error('[pchome optlog] 套用雲端失敗：',e); } };
 window.__cloudDrainLatest('__pchomeOptlogCloudLatest','__pchomeApplyCloudOptlog');   // drain（動態載入時序，見訂單明細同註）
@@ -35974,7 +36049,8 @@ async function pchomeOpenSyncPreview(shop){
   keys.filter(function(k){return k.indexOf('ec_pchome_optlog|')===0;}).forEach(function(ok2){
     var osh=ok2.slice('ec_pchome_optlog|'.length), lom=pchomeLoadOptlog(osh)||{};
     var n=Object.keys(lom).reduce(function(a,s){return a+(Array.isArray(lom[s])?lom[s].length:0);},0);
-    items.push({key:ok2, kind:'PChome優化紀錄', name:'優化紀錄（'+osh+'）', localCount:n, cloudCount:0, status:(n>0?'diff':'same'), conflict:false, merge:true, conflictReasons:[], diffSamples:[], diffSummary:Object.keys(lom).length+' 個 SKU · '+n+' 筆 · 合併 upsert（不覆蓋雲端）'});
+    var pdel=pchomeOptlogPendingDeletes(osh);   // 還沒推的刪除筆數；0＝這一列跟以前完全一樣
+    items.push({key:ok2, kind:'PChome優化紀錄', name:'優化紀錄（'+osh+'）', localCount:n, cloudCount:0, status:((n>0||pdel>0)?'diff':'same'), conflict:false, merge:true, conflictReasons:[], diffSamples:(pdel>0?[{item:'刪除 '+pdel+' 筆', desc:'同步後雲端也會刪掉這 '+pdel+' 筆，其他電腦之後同步不會再把它加回來'}]:[]), diffSummary:Object.keys(lom).length+' 個 SKU · '+n+' 筆 · 合併 upsert（不覆蓋雲端）'+(pdel>0?' · 刪除 '+pdel+' 筆':'')});
   });
   // 商品歷程（單一 key；read-merge-write、不覆蓋雲端）
   if(keys.indexOf('ec_pchome_history')>=0){
@@ -36693,7 +36769,7 @@ function pchomeRenderOptlogSection(shop, 料號){
       +'<span style="flex-shrink:0;font-size:11px;color:#94a3b8;width:74px">'+_momoEsc(e.date||'')+'</span>'
       +'<span style="flex-shrink:0;font-size:11px;font-weight:700;color:#4f46e5;background:#eef2ff;border-radius:5px;padding:1px 7px">'+_momoEsc(e.type||'其他')+'</span>'
       +'<span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">'+_momoEsc(e.note||'')+(e.by?' <span style="color:#94a3b8">· '+_momoEsc(momoOptlogUserToName(e.by)||e.by)+'</span>':'')+'</span>'
-      +'<a onclick="pchomeDeleteOptlog(\''+shop+'\',\''+_momoEsc(料號)+'\','+i+')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>';
+      +'<a onclick="pchomeDeleteOptlog(\''+shop+'\',\''+_momoEsc(料號)+'\','+i+',\''+_momoEsc(e.id==null?'':e.id)+'\')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>';
   }).join('') : '<div style="font-size:12px;color:#94a3b8;padding:4px 0">尚無優化紀錄。記下調價/上下架/做活動等人工動作，之後跟銷量並看因果。</div>';
   { var bn=document.getElementById('pch-ana-tab-optlog-n'); if(bn) bn.textContent=list.length?' ('+list.length+')':''; }   // 分頁籤上的筆數（照 momo）
   el.innerHTML='<div class="mm-ana-h">優化紀錄'+(list.length?'（'+list.length+'）':'')+'</div>'
@@ -36712,8 +36788,15 @@ function pchomeAddOptlogModal(shop, 料號){
   pchomeRenderOptlogSection(shop, 料號);
   pchomeOptlogCellRefresh(shop, 料號);   // 背景總表的「優化紀錄」那一格跟上（沒開總表＝no-op）
 }
-function pchomeDeleteOptlog(shop, 料號, idx){
+function pchomeDeleteOptlog(shop, 料號, idx, id){
   var map=pchomeLoadOptlog(shop); if(!map[料號]) return;
+  // 有帶 id 就用 id 核對：彈窗開著時清單變過（雲端更新）⇒ 位置可能已經不是那一筆，改用 id 找；找不到就不刪。
+  if(id!=null&&id!==''){ var cur=map[料號][idx]; if(!cur||String(cur.id)!==String(id)){ idx=-1; for(var i=0;i<map[料號].length;i++){ if(map[料號][i]&&String(map[料號][i].id)===String(id)){ idx=i; break; } } }
+    if(idx<0){ pchomeRenderOptlogSection(shop, 料號); pchomeOptlogCellRefresh(shop, 料號); return; } }
+  var del=map[料號][idx]; if(del===undefined) return;
+  // 🔴 墓碑：只記這一筆的 id（先記墓碑、再改清單）。沒有 id 的舊紀錄不記墓碑（不用內容比對去刪）⇒ 只從本機移除，雲端若有同一筆，同步後會回來。
+  if(del&&del.id!=null){ var tomb=pchomeOptlogTombLoad(shop); tomb[String(del.id)]={ at:Date.now(), by:(window.App&&window.App.currentUser&&window.App.currentUser.username)||'' }; pchomeOptlogTombSave(shop, tomb); }
+  else console.warn('[pchome optlog] 這筆紀錄沒有 id，只從本機移除、不記刪除標記（雲端若有同一筆，同步後會回來）');
   map[料號].splice(idx,1); if(!map[料號].length) delete map[料號];
   pchomeSaveOptlog(shop, map);
   pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);

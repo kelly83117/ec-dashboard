@@ -417,7 +417,12 @@ ESM 有個致命陷阱必須牢記：
   🔴 存檔只走 `pchomeAddOptlog`（收尾同 `pchomeAddOptlogModal`），沒有新的儲存 key 或雲端物件；存完只重畫那一格（`pchomeOptlogCellRefresh`）。外觀沿用酷澎調整欄的 `.cup-pg-note-inp`，但這裡每按一次 Enter 是新增一筆，不是覆蓋文字。
   輸入狀態有 ✓（同一支 `pchomeOptlogCellSave`）／✕ 小鈕。沒存就離開：輸入框有字時點別格或格子外面 ⇒ 留在原格、警示色＋「尚未儲存…」提示、那一下點擊不生效（`_pchomeOlOutsideClick`，document capture），不丟也不自動存；空的就直接收起來。
   「共 N 筆」（`pchomeOptlogCellOpen`，檢視）不可以包在掛了 `pchomeOptlogCellEdit` 的元素裡（唯讀擋板往上找 6 層）。純函式在 profit.js `PCH-OLCELL-PURE-BEGIN/END`，node 測試 `scripts/pchome-optlog-cell.test.cjs`。
-  已知問題（沒修）：`pchomeDeleteOptlog` 只刪本機，同步是依 id 聯集（`pchomeMergeByIdMap`）⇒ 已經上過雲的紀錄刪掉後，下次同步會被雲端併回來。
+  **刪除墓碑（2026-11-19）**：`pchomeDeleteOptlog` 把那一筆的 id 記進墓碑，同步結果＝（本機 ∪ 雲端，依 id）再排除（本機墓碑 ∪ 雲端墓碑）⇒ 已上雲的紀錄刪掉後不會被併回來，別台的舊本機資料也加不回來。
+  - 雲端＝`app/pchome_optlog` 同一份文件的欄位 `_tomb_{通路}`＝`{ 紀錄 id: { at, by } }`（走既有的 `__cloudPchomeOptlog.setField`，沒有新增雲端物件）；本機＝localStorage `pchome_optlog_tomb|{通路}`（不是 `ec_` 開頭、不進同步掃描，跟著 `ec_pchome_optlog|{通路}` 的待同步一起推）。🔴 `_tomb_` 開頭的欄位不是通路，讀這份文件時要跳過（`pchomeOptlogIsTombField`）。
+  - 🔴 只有使用者親手按刪除的 id 會進墓碑；沒有 id 的紀錄不記墓碑（不用內容比對去刪）。刪除鈕帶 id 核對，位置對不上就用 id 找、找不到不刪。
+  - 🔴 等價性：本機、雲端墓碑都空時，寫雲端、寫本機的內容跟沒有墓碑時完全一樣（只寫通路那一欄、不多讀）。有墓碑時先寫墓碑欄再寫通路欄，寫完讀回確認（刪掉的 id 不在雲端、墓碑在雲端）才算成功，不符就丟「寫入未確認」、待同步留著。
+  - 墓碑保留 180 天（`PCHOME_OL_TOMB_KEEP_MS`，依刪除時間），過期只清墓碑；過期後仍留著那筆的電腦再同步會把它帶回來。雲端套用到本機時也會濾掉雲端墓碑裡的 id（舊分頁寫回來的不顯示）。
+  - 純函式在 profit.js `PCH-OLTOMB-PURE-BEGIN/END`，node 測試 `scripts/pchome-optlog-tomb.test.cjs`（等價性拿修改前的 `0439fc7` 當基準，`PCHOME_BACKUP_JSON` 指到 v3 備份時用真實資料）。商品歷程（`ec_pchome_history`）沒有刪除功能、沒有墓碑。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
