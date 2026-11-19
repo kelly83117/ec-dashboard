@@ -16,7 +16,7 @@ const eq = (a, b, name) => ok(JSON.stringify(a) === JSON.stringify(b), name, '�
 const src = fs.readFileSync(path.join(ROOT, 'js/profit.js'), 'utf8').replace(/\r\n/g, '\n');
 const a = src.indexOf('// PCH-OLCELL-PURE-BEGIN'), b = src.indexOf('// PCH-OLCELL-PURE-END');
 if (a < 0 || b < a) throw new Error('找不到 PCH-OLCELL-PURE 區塊');
-const P = new Function(src.slice(a, b) + '\nreturn { pchomeOptlogLatest, pchomeOptlogCellNote, pchomeOptlogCellView, pchomeOptlogCellInnerHTML };')();
+const P = new Function(src.slice(a, b) + '\nreturn { pchomeOptlogLatest, pchomeOptlogCellNote, pchomeOptlogCellLeave, pchomeOptlogCellView, pchomeOptlogCellInnerHTML };')();
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const TYPES = ['商品內容優化', '調價', '上下架', '相關商品', '影片', '五星好評', '做活動', '其他'];
 const nameOf = u => ({ xinyu: '心雨' })[u] || u;
@@ -80,7 +80,14 @@ eq(P.pchomeOptlogCellView([], nameOf), null, '沒有紀錄 → null');
   ok(h.includes('<option value="做活動" selected>') && (h.match(/ selected>/g) || []).length === 1, '選中傳進來的類型');
   ok(h.includes('value="打到一半&quot;"'), '草稿內容帶回輸入框（有跳脫）');
   ok(h.includes(`onkeydown="if(event.key==='Enter'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key==='Escape')pchomeOptlogCellCancel()"`), 'Enter 存、Esc 取消（選字中的 Enter 不存）');
-  ok(h.indexOf('<select') < h.indexOf('<input') && h.includes('class="cup-pg-note-inp pch-ol-inp"') && !h.includes('<button'), '左邊類型下拉、右邊輸入框（沿用酷澎調整欄的 class），沒有按鈕');
+  ok(h.indexOf('<select') < h.indexOf('<input') && h.includes('class="cup-pg-note-inp pch-ol-inp"'), '左邊類型下拉、右邊輸入框（沿用酷澎調整欄的 class）');
+  ok(h.includes('placeholder="輸入後按 Enter 或 ✓ 儲存"'), 'placeholder');
+  ok(h.includes('title="儲存（Enter）" aria-label="儲存" onclick="pchomeOptlogCellSave(this)">✓</button>'), '✓ 小鈕：儲存，走同一支 pchomeOptlogCellSave');
+  ok(h.includes('title="取消（Esc）" aria-label="取消" onclick="pchomeOptlogCellCancel()">✕</button>'), '✕ 小鈕：取消');
+  ok((h.match(/<button/g) || []).length === 2 && h.indexOf('<input') < h.indexOf('<button'), '兩顆鈕在輸入框右邊');
+  ok(!h.includes('pch-ol-warn') && !h.includes('pch-ol-hint'), '平常沒有警示');
+  const w = P.pchomeOptlogCellInnerHTML([], { type: '做活動', note: '還沒存', warn: true }, deps);
+  ok(w.includes('pch-ol-inp pch-ol-warn"') && w.includes('<div class="pch-ol-hint">尚未儲存：按 Enter 儲存，或按 Esc 放棄</div>') && w.includes('value="還沒存"'), '警示狀態：輸入框警示色＋提示小字，文字還在');
   ok(h.startsWith('<div class="pch-ol-row" onclick="event.stopPropagation()">'), '輸入區點了不冒泡到列');
   ok(!h.includes('pchomeOptlogCellEdit'), '編輯中不再掛開編輯'); }
 { const h = P.pchomeOptlogCellInnerHTML([], { type: '不存在的類型', note: '' }, deps);
@@ -89,6 +96,18 @@ eq(P.pchomeOptlogCellView([], nameOf), null, '沒有紀錄 → null');
 // ── 空白不存 ──
 eq(['', '   ', '\t\n', '　', null, undefined].map(P.pchomeOptlogCellNote), ['', '', '', '', '', ''], '空白、全形空白、null → 空字串（不存）');
 eq(P.pchomeOptlogCellNote('  調降供貨價 \n'), '調降供貨價', '前後空白去掉');
+// ── 沒存就離開 ──
+eq(['', '   ', '　', null, undefined].map(P.pchomeOptlogCellLeave), ['close', 'close', 'close', 'close', 'close'], '輸入框是空的 → 點別處直接收起來');
+eq(['調價', ' x '].map(P.pchomeOptlogCellLeave), ['stay', 'stay'], '有還沒存的文字 → 留在原格');
+{ const i = src.indexOf('\nfunction _pchomeOlOutsideClick('), body = src.slice(i, src.indexOf('\n}\n', i));
+  ok(i > 0 && !/pchomeAddOptlog|pchomeOptlogCellSave|pchomeSaveOptlog/.test(body), '點別處不會自動儲存');
+  ok(/==='close'\)\{ _pchomeOlEdit=null;/.test(body) && /if\(_pchomeOlWarn\(\)\)\{ ev\.preventDefault\(\); ev\.stopImmediatePropagation\(\); \}/.test(body), '空的收起來；有字就提示並讓這一下點擊不生效');
+  ok(/if\(td\.contains\(ev\.target\)\) return;/.test(body), '點原格裡面不處理');
+  ok(src.includes("document.addEventListener('click', _pchomeOlOutsideClick, true);"), '用 capture 階段監聽');
+  const w = src.indexOf('\nfunction _pchomeOlWarn('), wb = src.slice(w, src.indexOf('\n}\n', w));
+  ok(w > 0 && !/_pchomeOlEdit=null|innerHTML/.test(wb) && /inp\.focus/.test(wb), '提示時不清草稿、不重畫輸入框，並重新取得焦點');
+  const e = src.indexOf('\nfunction pchomeOptlogCellEdit('), eb = src.slice(e, src.indexOf('\n}\n', e));
+  ok(/pchomeOptlogCellLeave\(_pchomeOlDraftNow\(\)\)==='stay'&&_pchomeOlWarn\(\)\) return;/.test(eb), '開別格前也先檢查原格'); }
 { const i = src.indexOf('\nfunction pchomeOptlogCellSave('), body = src.slice(i, src.indexOf('\n}\n', i));
   const iBlank = body.indexOf("if(!txt){"), iAdd = body.indexOf('pchomeAddOptlog(');
   ok(iBlank > 0 && iAdd > iBlank && /if\(!txt\)\{[^\n]*pch-ol-err[^\n]*return; \}/.test(body), '空白：標紅框後 return，在 pchomeAddOptlog 之前');

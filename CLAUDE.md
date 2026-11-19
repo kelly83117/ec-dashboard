@@ -415,6 +415,7 @@ ESM 有個致命陷阱必須牢記：
     新增酷澎通路要改 `CUP_OVERLAP_SHOPS`、`CUP_OV_COLOR`／`CUP_OV_DOTCLS` 與 css 的 `--cup-*`。Console 只讀 `__cupOvSnap('YYYY-MM')`；node 測試 `scripts/coupang-overview.test.cjs`。
 - PChome 淨利表表格的「優化紀錄」欄（2026-11-19，心雨；轉單／寄倉、帳務月／日曆月都有，`PCHOME_PROFIT_COLS` 的 `optlog`，`nosort`、不進匯出）：一行顯示最近一筆（`pchomeOptlogLatest`：date＋time 最大）＋「共 N 筆」，點格子就地輸入、Enter 新增一筆。
   🔴 存檔只走 `pchomeAddOptlog`（收尾同 `pchomeAddOptlogModal`），沒有新的儲存 key 或雲端物件；存完只重畫那一格（`pchomeOptlogCellRefresh`）。外觀沿用酷澎調整欄的 `.cup-pg-note-inp`，但這裡每按一次 Enter 是新增一筆，不是覆蓋文字。
+  輸入狀態有 ✓（同一支 `pchomeOptlogCellSave`）／✕ 小鈕。沒存就離開：輸入框有字時點別格或格子外面 ⇒ 留在原格、警示色＋「尚未儲存…」提示、那一下點擊不生效（`_pchomeOlOutsideClick`，document capture），不丟也不自動存；空的就直接收起來。
   「共 N 筆」（`pchomeOptlogCellOpen`，檢視）不可以包在掛了 `pchomeOptlogCellEdit` 的元素裡（唯讀擋板往上找 6 層）。純函式在 profit.js `PCH-OLCELL-PURE-BEGIN/END`，node 測試 `scripts/pchome-optlog-cell.test.cjs`。
   已知問題（沒修）：`pchomeDeleteOptlog` 只刪本機，同步是依 id 聯集（`pchomeMergeByIdMap`）⇒ 已經上過雲的紀錄刪掉後，下次同步會被雲端併回來。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。

@@ -36735,6 +36735,8 @@ function pchomeOptlogLatest(list){
   return best;
 }
 function pchomeOptlogCellNote(v){ return String(v==null?'':v).trim(); }   // 空白＝''＝不存
+// 輸入中點別處：有還沒存的文字 ⇒ 'stay'（留在原格、提示，不丟也不自動存）；空的 ⇒ 'close'（直接收起來）。
+function pchomeOptlogCellLeave(v){ return pchomeOptlogCellNote(v)?'stay':'close'; }
 // 格子要顯示的文字。回 null＝沒有紀錄。nameOf：username → 顯示名稱。
 function pchomeOptlogCellView(list, nameOf){
   var arr=(Array.isArray(list)?list:[]).filter(function(e){ return e&&typeof e==='object'; });
@@ -36745,6 +36747,7 @@ function pchomeOptlogCellView(list, nameOf){
   return { n:arr.length, type:type, note:note, md:md, by:by, meta:[md,by].filter(Boolean).join(' '),
     title:'【'+type+'】'+note+'\n'+[d+(e.time?' '+e.time:''), by].filter(Boolean).join(' · ') };
 }
+var PCHOME_OL_UNSAVED_MSG='尚未儲存：按 Enter 儲存，或按 Esc 放棄';
 // 格子內層 HTML（外觀照酷澎「調整」欄：一行、像輸入框的框；沿用 .cup-pg-note-inp）。edit＝null（檢視）或 {type,note}（輸入中）。deps＝{esc, types, nameOf}。
 //   🔴 跟酷澎調整欄不同：這裡每按一次 Enter 是「新增一筆優化紀錄」，不是覆蓋同一段文字。
 function pchomeOptlogCellInnerHTML(list, edit, deps){
@@ -36754,8 +36757,11 @@ function pchomeOptlogCellInnerHTML(list, edit, deps){
     return '<div class="pch-ol-row" onclick="event.stopPropagation()">'
       +'<select class="pch-ol-sel" aria-label="紀錄類型" onchange="pchomeOptlogCellDraft(\'type\',this.value)">'
         +types.map(function(t){ return '<option value="'+esc(t)+'"'+(t===cur?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
-      +'<input class="cup-pg-note-inp pch-ol-inp" type="text" value="'+esc(edit.note||'')+'" placeholder="輸入後按 Enter 新增，Esc 取消" oninput="pchomeOptlogCellDraft(\'note\',this.value)"'
-        +' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()"></div>';
+      +'<input class="cup-pg-note-inp pch-ol-inp'+(edit.warn?' pch-ol-warn':'')+'" type="text" value="'+esc(edit.note||'')+'" placeholder="輸入後按 Enter 或 ✓ 儲存" oninput="pchomeOptlogCellDraft(\'note\',this.value)"'
+        +' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()">'
+      +'<button type="button" class="pch-ol-btn pch-ol-ok" title="儲存（Enter）" aria-label="儲存" onclick="pchomeOptlogCellSave(this)">✓</button>'
+      +'<button type="button" class="pch-ol-btn" title="取消（Esc）" aria-label="取消" onclick="pchomeOptlogCellCancel()">✕</button>'
+      +(edit.warn?'<div class="pch-ol-hint">'+PCHOME_OL_UNSAVED_MSG+'</div>':'')+'</div>';
   }
   var v=pchomeOptlogCellView(list, deps.nameOf);
   if(!v) return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="點一下新增優化紀錄">輸入優化紀錄…</div></div>';
@@ -36782,6 +36788,7 @@ function pchomeOptlogCellsRefreshAll(shop){ var c=document.getElementById('pchom
 function pchomeOptlogCellEdit(el){
   var x=_pchomeOlCtx(el); if(!x) return;
   var prev=_pchomeOlEdit;
+  if(prev&&(prev.shop!==x.shop||String(prev.sku)!==String(x.sku))&&pchomeOptlogCellLeave(_pchomeOlDraftNow())==='stay'&&_pchomeOlWarn()) return;   // 原格有還沒存的文字：留在原格（不丟、不自動存）
   _pchomeOlEdit={shop:x.shop, sku:x.sku, type:_pchomeOlLastType, note:''};
   if(prev&&(prev.shop!==x.shop||String(prev.sku)!==String(x.sku))) pchomeOptlogCellRefresh(prev.shop, prev.sku);   // 一次只開一格：前一格放棄
   x.td.innerHTML=pchomeOptlogCellHTML(x.shop, x.sku);
@@ -36804,6 +36811,27 @@ function pchomeOptlogCellOpen(el){
   pchomeOpenAnalysis(x.shop, x.sku);
   if(document.getElementById('pch-ana-tab-optlog')) pchomeAnaSwitchTab('optlog');
 }
+// ── 沒存就離開（2026-11-19）：輸入框有字時點別格／點格子外面 ⇒ 留在原格、警示色、重新取得焦點、顯示提示；不丟、不自動存。空的 ⇒ 直接收起來。──
+function _pchomeOlDraftNow(){ var e=_pchomeOlEdit; if(!e) return ''; var td=_pchomeOlTd(e.shop, e.sku), inp=td&&td.querySelector('.pch-ol-inp'); return inp?inp.value:(e.note||''); }   // 以畫面上輸入框的現值為準
+// 回 true＝已經在原格提示（呼叫端要中止原本的動作）；原格不在畫面上（找不到、被隱藏）回 false＝不擋（草稿留在記憶體，那一格再畫出來時還在）。
+function _pchomeOlWarn(){
+  var e=_pchomeOlEdit; if(!e) return false;
+  var td=_pchomeOlTd(e.shop, e.sku); if(!td||!td.isConnected||td.offsetParent===null) return false;
+  var inp=td.querySelector('.pch-ol-inp'), row=td.querySelector('.pch-ol-row'); if(!inp||!row) return false;
+  e.warn=true; e.note=inp.value;
+  inp.classList.add('pch-ol-warn');
+  if(!row.querySelector('.pch-ol-hint')){ var h=document.createElement('div'); h.className='pch-ol-hint'; h.textContent=PCHOME_OL_UNSAVED_MSG; row.appendChild(h); }
+  try{ inp.focus({preventScroll:true}); }catch(x){ inp.focus(); }
+  return true;
+}
+function _pchomeOlOutsideClick(ev){
+  var e=_pchomeOlEdit; if(!e) return;
+  var td=_pchomeOlTd(e.shop, e.sku); if(!td||!td.isConnected||td.offsetParent===null) return;   // 原格不在畫面上：不擋
+  if(td.contains(ev.target)) return;
+  if(pchomeOptlogCellLeave(_pchomeOlDraftNow())==='close'){ _pchomeOlEdit=null; pchomeOptlogCellRefresh(e.shop, e.sku); return; }   // 空的：收起來，這一下點擊照常進行
+  if(_pchomeOlWarn()){ ev.preventDefault(); ev.stopImmediatePropagation(); }   // 有字：這一下點擊不生效（不開彈窗、不切格、不重畫表格）
+}
+document.addEventListener('click', _pchomeOlOutsideClick, true);   // capture：趕在列的 onclick、別格的 pchomeOptlogCellEdit 之前
 // ══════ PChome 優化紀錄 → 工作日誌 pchome-summary（照 momo momoUpdateDailyProgress／momoOpenDpDetail；ec.dailyProgress 全站共用，只換 pchome-summary、保留 momo-summary 與其他）══════
 var PCHOME_OPTLOG_DP_SHOPS=['轉單','寄倉'];
 var PCHOME_OPTLOG_DP_SEP='·';
@@ -37827,7 +37855,7 @@ var PCHOME_PROFIT_COLS=[
   {k:'profit',label:'淨利',w:118,fmt:'money',info:'營收未稅−成本−費用未稅；本期零銷或缺成本顯「—」'},
   {k:'margin',label:'淨利率',w:90,fmt:'pct1'},
   {k:'tags',label:'標籤',w:150,left:true,info:'依嚴重度顯示最該注意的一個標籤，其餘收「+N」、hover 看全部。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
-  {k:'optlog',label:'優化紀錄',w:250,left:true,nosort:true,info:'這個通路、這個商品最近一筆優化紀錄。點格子直接新增一筆；點「共 N 筆」看全部（商品彈窗的優化紀錄分頁）。新增後記得按「☁ 同步雲端」。'},   // 2026-11-19：表格直接看與新增（不排序、不進匯出）
+  {k:'optlog',label:'優化紀錄',w:280,left:true,nosort:true,info:'這個通路、這個商品最近一筆優化紀錄。點格子直接新增一筆；點「共 N 筆」看全部（商品彈窗的優化紀錄分頁）。新增後記得按「☁ 同步雲端」。'},   // 2026-11-19：表格直接看與新增（不排序、不進匯出）
 ];
 var _PCHOME_COLCFG_LS='pchome_cols|';   // + shop（每賣場各自一份、不上雲；key 不在 sync 白名單前綴內）
 function pchomeColAvail(){ return PCHOME_PROFIT_COLS; }   // PChome 目前無賣場條件分支（轉單/寄倉共用同一組欄）；保留函式形狀以防日後分歧

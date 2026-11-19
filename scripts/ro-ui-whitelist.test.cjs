@@ -71,6 +71,8 @@ ok(!RE.test("cupPageNoteSync('麻吉','123')"), 'cupPageNoteSync 本身不寫入
 //   「共 N 筆」不可以包在掛了 pchomeOptlogCellEdit 的元素裡（擋板往上找 6 層，包進去唯讀帳號就點不開彈窗）。
 ok(src.includes(`onkeydown="if(event.key===\\'Enter\\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\\'Escape\\')pchomeOptlogCellCancel()"`), 'PChome 優化紀錄欄輸入框的 Enter／Esc 寫法還在');
 ok(RE.test("if(event.key==='Enter'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key==='Escape')pchomeOptlogCellCancel()"), 'PChome 優化紀錄欄：Enter 存檔會被擋');
+ok(src.includes('aria-label="儲存" onclick="pchomeOptlogCellSave(this)">✓</button>') && RE.test('pchomeOptlogCellSave(this)'), 'PChome 優化紀錄欄：✓ 小鈕走 pchomeOptlogCellSave、會被擋');
+ok(src.includes('aria-label="取消" onclick="pchomeOptlogCellCancel()">✕</button>') && !RE.test('pchomeOptlogCellCancel()'), 'PChome 優化紀錄欄：✕ 小鈕是取消、不擋');
 { const i = src.indexOf('\nfunction pchomeOptlogCellSave('), body = src.slice(i, src.indexOf('\n}\n', i));
   ok(i > 0 && body.includes('pchomeAddOptlog(x.shop, x.sku, {type:type, note:txt})'), '優化紀錄欄存檔呼叫 pchomeAddOptlog');
   ok(body.includes('pchomeOptlogClearCache(x.shop); pchomeRefreshSyncBtn(x.shop)'), '優化紀錄欄存檔的收尾同 pchomeAddOptlogModal');

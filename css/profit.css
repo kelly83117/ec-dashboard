@@ -2337,15 +2337,20 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-pg-note-mixed{font-size:12px;font-weight:600;color:var(--warn);cursor:pointer;text-decoration:underline dotted;}
 /* PChome 總表「優化紀錄」欄（2026-11-19）：外觀照酷澎「調整」欄（框沿用 .cup-pg-note-inp，這裡只補排版）。一行＝最近一筆＋共 N 筆；點框就地新增。 */
 :root{--pch-ol-type-bg:var(--primary-soft);--pch-ol-type-fg:var(--primary);}
-.mm-ptbl td.pch-ol-td{cursor:default;}
-.pch-ol-row{display:flex;align-items:center;gap:6px;min-width:0;}
+.mm-ptbl td.pch-ol-td{padding-left:10px;padding-right:10px;cursor:default;}
+.pch-ol-row{position:relative;display:flex;align-items:center;gap:4px;min-width:0;}
 .pch-ol-main{flex:1;min-width:0;width:auto;box-sizing:border-box;display:flex;align-items:center;gap:5px;min-height:23px;color:var(--text);cursor:text;}
 .pch-ol-main.pch-ol-empty{color:var(--text-faint);}
 .pch-ol-type{flex-shrink:0;padding:0 5px;border-radius:4px;background:var(--pch-ol-type-bg);color:var(--pch-ol-type-fg);font-size:10px;font-weight:700;white-space:nowrap;}
 .pch-ol-note{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pch-ol-n{flex-shrink:0;font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;white-space:nowrap;}
 .pch-ol-n:hover{color:var(--primary);text-decoration:underline;}
-.pch-ol-sel{flex-shrink:0;width:74px;height:23px;padding:0 2px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12px;font-family:inherit;outline:none;}
+.pch-ol-sel{flex-shrink:0;width:70px;height:23px;padding:0 2px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12px;font-family:inherit;outline:none;}
 .pch-ol-inp{flex:1;min-width:0;width:auto;box-sizing:border-box;height:23px;font-family:inherit;}
 .pch-ol-inp:focus{border-color:var(--primary);}
 .pch-ol-inp.pch-ol-err{border-color:var(--danger);}
+.pch-ol-inp.pch-ol-warn,.pch-ol-inp.pch-ol-warn:focus{border-color:var(--warn);background:var(--warn-soft);}
+.pch-ol-btn{flex-shrink:0;width:22px;height:23px;padding:0;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text-muted);font-size:12px;line-height:1;font-family:inherit;cursor:pointer;}
+.pch-ol-btn.pch-ol-ok{border-color:var(--primary);color:var(--primary);font-weight:700;}
+.pch-ol-btn:hover{background:var(--primary-soft);}
+.pch-ol-hint{position:absolute;left:0;top:100%;z-index:5;margin-top:2px;padding:1px 6px;border:1px solid var(--warn);border-radius:4px;background:var(--warn-soft);color:var(--text);font-size:10px;font-weight:600;line-height:1.5;white-space:nowrap;pointer-events:none;}
