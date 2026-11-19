@@ -63,7 +63,7 @@ const fnBody = (name) => { const i = mk.indexOf(name); if (i < 0) throw new Erro
   ok(!/Store\.set\(`ec\.insight_\$\{shopName\}_master`/.test(s), '母表：迴圈裡不再邊算邊寫');
   ok(s.indexOf('showToast(`商品清單已合併到') > w, '母表：「已合併」提示在寫入之後'); }
 { const s = fnBody('const wireSalesUpload = (inputId, slotIdx, slotLabel) => {');
-  const g = s.indexOf("_insDocCapGuard(currentShop, sKey('weeks'), weeks);"), w = s.indexOf("Store.set(sKey('weeks'), weeks);");
+  const g = s.indexOf("_insDocCapGuard(currentShop, sKey('weeks'), slimWeeks);"), w = s.indexOf("Store.set(sKey('weeks'), slimWeeks);");
   ok(g > 0 && w > g && s.indexOf('已上傳（') > w, '每週銷售：預檢 → 寫 → 才提示已上傳'); }
 { const s = fnBody("const perfInput = document.getElementById('insight-perf-upload');");
   const g = s.indexOf("_insDocCapGuard(currentShop, sKey('perf'), perfValue);"), w = s.indexOf("Store.set(sKey('perf'), perfValue);");
