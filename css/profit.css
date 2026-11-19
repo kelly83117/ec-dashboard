@@ -2296,3 +2296,10 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-pc-btn:disabled{opacity:.5;cursor:not-allowed;}
 .cup-pc-btn-pri{border-color:var(--primary);color:var(--primary);font-weight:700;}
 @media (max-width:560px){.cup-pc-inputs{grid-template-columns:1fr;}.cup-pc-card-r{text-align:left;}}
+/* 酷澎總表動銷率卡（2026-11-19）：大字後的小字分數、比上月的顏色、卡片下方的來源行。顏色走 :root 變數。 */
+.cup-st-frac{font-size:12px;font-weight:400;color:var(--text-muted);}
+.cup-st-up{color:var(--success);}
+.cup-st-down{color:var(--danger);}
+.cup-st-flat{color:var(--text-muted);}
+.cup-st-src{margin-bottom:4px;font-size:11px;line-height:1.6;color:var(--text-muted);}
+.cup-st-src:empty{display:none;}

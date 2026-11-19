@@ -31064,7 +31064,7 @@ function _cupRedrawIfVisible(){
 ['coupangReportReady','coupangMsfReady','coupangNoteReady','momoCostByOriginReady'].forEach(ev=>window.addEventListener(ev, _cupRedrawIfVisible));
 window.addEventListener('coupangProductsCloudReady', ()=>{ try{ ['麻吉','露營館'].forEach(s=>{
   if(_cupPmStage[s]) cupRenderProductsPreview(s);
-  const a=_cupStArgs[s]; if(a) cupRenderSellThrough(s, a.rows, a.hasReport);   // C3：動銷率卡（只重畫這一格）
+  const a=_cupStArgs[s]; if(a) cupRenderSellThrough(s, a.rows, a.hasReport, a.month);   // C3：動銷率卡（只重畫這一格）
   if(s===_cupShop && _cupSub[s]==='sync' && !_cupPmStage[s] && typeof cupRenderShop==='function') cupRenderShop(s);   // 商品同步分頁顯示的主檔跟著更新（正在預覽時不動）
 }); }catch(e){} });
 // 同步預覽「狀態」格（酷澎商品主檔）
@@ -31240,23 +31240,40 @@ function cupRenderProductsTab(shop){
   </div>`;
 }
 // 總表動銷率卡（商品頁口徑）。沒有本機主檔 ⇒ 維持「待商品同步」佔位。
-const _cupStArgs={};   // shop → 最近一次畫動銷率卡的 {rows, hasReport}（雲端主檔到了只重畫這一格）
-function cupRenderSellThrough(shop, rows, hasReport){
-  _cupStArgs[shop]={ rows, hasReport };
-  const v=document.getElementById('cup-kv-st-'+shop), dEl=document.getElementById('cup-kv-st-d-'+shop), tip=document.getElementById('cup-kv-st-tip-'+shop);
+const _cupStArgs={};   // shop → 最近一次畫動銷率卡的 {rows, hasReport, month}（雲端主檔到了只重畫這一格＋來源行）
+// 2026-11-19（Vanessa）：大字改 MOMO 同款「33.4% (466 / 1,396)」、第二行比上月（pp）、卡片下方多一行「動銷率來源」。
+//   🔴 只改顯示：算法仍是 cupProductsListed＋cupSellThroughCalc；上月＝上月訂單報表丟進同一支、用【同一份目前清單】。
+function cupRenderSellThrough(shop, rows, hasReport, month){
+  _cupStArgs[shop]={ rows, hasReport, month };
+  const v=document.getElementById('cup-kv-st-'+shop), dEl=document.getElementById('cup-kv-st-d-'+shop), tip=document.getElementById('cup-kv-st-tip-'+shop), src=document.getElementById('cup-st-src-'+shop);
   if(!v||!dEl) return;
+  const setSrc=t=>{ if(src) src.textContent=t||''; };
+  dEl.classList.remove('cup-st-up','cup-st-down','cup-st-flat');
   const d=cupLoadProducts(shop);
   if(!d||_cupProdBad[shop]){
     const c=_cupProdCloud[shop], loading=!_cupProdBad[shop] && !(c&&c.complete);   // 本機沒有、雲端還沒到齊 ⇒ 載入中
     v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent=loading?'商品主檔載入中…':'待商品同步'; dEl.style.color='#9ca3af';
+    setSrc(loading?'動銷率來源：商品主檔載入中…':'動銷率來源：還沒有商品主檔（到「商品同步」分頁上傳 price_inventory）');
     if(tip) tip.title=loading?'正在讀雲端的商品主檔，讀到後自動算出動銷率。':'動銷率需要商品主檔（上架中的商品頁＝分母）。到「商品同步」分頁上傳 price_inventory 並按「☁ 同步雲端」後，大家都會看到。'; return; }
   const L=cupProductsListed(d);
+  const n=x=>Number(x||0).toLocaleString(), day=String(L.latest||'').slice(0,10).replace(/-/g,'/')||'—';
   if(!hasReport){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='這個月沒有訂單報表'; dEl.style.color='#9ca3af';
-    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 頁（清單 '+_cupFmtExport(L.latest)+'）。\n'+_cupStSrcTip(L.latest); return; }
+    setSrc('動銷率來源：上架中商品頁 '+n(L.listed.size)+' · 整頁停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（這個月沒有訂單報表）');
+    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 個商品頁（清單 '+_cupFmtExport(L.latest)+'）。\n'+_cupStSrcTip(L.latest); return; }
   const r=cupSellThroughCalc(rows, L.listed);
-  v.textContent=r.pct!=null?r.pct.toFixed(1)+'%':'—'; v.style.color='';
-  dEl.textContent=r.num.toLocaleString()+' / '+r.den.toLocaleString()+' 頁 · 清單 '+_cupFmtExport(L.latest).slice(5,10).replace('-','/'); dEl.style.color='#6b7280';
-  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 頁。\n分母＝目前上架 '+r.listedN+' 頁 ∪ 本月有賣出 ⇒ '+r.den+' 頁（其中 '+r.soldNotListed+' 頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n'+_cupStSrcTip(L.latest);
+  v.style.color='';
+  if(r.pct!=null) v.innerHTML=r.pct.toFixed(1)+'% <span class="cup-st-frac">('+n(r.num)+' / '+n(r.den)+')</span>'; else v.textContent='—';
+  // 第二行：比上月（上月訂單報表 × 同一份目前清單）。上升綠、下降紅（A-310）。
+  const prevM=month?cupPrevMonth(month):null, prev=prevM?cupLoadReport(shop,prevM):null;
+  dEl.style.color='';
+  if(!prev||!Array.isArray(prev.rows)){ dEl.textContent='（無上月報表可比）'; }
+  else { const p=cupSellThroughCalc(prev.rows, L.listed), lbl='較 '+(+prevM.slice(5,7))+'月 ';
+    if(r.pct==null||p.pct==null) dEl.textContent='';
+    else { const dd=r.pct-p.pct, t=Math.abs(dd).toFixed(1);
+      if(t==='0.0'){ dEl.textContent=lbl+'持平'; dEl.classList.add('cup-st-flat'); }
+      else { dEl.textContent=lbl+(dd>0?'▲ ':'▼ ')+t+'pp'; dEl.classList.add(dd>0?'cup-st-up':'cup-st-down'); } } }
+  setSrc('動銷率來源：上架中商品頁 '+n(L.listed.size)+' · 本月有賣 '+n(r.num)+(r.soldNotListed>0?'（其中 '+n(r.soldNotListed)+' 個不在上架清單）· ':' · ')+'整頁停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（過去月份也用這份清單）');
+  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 個。\n分母＝目前上架 '+r.listedN+' 個商品頁 ∪ 本月有賣出 ⇒ '+r.den+' 個商品頁（其中 '+r.soldNotListed+' 個商品頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n'+_cupStSrcTip(L.latest);
 }
 function _cupStSrcTip(latest){ return '主檔來自雲端（最新匯出 '+_cupFmtExport(latest)+'），任何一台上傳並同步後大家都會看到。'; }
 // ══ 通路健檢的酷澎動銷率（2026-11-18 第 3 塊）：唯讀轉接，跟上面總表動銷率卡同一套（cupProductsListed＋cupSellThroughCalc）══
@@ -31523,6 +31540,7 @@ function cupProfitTabHTML(shop){
       <div class="mm-kpi"><div class="mm-kpi-l">總銷量</div><div class="mm-kpi-v" id="cup-kv-qty-${shop}">—</div><div class="mm-kpi-d" id="cup-kv-qty-cmp-${shop}"></div></div>
       <div class="mm-kpi"><div class="mm-kpi-l">動銷率 <span class="mm-info" id="cup-kv-st-tip-${shop}" title="動銷率需要商品上架總數（分母），待「商品同步」（PR-C）接入 price_inventory 後才有。">?</span></div><div class="mm-kpi-v" id="cup-kv-st-${shop}" style="color:#9ca3af">—</div><div class="mm-kpi-d" id="cup-kv-st-d-${shop}" style="color:#9ca3af">待商品同步</div></div>
     </div>
+    <div id="cup-st-src-${shop}" class="cup-st-src"></div>
     <div id="cup-fee-rule-${shop}" style="font-size:11px;color:#9ca3af;margin-bottom:8px;line-height:1.6"></div>
     <div id="cup-freshwarn-${shop}"></div>
     <div id="cup-misscost-chip-${shop}"></div>
@@ -31553,7 +31571,7 @@ function cupRenderProfitBody(shop){
   { const _netEl=document.getElementById('cup-kv-net-'+shop); if(_netEl) _netEl.classList.toggle('mm-neg', Number(kpi.net)<0); }
   set('cup-kv-rate-'+shop,(kpi.rate!=null?kpi.rate.toFixed(1)+'%':'—'));
   set('cup-kv-qty-'+shop,Math.round(kpi.qty||0).toLocaleString());
-  try{ cupRenderSellThrough(shop, rows, !!saved); }catch(e){ console.warn('[酷澎動銷率] 計算失敗',e); }   // PR-C1：本機商品主檔 → 動銷率（沒有主檔維持佔位）
+  try{ cupRenderSellThrough(shop, rows, !!saved, month); }catch(e){ console.warn('[酷澎動銷率] 計算失敗',e); }   // PR-C1：本機商品主檔 → 動銷率（沒有主檔維持佔位）
   // 較上期
   const prevM=month?cupPrevMonth(month):null; const prev=prevM?cupLoadReport(shop,prevM):null;
   const cmpTxt=(cur,pv)=>{ const d=cur-pv, pct=pv?(d/Math.abs(pv)*100):null; return '較 '+(+prevM.slice(5,7))+'月 '+(d>=0?'▲':'▼')+(pct!=null?Math.abs(pct).toFixed(1)+'%':'')+' ('+(d>=0?'+':'')+Math.round(d).toLocaleString()+')'; };
