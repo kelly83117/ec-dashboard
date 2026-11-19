@@ -662,7 +662,6 @@ Object.assign(App, {
           const colStock = idx('可用庫存');
           const colDemand = idx('需求');
           const colPrice = idx('售價');
-          const colCost = idx('成本');
           const colProfit = idx('獲利');
           const colQty = idx('銷售數量');
 
@@ -692,19 +691,13 @@ Object.assign(App, {
               return isFinite(n) ? n : 0;
             };
             if (!merged[code]) {
-              merged[code] = {
-                code,
-                name: String(row[colName] || '').trim(),
-                stock: 0, demand: 0,
-                revenue: 0, cost: 0, profit: 0, qty: 0,
-              };
+              merged[code] = _insSalesNewRow(code, String(row[colName] || '').trim());   // 不存 cost（沒有讀取端，見 INS-SLIM-PURE）
             }
             // 庫存 / 需求 同商品編號各規格累加（可用庫存 = SUM(J - K) 每列）
             merged[code].stock   += num(colStock);
             merged[code].demand  += num(colDemand);
-            // 營收 / 成本 / 獲利 / 銷售數量 也累加（各規格獨立）
+            // 營收 / 獲利 / 銷售數量 也累加（各規格獨立）
             merged[code].revenue += num(colPrice);
-            merged[code].cost    += num(colCost);
             merged[code].profit  += num(colProfit);
             merged[code].qty     += num(colQty);
             // 名稱以較完整版本為主
@@ -809,7 +802,6 @@ Object.assign(App, {
             if (rows.length < 2) return;
             const headers = rows[0].map(h => String(h || '').trim());
             const cId = headers.findIndex(h => h === '商品ID' || h.indexOf('商品ID') === 0);
-            const cName = headers.findIndex(h => h.indexOf('商品名稱') >= 0);
             const cImp = headers.findIndex(h => h.indexOf('曝光') >= 0);
             const cClk = headers.findIndex(h => h.indexOf('商品點擊數') >= 0 || (h.indexOf('點擊') >= 0 && h.indexOf('率') < 0));
             const cCtr = headers.findIndex(h => h.indexOf('點擊率') >= 0);
@@ -833,15 +825,9 @@ Object.assign(App, {
               const imp = cImp >= 0 ? parseNum(row[cImp]) : 0;
               const clk = cClk >= 0 ? parseNum(row[cClk]) : 0;
               if (imp === 0 && clk === 0) continue;
-              // 同一 ID 可能在多分頁重複出現，取最大值
-              const prev = byShopeeId[id] || { impressions: 0, clicks: 0, ctr: 0, convRate: 0 };
-              byShopeeId[id] = {
-                impressions: Math.max(prev.impressions, imp),
-                clicks: Math.max(prev.clicks, clk),
-                ctr: cCtr >= 0 ? Math.max(prev.ctr, parseNum(row[cCtr])) : prev.ctr,
-                convRate: cConv >= 0 ? Math.max(prev.convRate, parseNum(row[cConv])) : prev.convRate,
-                name: cName >= 0 ? String(row[cName] || '').trim() : (prev.name || ''),
-              };
+              // 同一 ID 可能在多分頁重複出現，取最大值；不存商品名稱（沒有讀取端，見 INS-SLIM-PURE）
+              byShopeeId[id] = _insPerfEntry(byShopeeId[id], imp, clk,
+                cCtr >= 0 ? parseNum(row[cCtr]) : null, cConv >= 0 ? parseNum(row[cConv]) : null);
               totalRows++;
             }
           });
@@ -1151,6 +1137,7 @@ Object.assign(App, {
           let totalProducts = 0;
           let totalNew = 0;
           let totalUpdated = 0;
+          const writes = [];   // 先把四個通路要寫的內容都算好、全部過單檔上限預檢，才開始寫（有一個超過就全部不寫）
           Object.keys(shops).forEach(shopName => {
             const data = shops[shopName];
             // 合併式更新：保留舊母表的所有商品，新檔案的同編號會覆蓋（更新最新資料），新編號則加入
@@ -1170,11 +1157,13 @@ Object.assign(App, {
               uploadedAt: now,
               uploadedBy,
             };
-            Store.set(`ec.insight_${shopName}_master`, mergedData);
+            writes.push({ shop: shopName, key: `ec.insight_${shopName}_master`, value: mergedData });
             totalProducts += Object.keys(mergedByCode).length;
             totalNew += newCount;
             totalUpdated += updatedCount;
           });
+          _insDocCapGuardAll(writes);   // 🛡 超過 95% ⇒ throw（下面 catch 顯示原句），一個通路都不寫
+          writes.forEach(w => Store.set(w.key, w.value));
           const diffMsg = (totalNew > 0 || totalUpdated > 0)
             ? `（新增 ${totalNew}、更新 ${totalUpdated}）`
             : '';
@@ -1183,7 +1172,7 @@ Object.assign(App, {
         } catch (err) {
           console.error(err);
           hideUploadingOverlay('insight-master-upload');
-          showToast(`解析失敗：${err.message}`, 'error');
+          showToast(_insUploadErrMsg(err), 'error');
         } finally {
           masterInput.value = '';
         }
@@ -1227,14 +1216,17 @@ Object.assign(App, {
           weeks[slotIdx] = newEntry;
           // 截斷只保留前 4 週
           if (weeks.length > 4) weeks.length = 4;
-          Store.set(sKey('weeks'), weeks);
+          // 舊版上傳留下的每列 cost 一起拿掉（一次上傳就清掉 4 週；不改到記憶體裡原本那幾週的物件）
+          const slimWeeks = _insWeeksStripCost(weeks);
+          _insDocCapGuard(currentShop, sKey('weeks'), slimWeeks);   // 🛡 單檔上限預檢：超過就 throw、不寫
+          Store.set(sKey('weeks'), slimWeeks);
           const shiftMsg = shifted ? '（上上週/上上上週已自動往後推）' : '';
           showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）${shiftMsg}`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
           hideUploadingOverlay(inputId);
-          showToast(`解析失敗：${err.message}`, 'error');
+          showToast(_insUploadErrMsg(err), 'error');
         } finally {
           input.value = '';
         }
@@ -1255,17 +1247,19 @@ Object.assign(App, {
         showUploadingOverlay('insight-perf-upload');
         try {
           const result = await this.parseInsightPerfExcel(file);
-          Store.set(sKey('perf'), {
+          const perfValue = {
             ...result,
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
-          });
+          };
+          _insDocCapGuard(currentShop, sKey('perf'), perfValue);   // 🛡 單檔上限預檢：超過就 throw、不寫
+          Store.set(sKey('perf'), perfValue);
           showToast(`「${currentShop} · 商品表現」已上傳`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
           hideUploadingOverlay('insight-perf-upload');
-          showToast(`解析失敗：${err.message}`, 'error');
+          showToast(_insUploadErrMsg(err), 'error');
         } finally {
           perfInput.value = '';
         }
@@ -2679,6 +2673,89 @@ function _insClearPiecePlan(shop, piece, weeks, shops) {
   }
   return out.filter(op => /^ec\.insight_.+_(master|weeks|perf)$/.test(op.key) && !/_notes$/.test(op.key));
 }
+/* ═══ INS-SLIM-PURE-BEGIN：洞察表上傳內容瘦身（2026-11-19）純函式，node 測試用標記抽取 ═══ */
+// 只存有讀取端的欄位。2026-11-19 盤點：商品表現每個商品的 name、每週銷售每列的 cost 全 repo 沒有任何地方讀
+//   （畫面品名來自每週銷售與母表；獲利 profit 另外存），好麻吉這兩樣合計約 225KB → 上傳時不再存。
+//   舊資料裡已經有的 name／cost 讀進來照常運作（沒有人讀它），下一次上傳自然消失；不搬正式資料。
+//   🔴 之後如果要在畫面用到這兩樣，要先改回來存、再請大家重新上傳。
+// 每週銷售的一列商品（同品號各規格累加前的初始值）
+function _insSalesNewRow(code, name) {
+  return { code, name, stock: 0, demand: 0, revenue: 0, profit: 0, qty: 0 };
+}
+// 商品表現的一個商品：同一 ID 在多個分頁重複出現時取最大值；ctr／conv 傳 null＝這個分頁沒有那一欄，沿用前值。
+function _insPerfEntry(prev, imp, clk, ctr, conv) {
+  const p = prev || { impressions: 0, clicks: 0, ctr: 0, convRate: 0 };
+  return {
+    impressions: Math.max(p.impressions, imp),
+    clicks: Math.max(p.clicks, clk),
+    ctr: ctr === null || ctr === undefined ? p.ctr : Math.max(p.ctr, ctr),
+    convRate: conv === null || conv === undefined ? p.convRate : Math.max(p.convRate, conv),
+  };
+}
+// 把每一週每列的 cost 拿掉（舊版上傳留下的）。不改輸入；本來就沒有 cost 的那一週回傳同一個物件；null 槽、不認得的形狀原樣保留。
+function _insWeeksStripCost(weeks) {
+  if (!Array.isArray(weeks)) return weeks;
+  return weeks.map(w => {
+    if (!w || typeof w !== 'object' || !Array.isArray(w.products)) return w;
+    if (!w.products.some(p => p && typeof p === 'object' && Object.prototype.hasOwnProperty.call(p, 'cost'))) return w;
+    return Object.assign({}, w, { products: w.products.map(p => {
+      if (!p || typeof p !== 'object' || !Object.prototype.hasOwnProperty.call(p, 'cost')) return p;
+      const o = Object.assign({}, p); delete o.cost; return o;
+    }) });
+  });
+}
+/* ═══ INS-SLIM-PURE-END ═══ */
+/* ═══ INS-DOC-CAP-PURE-BEGIN：洞察表上傳前的單檔上限預檢（2026-11-19）純函式，node 測試用標記抽取 ═══ */
+// 這次上傳寫上去之後，app/insight_{通路} 整份的實際大小（Firestore 規則，firebase.js __insightDocMeasure）超過這個比例 ⇒ 不寫。
+//   只擋三種上傳（母表／每週銷售／商品表現）；調整紀錄（_notes）不擋——留下的空間就是給每天的調整紀錄用的。
+const INS_DOC_BLOCK_RATIO = 0.95;
+// bytes＝寫上去之後整份文件的大小；limit＝單檔上限（1,048,576）。回 { ok, pct, msg }；pct＝百分比（一位小數）。量不到（bytes 不是數字）⇒ 放行、pct null。
+function insDocCapVerdict(shop, bytes, limit, blockRatio) {
+  if (typeof bytes !== 'number' || !isFinite(bytes) || !(limit > 0)) return { ok: true, pct: null, msg: '' };
+  const ratio = bytes / limit, pct = Math.round(ratio * 1000) / 10;
+  if (ratio <= blockRatio) return { ok: true, pct, msg: '' };
+  return { ok: false, pct, msg: shop + '洞察表資料已接近雲端單檔上限（目前 ' + pct.toFixed(1) + '%），這次沒有上傳，雲端資料沒有變。請通知 Keani 處理。' };
+}
+// checks＝[{ shop, key, value }]；measure(shop, key, value) → { bytes, limit } 或 null（量不到）。
+//   全部量完才回 { results:[{ shop, key, bytes, pct, ok, measured, msg }], blocked: 第一個超過的那筆或 null, unmeasured:[通路…] }。
+//   呼叫端要在「任何一筆寫入之前」呼叫：blocked 不是 null ⇒ 一筆都不寫。
+function insDocCapCheckAll(checks, measure, blockRatio) {
+  const results = [], unmeasured = [];
+  let blocked = null;
+  (Array.isArray(checks) ? checks : []).forEach(c => {
+    let m = null;
+    try { m = measure(c.shop, c.key, c.value); } catch (e) { m = null; }
+    const measured = !!(m && typeof m.bytes === 'number' && isFinite(m.bytes) && m.limit > 0);
+    const v = measured ? insDocCapVerdict(c.shop, m.bytes, m.limit, blockRatio) : { ok: true, pct: null, msg: '' };
+    if (!measured) unmeasured.push(c.shop);
+    const row = { shop: c.shop, key: c.key, bytes: measured ? m.bytes : null, pct: v.pct, ok: v.ok, measured, msg: v.msg };
+    results.push(row);
+    if (!v.ok && !blocked) blocked = row;
+  });
+  return { results, blocked, unmeasured };
+}
+// 上傳流程 catch 的提示：預檢擋下的（err.insCap）直接顯示原句，其他照舊冠「解析失敗：」。
+function _insUploadErrMsg(err) {
+  const msg = (err && err.message) || String(err);
+  return (err && err.insCap) ? msg : ('解析失敗：' + msg);
+}
+/* ═══ INS-DOC-CAP-PURE-END ═══ */
+// 三個上傳入口在 Store.set 之前一律先過這支：超過上限就 throw（中文訊息、err.insCap=true），呼叫端不寫、不跳「已上傳」、不重畫。
+//   量測函式不存在或還沒收到雲端快照 ⇒ 放行並在 console 留一行（同 profit.js _momoDocCapGuard）。唯讀觀測：window.__insLastDocCap。
+function _insDocCapGuardAll(checks) {
+  const measure = (shop, key, value) => (typeof window.__insightDocMeasure === 'function') ? window.__insightDocMeasure(shop, key, value) : null;
+  const r = insDocCapCheckAll(checks, measure, INS_DOC_BLOCK_RATIO);
+  r.unmeasured.forEach(s => { try { console.warn('[洞察表 size] ' + s + ' 量不到這次要寫的大小（__insightDocMeasure 不存在或還沒收到雲端快照），照常上傳'); } catch {} });
+  try { window.__insLastDocCap = { at: Date.now(), blockRatio: INS_DOC_BLOCK_RATIO, results: r.results.map(x => ({ shop: x.shop, key: x.key, bytes: x.bytes, pct: x.pct, ok: x.ok, measured: x.measured })) }; } catch {}
+  if (r.blocked) {
+    try { console.error('[洞察表 size] ' + r.blocked.msg + '（' + r.blocked.bytes + ' bytes，' + r.blocked.key + '）'); } catch {}
+    const e = new Error(r.blocked.msg);
+    e.insCap = true;
+    throw e;
+  }
+  return r;
+}
+function _insDocCapGuard(shop, key, value) { return _insDocCapGuardAll([{ shop, key, value }]); }
 const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被舊副本清理、讀取端忽略（app.js _dropInsightKeys）等依前綴掃的邏輯掃到
 function _insNoteDraftsLoad(ls) {
   try {

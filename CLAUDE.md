@@ -276,6 +276,19 @@ ESM 有個致命陷阱必須牢記：
   沒有「本機待同步」、也沒有洞察表的「☁ 同步雲端」鈕了。新增帶 `opId`（沒確認的輸入重按沿用同一個，交易重跑不會重複）；
   長期備註只在失焦 / 關窗時寫，帶 `base` 做 compare-and-set（別人剛改過就不蓋、提示）。
   詳細的寫入期間畫面、提示文字、草稿（`ec.insightNoteDrafts`）見 marketing.js `openInsightNoteModal` 與 `_insNoteResultMsg`。
+  - **四個欄位的形狀**（2026-11-19 盤點；上傳三種都是 `Store.set` 整個欄位覆蓋、當下直接寫雲端，沒有 dirty／待同步）：
+    - `_master`＝`{ byCode:{ 品號:{ id, name, mocbicName } }, sheet, rawRows, headers, uploadedAt, uploadedBy }`。母表上傳是合併式：同品號覆蓋、新品號加入、**舊品號不會被拿掉**（一份檔一次寫四個通路）。
+    - `_weeks`＝陣列（新→舊，最多 4 格，可能有 null 槽）：`{ products:[{ code, name, stock, demand, revenue, profit, qty }], period, periodKey, rawRows, uploadedAt, uploadedBy }`。上傳「上週」而且期間不同時往後推一格、截成 4 格；第 4 格是隱藏的（算「上上上週」分類）。
+    - `_perf`＝`{ byShopeeId:{ 商品ID:{ impressions, clicks, ctr, convRate } }, rawRows, uploadedAt, uploadedBy }`，每次上傳整份換掉；曝光與點擊都是 0 的商品不存。
+    - `_notes` 見上；它是唯一會一直累積的欄位。
+  - **瘦身（2026-11-19）**：`_perf` 每個商品不存 `name`、`_weeks` 每列不存 `cost`——全 repo 沒有讀取端（畫面品名來自 `_weeks` 與 `_master`，獲利另外存）。
+    每週銷售上傳時會把既有幾週每列的 `cost` 一起拿掉（`_insWeeksStripCost`）。沒有搬正式資料：舊資料裡的 `name`／`cost` 照常讀得進來，各通路下一次上傳後自然消失；舊分頁上傳會把它們寫回來，不影響正確性。
+    純函式在 marketing.js `INS-SLIM-PURE-BEGIN/END`，node 測試 `scripts/insight-slim.test.cjs`（`INSIGHT_BACKUP_JSON` 指到 v3 備份檔時用真實資料模擬大小）。🔴 之後要在畫面用到這兩樣，要先改回來存、再請大家重新上傳。
+  - **上傳前單檔上限預檢（2026-11-19）**：母表／每週銷售／商品表現三個上傳入口在 `Store.set` 之前先過 marketing.js `_insDocCapGuard`／`_insDocCapGuardAll`，
+    用 firebase.js `window.__insightDocMeasure(shop, key, value)`（既有訂閱的快照把這次要寫的欄位換進去算大小；唯讀、不多讀、不以 `__cloud` 開頭）量寫上去之後整份文件多大，
+    超過 `INS_DOC_BLOCK_RATIO`（95%）就 throw「{通路}洞察表資料已接近雲端單檔上限（目前 xx.x%），這次沒有上傳，雲端資料沒有變。請通知 Keani 處理。」：不寫、不跳「已上傳」、不重畫、記憶體不變。
+    母表是四個通路先全部算好、全部檢查完才寫，有一個超過就全部不寫。量不到（快照還沒到）⇒ 放行並在 console 留一行。**調整紀錄（`_notes`）不擋**，留下的 5% 就是給它用的。
+    🔴 新增會寫 `ec.insight_*_{master|weeks|perf}` 的入口要接這支（`scripts/insight-capguard.test.cjs` 會數）。Console 只讀：`window.__insLastDocCap`。上傳卡的 ✕ 清除（只會變小）沒有接。
 - `app/main` 欄位 `ec.adjOwnerTimeline` — 通路負責人的雲端設定（#306），
   形狀 `{ v:1, segs:[ { shop, from:'YYYY-MM-DD', owner:<username>, ownerName, by, at:<數字> } ] }`，一段只管一個通路。
   - **讀取**：daily.js 寫死的 `ADJ_OWNER_TIMELINE` 是 BASE，永遠參與；雲端段疊在上面，某通路某天＝生效日 ≤ 那天裡最新的一段。
