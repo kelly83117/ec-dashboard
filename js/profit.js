@@ -35531,6 +35531,7 @@ async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_op
 window.__pchomeApplyCloudOptlog=function(docData){ try{ var data=docData||{};
   Object.keys(data).forEach(function(shop){ var k='ec_pchome_optlog|'+shop; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
     var v=data[shop]; if(v&&typeof v==='object'){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=v; Store._mem=Store._mem||{}; Store._mem[k]=v; } });
+  try{ PCHOME_OPTLOG_DP_SHOPS.forEach(function(s){ pchomeOptlogCellsRefreshAll(s); }); }catch(e){}   // 總表開著時只重畫「優化紀錄」欄（表格比雲端快照早畫好的情況）
 }catch(e){ console.error('[pchome optlog] 套用雲端失敗：',e); } };
 window.__cloudDrainLatest('__pchomeOptlogCloudLatest','__pchomeApplyCloudOptlog');   // drain（動態載入時序，見訂單明細同註）
 // ── history（商品歷程；獨立 doc、非內嵌 product）──
@@ -36709,6 +36710,7 @@ function pchomeAddOptlogModal(shop, 料號){
   pchomeAddOptlog(shop, 料號, {type:type, note:txt});
   pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
   pchomeRenderOptlogSection(shop, 料號);
+  pchomeOptlogCellRefresh(shop, 料號);   // 背景總表的「優化紀錄」那一格跟上（沒開總表＝no-op）
 }
 function pchomeDeleteOptlog(shop, 料號, idx){
   var map=pchomeLoadOptlog(shop); if(!map[料號]) return;
@@ -36716,6 +36718,91 @@ function pchomeDeleteOptlog(shop, 料號, idx){
   pchomeSaveOptlog(shop, map);
   pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
   pchomeRenderOptlogSection(shop, 料號);
+  pchomeOptlogCellRefresh(shop, 料號);   // 背景總表的「優化紀錄」那一格跟上（沒開總表＝no-op）
+}
+// ══════ PChome 總表「優化紀錄」欄（2026-11-19，心雨）：表格直接看最近一筆、點格子新增 ══════
+//   🔴 儲存只走 pchomeAddOptlog（＋跟 pchomeAddOptlogModal 相同的收尾），沒有另外的寫入路徑；存完只重畫那一格。
+//   唯讀帳號：pchomeOptlogCellEdit／pchomeOptlogCellSave 在 app.js __RO_WRITE_RE 裡；「共 N 筆」（pchomeOptlogCellOpen）是檢視、不擋，
+//   所以它不可以放在掛了 pchomeOptlogCellEdit 的元素裡面（擋板會往上找 6 層）。
+//   handler 一律傳 this、由 td 的 data-pch-ol／data-pch-ol-shop 取料號與通路（料號不拼進 inline handler 字串）。
+// PCH-OLCELL-PURE-BEGIN（純函式：不碰 DOM、Store、localStorage；node 測試 scripts/pchome-optlog-cell.test.cjs）
+// 最近一筆：date＋time 最大的；同時間取陣列裡比較後面的（後加的）。沒有紀錄回 null。
+function pchomeOptlogLatest(list){
+  var best=null, bk='';
+  (Array.isArray(list)?list:[]).forEach(function(e){ if(!e||typeof e!=='object') return;
+    var k=String(e.date||'')+' '+String(e.time||'');
+    if(best===null||k>=bk){ best=e; bk=k; } });
+  return best;
+}
+function pchomeOptlogCellNote(v){ return String(v==null?'':v).trim(); }   // 空白＝''＝不存
+// 格子要顯示的文字。回 null＝沒有紀錄。nameOf：username → 顯示名稱。
+function pchomeOptlogCellView(list, nameOf){
+  var arr=(Array.isArray(list)?list:[]).filter(function(e){ return e&&typeof e==='object'; });
+  var e=pchomeOptlogLatest(arr); if(!e) return null;
+  var d=String(e.date||''), m=d.match(/^\d{4}-(\d{2})-(\d{2})$/), md=m?(m[1]+'/'+m[2]):d;
+  var by=e.by?String((nameOf?nameOf(e.by):'')||e.by):'';
+  var type=String(e.type||'其他'), note=String(e.note||'');
+  return { n:arr.length, type:type, note:note, md:md, by:by, meta:[md,by].filter(Boolean).join(' '),
+    title:'【'+type+'】'+note+'\n'+[d+(e.time?' '+e.time:''), by].filter(Boolean).join(' · ') };
+}
+// 格子內層 HTML（外觀照酷澎「調整」欄：一行、像輸入框的框；沿用 .cup-pg-note-inp）。edit＝null（檢視）或 {type,note}（輸入中）。deps＝{esc, types, nameOf}。
+//   🔴 跟酷澎調整欄不同：這裡每按一次 Enter 是「新增一筆優化紀錄」，不是覆蓋同一段文字。
+function pchomeOptlogCellInnerHTML(list, edit, deps){
+  var esc=deps.esc, EDIT='onclick="event.stopPropagation();pchomeOptlogCellEdit(this)"';
+  if(edit){
+    var types=deps.types||[], cur=(types.indexOf(edit.type)>=0)?edit.type:(types[0]||'其他');
+    return '<div class="pch-ol-row" onclick="event.stopPropagation()">'
+      +'<select class="pch-ol-sel" aria-label="紀錄類型" onchange="pchomeOptlogCellDraft(\'type\',this.value)">'
+        +types.map(function(t){ return '<option value="'+esc(t)+'"'+(t===cur?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
+      +'<input class="cup-pg-note-inp pch-ol-inp" type="text" value="'+esc(edit.note||'')+'" placeholder="輸入後按 Enter 新增，Esc 取消" oninput="pchomeOptlogCellDraft(\'note\',this.value)"'
+        +' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()"></div>';
+  }
+  var v=pchomeOptlogCellView(list, deps.nameOf);
+  if(!v) return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="點一下新增優化紀錄">輸入優化紀錄…</div></div>';
+  return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main" '+EDIT+' title="'+esc(v.title)+'"><span class="pch-ol-type">'+esc(v.type)+'</span><span class="pch-ol-note">'+esc(v.note)+'</span></div>'
+    +'<a class="pch-ol-n" onclick="event.stopPropagation();pchomeOptlogCellOpen(this)" title="看全部優化紀錄">共 '+v.n+' 筆</a></div>';
+}
+// PCH-OLCELL-PURE-END
+var _pchomeOlEdit=null;          // 目前編輯中的那一格 {shop,sku,type,note}；一次只開一格
+var _pchomeOlLastType='調價';    // 這次開站內上一次用的類型（只在記憶體）
+function pchomeOptlogCellHTML(shop, sku){
+  var list=(pchomeLoadOptlog(shop)||{})[sku];
+  var ed=(_pchomeOlEdit&&_pchomeOlEdit.shop===shop&&String(_pchomeOlEdit.sku)===String(sku))?_pchomeOlEdit:null;
+  return pchomeOptlogCellInnerHTML(list, ed, {esc:_momoEsc, types:PCHOME_OPTLOG_TYPES, nameOf:momoOptlogUserToName});
+}
+function pchomeOptlogTdHTML(shop, sku){ return '<td class="tl pch-ol-td" data-pch-ol-shop="'+_momoEsc(shop)+'" data-pch-ol="'+_momoEsc(sku)+'" onclick="event.stopPropagation()">'+pchomeOptlogCellHTML(shop, sku)+'</td>'; }
+function _pchomeOlTd(shop, sku){ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return null;
+  var tds=c.querySelectorAll('td[data-pch-ol]'); for(var i=0;i<tds.length;i++){ if(tds[i].getAttribute('data-pch-ol')===String(sku)) return tds[i]; } return null; }
+function _pchomeOlCtx(el){ var td=(el&&el.closest)?el.closest('td[data-pch-ol]'):null; return td?{td:td, shop:td.getAttribute('data-pch-ol-shop'), sku:td.getAttribute('data-pch-ol')}:null; }
+function pchomeOptlogCellRefresh(shop, sku){ try{ var td=_pchomeOlTd(shop, sku); if(td) td.innerHTML=pchomeOptlogCellHTML(shop, sku); }catch(e){} }
+// 整欄重畫（雲端優化紀錄晚到時用）：只動這一欄的 td；編輯中那一格有焦點就不動（不打斷輸入）。
+function pchomeOptlogCellsRefreshAll(shop){ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return;
+  [].forEach.call(c.querySelectorAll('td[data-pch-ol]'), function(td){ if(td.contains(document.activeElement)) return;
+    var h=pchomeOptlogCellHTML(shop, td.getAttribute('data-pch-ol')); if(td.innerHTML!==h) td.innerHTML=h; }); }
+function pchomeOptlogCellEdit(el){
+  var x=_pchomeOlCtx(el); if(!x) return;
+  var prev=_pchomeOlEdit;
+  _pchomeOlEdit={shop:x.shop, sku:x.sku, type:_pchomeOlLastType, note:''};
+  if(prev&&(prev.shop!==x.shop||String(prev.sku)!==String(x.sku))) pchomeOptlogCellRefresh(prev.shop, prev.sku);   // 一次只開一格：前一格放棄
+  x.td.innerHTML=pchomeOptlogCellHTML(x.shop, x.sku);
+  var inp=x.td.querySelector('.pch-ol-inp'); if(inp){ try{ inp.focus({preventScroll:true}); }catch(e){ inp.focus(); } }
+}
+function pchomeOptlogCellDraft(kind, v){ if(!_pchomeOlEdit) return; if(kind==='type') _pchomeOlEdit.type=v; else _pchomeOlEdit.note=v; }   // 只記在記憶體（整張表重畫時草稿還在）
+function pchomeOptlogCellCancel(){ var e=_pchomeOlEdit; _pchomeOlEdit=null; if(e) pchomeOptlogCellRefresh(e.shop, e.sku); }
+function pchomeOptlogCellSave(el){
+  var x=_pchomeOlCtx(el); if(!x) return;
+  var sel=x.td.querySelector('.pch-ol-sel'), inp=x.td.querySelector('.pch-ol-inp');
+  var type=sel?sel.value:'其他', txt=pchomeOptlogCellNote(inp?inp.value:'');
+  if(!txt){ if(inp){ inp.classList.add('pch-ol-err'); inp.focus(); } return; }   // 空白不存、標紅框
+  pchomeAddOptlog(x.shop, x.sku, {type:type, note:txt});
+  pchomeOptlogClearCache(x.shop); pchomeRefreshSyncBtn(x.shop);   // 收尾同 pchomeAddOptlogModal
+  _pchomeOlLastType=type; _pchomeOlEdit=null;
+  pchomeOptlogCellRefresh(x.shop, x.sku);   // 只重畫這一格
+}
+function pchomeOptlogCellOpen(el){
+  var x=_pchomeOlCtx(el); if(!x) return;
+  pchomeOpenAnalysis(x.shop, x.sku);
+  if(document.getElementById('pch-ana-tab-optlog')) pchomeAnaSwitchTab('optlog');
 }
 // ══════ PChome 優化紀錄 → 工作日誌 pchome-summary（照 momo momoUpdateDailyProgress／momoOpenDpDetail；ec.dailyProgress 全站共用，只換 pchome-summary、保留 momo-summary 與其他）══════
 var PCHOME_OPTLOG_DP_SHOPS=['轉單','寄倉'];
@@ -37740,6 +37827,7 @@ var PCHOME_PROFIT_COLS=[
   {k:'profit',label:'淨利',w:118,fmt:'money',info:'營收未稅−成本−費用未稅；本期零銷或缺成本顯「—」'},
   {k:'margin',label:'淨利率',w:90,fmt:'pct1'},
   {k:'tags',label:'標籤',w:150,left:true,info:'依嚴重度顯示最該注意的一個標籤，其餘收「+N」、hover 看全部。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
+  {k:'optlog',label:'優化紀錄',w:250,left:true,nosort:true,info:'這個通路、這個商品最近一筆優化紀錄。點格子直接新增一筆；點「共 N 筆」看全部（商品彈窗的優化紀錄分頁）。新增後記得按「☁ 同步雲端」。'},   // 2026-11-19：表格直接看與新增（不排序、不進匯出）
 ];
 var _PCHOME_COLCFG_LS='pchome_cols|';   // + shop（每賣場各自一份、不上雲；key 不在 sync 白名單前綴內）
 function pchomeColAvail(){ return PCHOME_PROFIT_COLS; }   // PChome 目前無賣場條件分支（轉單/寄倉共用同一組欄）；保留函式形狀以防日後分歧
@@ -38332,7 +38420,7 @@ function pchomeBillBodyHTML(shop){
   var arrow=function(k){ return (sort&&sort.col===k)?(sort.dir==='asc'?'▲':'▼'):''; };
   var thead='<thead><tr>'+COLS.map(function(c){
     var info=c.info?'<span class="mm-th-q"><span class="mm-info" title="'+esc(c.info)+'" onclick="event.stopPropagation()">?</span></span>':'<span class="mm-th-q"></span>';
-    return '<th class="mm-th'+(c.left?' tl':'')+(c.fixed?' mm-sticky-col':'')+'" onclick="pchomeProfitSetSort(\''+shop+'\',\''+c.k+'\')" style="text-align:'+(c.left?'left':'right')+'"><span class="mm-th-wrap"><span class="mm-th-name">'+c.label+'</span>'+info+'<span class="mm-th-arrow">'+arrow(c.k)+'</span></span><span class="mm-col-grip" onmousedown="pchomeColResizeDrag(event,\''+shop+'\',\''+c.k+'\')" onclick="event.stopPropagation()"></span></th>';
+    return '<th class="mm-th'+(c.left?' tl':'')+(c.fixed?' mm-sticky-col':'')+'"'+(c.nosort?'':' onclick="pchomeProfitSetSort(\''+shop+'\',\''+c.k+'\')"')+' style="text-align:'+(c.left?'left':'right')+'"><span class="mm-th-wrap"><span class="mm-th-name">'+c.label+'</span>'+info+'<span class="mm-th-arrow">'+arrow(c.k)+'</span></span><span class="mm-col-grip" onmousedown="pchomeColResizeDrag(event,\''+shop+'\',\''+c.k+'\')" onclick="event.stopPropagation()"></span></th>';
   }).join('')+'</tr></thead>';
   var dashCell='<td style="text-align:right;color:#c7cad1">—</td>';
   var num=function(v,color){ return '<td style="text-align:right'+(color?';color:'+color:'')+'">'+pchomeMoney(v)+'</td>'; };
@@ -38368,6 +38456,7 @@ function pchomeBillBodyHTML(shop){
       case 'profit': return x.淨利==null?dashCell:num(x.淨利, x.淨利<0?'#ef4444':'');
       case 'margin': var mg=(x.淨利率==null)?'#c7cad1':(x.淨利率<0?'#ef4444':(x.淨利率>=0.25?'#10b981':'#374151')); return '<td style="text-align:right;color:'+mg+'">'+pchomePct(x.淨利率)+'</td>';
       case 'tags': return '<td class="tl">'+pchomeTagChipHTML(tagBy[x.料號]||[])+'</td>';
+      case 'optlog': return pchomeOptlogTdHTML(shop, x.料號);
       default: return dashCell;
     }
   };
@@ -38427,7 +38516,7 @@ function pchomeCalBodyHTML(shop){
   var colgroup='<colgroup>'+COLS.map(function(c){return '<col style="width:'+pchomeColW(shop,c.k,c.w)+'px">';}).join('')+'</colgroup>';
   var arrow=function(k){ return (sort&&sort.col===k)?(sort.dir==='asc'?'▲':'▼'):''; };
   var thead='<thead><tr>'+COLS.map(function(c){ var info=c.info?'<span class="mm-th-q"><span class="mm-info" title="'+esc(c.info)+'" onclick="event.stopPropagation()">?</span></span>':'<span class="mm-th-q"></span>';
-    return '<th class="mm-th'+(c.left?' tl':'')+(c.fixed?' mm-sticky-col':'')+'" onclick="pchomeProfitSetSort(\''+shop+'\',\''+c.k+'\')" style="text-align:'+(c.left?'left':'right')+'"><span class="mm-th-wrap"><span class="mm-th-name">'+c.label+'</span>'+info+'<span class="mm-th-arrow">'+arrow(c.k)+'</span></span><span class="mm-col-grip" onmousedown="pchomeColResizeDrag(event,\''+shop+'\',\''+c.k+'\')" onclick="event.stopPropagation()"></span></th>';
+    return '<th class="mm-th'+(c.left?' tl':'')+(c.fixed?' mm-sticky-col':'')+'"'+(c.nosort?'':' onclick="pchomeProfitSetSort(\''+shop+'\',\''+c.k+'\')"')+' style="text-align:'+(c.left?'left':'right')+'"><span class="mm-th-wrap"><span class="mm-th-name">'+c.label+'</span>'+info+'<span class="mm-th-arrow">'+arrow(c.k)+'</span></span><span class="mm-col-grip" onmousedown="pchomeColResizeDrag(event,\''+shop+'\',\''+c.k+'\')" onclick="event.stopPropagation()"></span></th>';
   }).join('')+'</tr></thead>';
   var dashCell='<td style="text-align:right;color:#c7cad1">—</td>';
   var num=function(v,color){ return '<td style="text-align:right'+(color?';color:'+color:'')+'">'+pchomeMoney(v)+'</td>'; };
@@ -38453,6 +38542,7 @@ function pchomeCalBodyHTML(shop){
       case 'profit': return x.淨利==null?dashCell:num(x.淨利, x.淨利<0?'#ef4444':'');
       case 'margin': var mg=(x.淨利率==null)?'#c7cad1':(x.淨利率<0?'#ef4444':(x.淨利率>=0.25?'#10b981':'#374151')); return '<td style="text-align:right;color:'+mg+'">'+pchomePct(x.淨利率)+'</td>';
       case 'tags': return '<td class="tl">'+pchomeTagChipHTML(tagBy[x.料號]||[])+'</td>';
+      case 'optlog': return pchomeOptlogTdHTML(shop, x.料號);
       default: return dashCell; } };
   var bodyRows=shown.map(function(x){ return '<tr onclick="pchomeOpenAnalysis(\''+shop+'\',\''+_momoEsc(x.料號)+'\')" style="cursor:pointer" title="點看單品分析（歷程／優化紀錄）">'+COLS.map(function(c){return cell(c,x);}).join('')+'</tr>'; }).join('');
   var totMargin=(T.營收>0)?T.淨利/T.營收:null;
@@ -38611,6 +38701,7 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel, pchomeOnSearch, pchomeRenderProfitBody,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
   pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomeOvSetMonth, pchomePCInput, pchomePCReset, pchomePCToOptlog, pchomePCSave, pchomePCSaveConfirm, pchomeAddOptlogModal, pchomeDeleteOptlog,
+  pchomeOptlogCellEdit, pchomeOptlogCellSave, pchomeOptlogCellCancel, pchomeOptlogCellDraft, pchomeOptlogCellOpen, pchomeOptlogCellRefresh,
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }
