@@ -453,6 +453,12 @@ ESM 有個致命陷阱必須牢記：
   的 `restDeleteFields`。
 
 ### 同步的眉角（避免覆蓋使用者輸入）
+- 唯讀帳號（`role==='view'`，判斷只有 app.js `__isReadOnly`／`App.isReadOnly` 一支）不能同步（#501）：profit.js `_roSyncBlocked(where)` 接在每個推送入口的第一行
+  （`syncToCloud`、MOMO／酷澎／PChome 的預覽與確認、MO+ 兩支自動推、`momoAutoPushStock`、`syncAffRptToCloud`、MO+ 商品主檔直推、`momoMoPlusCleanDirty`、`__momoMergeEnforce`、`__cupProductsMergeEnforce`）。
+  唯讀 ⇒ 跳「唯讀帳號不能同步」、不推、不清 dirty／待同步、不回寫本機、不動 lastpushed。🔴 新增推送入口要接這支（`scripts/ro-sync-gate.test.cjs` 會檢查）。
+  即存即寫的（標籤、蝦皮總表、評分表、測試通路報表）與一次性搬家 Console 工具刻意不接；app.js `__installReadonlyCloudGuard`（把寫入換成 `Promise.resolve()`）仍是最後一道。
+- 唯讀帳號的介面擋板是白名單（app.js `__RO_WRITE_RE`）：handler 名字不在裡面就不會被擋。🔴 新增會改資料的 inline handler 要加進去，純試算／檢視／匯出不可以加
+  （`scripts/ro-ui-whitelist.test.cjs`）。結尾有 `\b`，名字要寫完整（`momoPCSave` 擋不到 `momoPCSaveConfirm`）。輸入框按 Enter 直接存的（`onkeydown`）也看這份白名單。
 - 雲端快照回來時，若使用者正在輸入卡片（`.card-rev` / `.card-ads` 等）或有
   未儲存更動，**不重繪**，以免把打到一半的數字蓋掉。
 - 首批快照 (`__firstCloudSnapshot`) 一律強制重繪，否則手機開頁會卡在空資料。

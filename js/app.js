@@ -3607,7 +3607,11 @@ function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（�
  * 採【允許為主 + 攔截寫入】：view 的檢視動作（切賣場/季別/排序/篩選/匯出/看帳號）一律放行，
  * 只攔明確的寫入 handler；漏網的仍由資料層擋下（不會改到資料，只是少了灰底提示）。 */
 // 明確「會改資料」的 inline handler 名稱片段（不含匯出 doExport/momoExport/cupExport、不含檢視狀態 setShop/tab/filter）
-const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cupSyncToCloud|pchomeMasterCommit|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoEditOptlog|momoSaveOptlogEdit|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|disableUser|restoreUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal|saveSplitDraft|openSheetSync|confirmSheetSync|sheetSyncReload)\b/;
+const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cupSyncToCloud|pchomeMasterCommit|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoEditOptlog|momoSaveOptlogEdit|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|disableUser|restoreUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal|saveSplitDraft|openSheetSync|confirmSheetSync|sheetSyncReload|pchomeOpenSyncPreview|pchomeConfirmSync|syncAffRptToCloud|deleteProfitNote|kpi(Books|Friday|Coupang)MissCostSave|momoMoPlusCostInlineSave|cupAnaCostSave|momoPCSave(Confirm)?|pchomePCSave(Confirm)?|pchomeAddOptlogModal|pchomeDeleteOptlog)\b/;
+// #501 第 2 塊（2026-11-19）補進來的：PChome 同步鈕（開預覽／確認）、聯盟行銷同步鈕、刪除廣告調整、
+//   KPI 博客來／FriDay／酷澎補成本、MO+ 商品內嵌成本、酷澎分析卡補成本、MOMO／PChome 定價與成本的儲存（含確認那一步）、
+//   PChome 優化紀錄新增與刪除。🔴 純試算的不可以加：cupPCInput／cupPCReset／cupPCToOptlog、momoPC／pchomePC 的輸入、還原、
+//   「帶入優化紀錄」（momoPCToOptlog／pchomePCToOptlog 只是預填輸入框）。
 // ⚠ 這是【白名單】：新功能的寫入 handler 沒加進來就【不會】被擋 —— view 角色照樣點得動、
 //   照樣寫進自己的 localStorage、還會看到同步鈕亮起（本檔的三道防線只有防線②
 //   __installReadonlyCloudGuard 擋得住雲端，本機那一步已經寫下去了），使用者會以為存好了。
@@ -3618,8 +3622,9 @@ const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cu
 function __roIsWriteEl(el) {
   if (!el || !el.getAttribute) return false;
   if (el.matches && el.matches('input[type="file"]')) return true;
-  // 檢查 onclick / oninput / onchange 三種 inline handler（酷澎調整欄 note 走 oninput）
-  const h = (el.getAttribute('onclick') || '') + ';' + (el.getAttribute('oninput') || '') + ';' + (el.getAttribute('onchange') || '');
+  // 檢查 onclick / oninput / onchange / onkeydown 四種 inline handler（酷澎調整欄 note 走 oninput；
+  //   onkeydown＝輸入框按 Enter 直接存的那種，例：MO+ 內嵌成本、PChome 優化紀錄輸入框，#501 第 2 塊補）
+  const h = (el.getAttribute('onclick') || '') + ';' + (el.getAttribute('oninput') || '') + ';' + (el.getAttribute('onchange') || '') + ';' + (el.getAttribute('onkeydown') || '');
   if (__RO_WRITE_RE.test(h)) return true;
   if (el.getAttribute('contenteditable') === 'true') return true;
   return false;
@@ -3643,6 +3648,16 @@ function __roInitUIGuard() {
   document.addEventListener('click', __roGuardEvent, true);
   document.addEventListener('input', __roGuardEvent, true);
   document.addEventListener('change', __roGuardEvent, true);
+  // #501 第 2 塊：輸入框按 Enter 直接存（onkeydown="if(event.key==='Enter')xxxSave(…)"）原本攔不到。
+  //   只看【這個元素自己的】onkeydown、只攔 Enter：不往上找父層（免得誤擋搜尋框），Esc 等其他鍵照常。
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !document.body.classList.contains('ro-readonly')) return;
+    const el = e.target;
+    if (!el || !el.getAttribute || !__RO_WRITE_RE.test(el.getAttribute('onkeydown') || '')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    __roDenied();
+  }, true);
   // 視覺裝飾：把寫入控制項標成灰底 + hover 提示（決策 1）；寫入輸入框直接設 readOnly（不能打字）。
   //   debounce 掃描動態渲染的內容。
   let __roDecoT = 0;
@@ -3655,7 +3670,7 @@ function __roInitUIGuard() {
       });
       return;
     }
-    const nodes = document.querySelectorAll('#view-app [onclick], #view-app [oninput], #view-app [onchange], #view-app input[type="file"], #view-app [contenteditable="true"]');
+    const nodes = document.querySelectorAll('#view-app [onclick], #view-app [oninput], #view-app [onchange], #view-app [onkeydown], #view-app input[type="file"], #view-app [contenteditable="true"]');
     nodes.forEach(el => {
       if (el.__roMarked) return;
       if (__roIsWriteEl(el)) {
