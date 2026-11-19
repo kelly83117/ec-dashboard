@@ -99,7 +99,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <button class="stab" style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>好麻吉</button>
-            <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#e74c3c"></span>露營館</button>
+            <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#1d4ed8"></span>露營館</button>
           </div>
         </div>
         <div class="pf-tabgrp">
@@ -10973,7 +10973,6 @@ function _kpiRefreshViews(){
     if(_kpiIsEditing(el)){_kpiV2.renderTimer=setTimeout(_kpiRefreshViews,400);return;}
     renderKpiTab();
   }
-  if(document.getElementById('cup-sum-kpi-rev')){try{syncCoupangSummaryFromKpi();}catch{}}
 }
 function _kpiCellKey(month,segs){return [month].concat(segs).join('\u0001');}
 // 給 _kpiGroupTableHtml 用：這一格上次寫入失敗（或還沒確認）就回傳 class。
@@ -17520,7 +17519,6 @@ function onCupMonthChange(shop,platform,sel){
   _cupPeriod[shop].month=sel.value;
   if(platform==='coupang'){_cupPeriod[shop].half='full';}
   updateCupHalfSelect(shop,platform);
-  if(platform==='coupang'&&shop==='總表')syncCoupangSummaryFromKpi();   // cupTryLoadSaved 死路徑已移除；非總表酷澎的舊 render 由 cupRenderShop 取代
 }
 function onCupHalfChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
@@ -17534,286 +17532,7 @@ function updateCupHalfSelect(shop,platform){
   sel.innerHTML=opts.map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('');
 }
 
-// ── 酷澎總表（跨店彙總儀表板）──
-function coupangSumShopCardHTML(shop){
-  return`<div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <span style="font-weight:700;font-size:15px;color:#1a1a2e">${cupShopDisplay(shop)}</span>
-      <span style="font-size:12px;color:#9ca3af" id="cup-sum-${shop}-orders">— 筆訂單</span>
-    </div>
-    <div style="display:flex;gap:20px;margin-bottom:12px">
-      <div><div style="font-size:12px;color:#9ca3af">營收</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rev">—</div></div>
-      <div><div style="font-size:12px;color:#9ca3af">純利</div><div class="cup-sum-profit-v" style="font-size:17px;font-weight:700" id="cup-sum-${shop}-profit">—</div></div>
-      <div><div style="font-size:12px;color:#9ca3af">純利率</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rate">—</div></div>
-    </div>
-    <div style="height:8px;border-radius:4px;background:#f3f4f6" id="cup-sum-${shop}-bar"></div>
-  </div>`;
-}
-// 酷澎總表預設月份：最新一個「KPI 酷澎三家任一家有營收」或「淨利表有酷澎報表」的月份（只在 MONTHS 裡找）；都沒有才退回 2026/06。
-function _cupSummaryDefaultMonth(){
-  let best='';
-  try{ const rows=getKpiRows()||[]; MONTHS.forEach(mo=>{ const row=rows.find(r=>r.month===mo.replace('/','-')); if(!row) return;
-    if(['商城-好麻吉','商城-露營館','酷澎買斷'].some(s=>{ const d=_cupKpiShopData(row,s); return d&&(Number(d.rev)||0)>0; }) && mo>best) best=mo; }); }catch(e){}
-  try{ CUP_OVERLAP_SHOPS.forEach(s=>cupAvailableMonths(s).forEach(m=>{ const mo=String(m).replace('-','/'); if(MONTHS.indexOf(mo)>=0&&mo>best) best=mo; })); }catch(e){}
-  return best||'2026/06';
-}
-function coupangSummaryHTML(){
-  _cupPeriod['總表']=_cupPeriod['總表']||{month:_cupSummaryDefaultMonth(),half:'full'};
-  const p=_cupPeriod['總表'];
-  return`
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-    <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-    <select onchange="onCupMonthChange('總表','coupang',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-      ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
-    </select>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <button class="col-pick-btn" id="cup-sum-view-card" onclick="setCoupangSummaryView('card')" style="border-color:#0ea5e9;color:#0ea5e9">卡片式</button>
-      <button class="col-pick-btn" id="cup-sum-view-table" onclick="setCoupangSummaryView('table')">原始表格</button>
-    </div>
-  </div>
-
-  <div id="cup-sum-card-view">
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
-        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總訂單數</div>
-        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-orders">—</div>
-      </div>
-      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
-        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總營收</div>
-        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-rev">—</div>
-      </div>
-      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
-        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總純利</div>
-        <div class="cup-sum-profit-v" style="font-size:22px;font-weight:700" id="cup-sum-kpi-profit">—</div>
-      </div>
-      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
-        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">純利率</div>
-        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-rate">—</div>
-      </div>
-    </div>
-
-    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px;margin-bottom:20px">
-      <div style="font-size:13px;color:#6b7280;font-weight:600;margin-bottom:10px">近 6 個月營收與純利趨勢</div>
-      <div id="cup-sum-trend-empty" style="padding:48px 20px;text-align:center;color:#9ca3af">
-        <div style="font-size:32px;margin-bottom:8px">📈</div>
-        <div style="font-size:13px">尚未串接資料</div>
-      </div>
-      <div style="position:relative;height:240px;display:none" id="cup-sum-trend-wrap"><canvas id="cup-sum-trend-chart"></canvas></div>
-    </div>
-
-    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:10px">酷澎商城</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-      ${coupangSumShopCardHTML('麻吉')}
-      ${coupangSumShopCardHTML('露營館')}
-      ${coupangSumShopCardHTML('買斷')}
-    </div>
-  </div>
-
-  <div id="cup-sum-table-view" style="display:none">
-    <div style="overflow-x:auto;border:1px solid #e4e6ef;border-radius:12px">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
-            <th style="padding:8px 12px;text-align:left;color:#6b7280;font-weight:700">名稱</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">訂單數</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">營收</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">商品成本</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">手續費</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">退貨運費</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">稅金</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">耗材</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">純利</th>
-            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">純利率</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style="border-top:1px solid #f0f2f7;font-weight:700;background:#fafbff">
-            <td style="padding:8px 12px">酷澎商城</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-orders">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-rev">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-cost">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-fee">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-ret">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-tax">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-material">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-profit">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-rate">—</td>
-          </tr>
-          <tr style="border-top:1px solid #f0f2f7">
-            <td style="padding:8px 12px 8px 28px">麻吉</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-orders">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-rev">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-cost">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-fee">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-ret">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-tax">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-material">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-profit">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-rate">—</td>
-          </tr>
-          <tr style="border-top:1px solid #f0f2f7">
-            <td style="padding:8px 12px 8px 28px">露營館</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-orders">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-rev">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-cost">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-fee">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-ret">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-tax">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-material">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-profit">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-rate">—</td>
-          </tr>
-          <tr style="border-top:1px solid #f0f2f7">
-            <td style="padding:8px 12px">酷澎(買斷)</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-qty">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-rev">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-cost">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-fee">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-ret">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-tax">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-material">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-profit">—</td>
-            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-rate">—</td>
-          </tr>
-          <tr class="tr-total">
-            <td>總計</td>
-            <td class="td-num" id="cup-tbl-total-orders">—</td>
-            <td class="td-num" id="cup-tbl-total-rev">—</td>
-            <td class="td-num" id="cup-tbl-total-cost">—</td>
-            <td class="td-num" id="cup-tbl-total-fee">—</td>
-            <td class="td-num" id="cup-tbl-total-ret">—</td>
-            <td class="td-num" id="cup-tbl-total-tax">—</td>
-            <td class="td-num" id="cup-tbl-total-material">—</td>
-            <td class="td-num" id="cup-tbl-total-profit">—</td>
-            <td class="td-num" id="cup-tbl-total-rate">—</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>`;
-}
-function setCoupangSummaryView(v){
-  const cardEl=document.getElementById('cup-sum-card-view');
-  const tableEl=document.getElementById('cup-sum-table-view');
-  const btnCard=document.getElementById('cup-sum-view-card');
-  const btnTable=document.getElementById('cup-sum-view-table');
-  if(!cardEl||!tableEl)return;
-  cardEl.style.display=v==='card'?'block':'none';
-  tableEl.style.display=v==='table'?'block':'none';
-  if(btnCard){btnCard.style.borderColor=v==='card'?'#0ea5e9':'';btnCard.style.color=v==='card'?'#0ea5e9':'';}
-  if(btnTable){btnTable.style.borderColor=v==='table'?'#0ea5e9':'';btnTable.style.color=v==='table'?'#0ea5e9':'';}
-}
-// 酷澎總表的三個賣場（商城-好麻吉/商城-露營館/酷澎買斷）現在直接抓 KPI 那邊填好的資料，
-// 不用再手動輸入一次；月份選單切換時（onCupMonthChange）跟頁籤第一次開啟時都會呼叫這裡。
-function _cupKpiShopData(row,shop){
-  const group=KPI_GROUPS.find(g=>g.key==='coupang');
-  // #500：要走 _kpiShopCalc（＝_kpiCalcAll(_kpiRawForCalc(...))），跟 KPI 頁同一支；直接 _kpiCalcAll(raw) 會漏掉 autoFill（耗材＝訂單數×$3），純利偏高。
-  const d=_kpiShopCalc(row,group,shop);
-  const rev=d.rev||0,pure=d.pure||0;
-  return{qty:d.qty||0,rev,cost:d.cost||0,fee:d.fee||0,ret:d.ret||0,tax:d.tax||0,material:d.material||0,pure,rate:rev>0?pure/rev*100:null};
-}
-function syncCoupangSummaryFromKpi(){
-  const p=_cupPeriod['總表']||{month:_cupSummaryDefaultMonth()};
-  const month=p.month.replace('/','-');
-  const row=getKpiRows().find(r=>r.month===month);
-  const majhi=_cupKpiShopData(row,'商城-好麻吉');
-  const camp=_cupKpiShopData(row,'商城-露營館');
-  const buyout=_cupKpiShopData(row,'酷澎買斷');
-  const mall={qty:majhi.qty+camp.qty,rev:majhi.rev+camp.rev,cost:majhi.cost+camp.cost,fee:majhi.fee+camp.fee,ret:majhi.ret+camp.ret,tax:majhi.tax+camp.tax,material:majhi.material+camp.material,pure:majhi.pure+camp.pure};
-  mall.rate=mall.rev>0?mall.pure/mall.rev*100:null;
-  const total={qty:mall.qty+buyout.qty,rev:mall.rev+buyout.rev,cost:mall.cost+buyout.cost,fee:mall.fee+buyout.fee,ret:mall.ret+buyout.ret,tax:mall.tax+buyout.tax,material:mall.material+buyout.material,pure:mall.pure+buyout.pure};
-  total.rate=total.rev>0?total.pure/total.rev*100:null;
-
-  const setTxt=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
-  // 純利負數＝紅、正數＝深色（A-310，#476；同 .mm-kpi-v.mm-neg 那一套）。
-  //   每次填值都要 toggle：切月份只重填值、不重建 HTML，不 toggle 的話紅色會留到下一個月。
-  const setNeg=(id,neg)=>{const el=document.getElementById(id);if(el)el.classList.toggle('mm-neg',!!neg);};
-  // ⚠ fmtN 是 Math.abs（全站共用、【不要】改它），所以純利虧損時要自己補負號，
-  //   不然畫面會出現「紅色的正數」。位置照 momoMoney / pchomeMoney / _kvMoney：負號在 NT$ 之前。
-  //   用 U+2212「−」（同蝦皮五格 _kvMoney / _kvWan），不是 ASCII 的 '-'。
-  //   判斷用 v<0，與 setNeg 同一個基準 → 有負號的必定是紅的、紅的必定有負號。
-  //   ⚠ 只給「純利」用：營收、純利率等其他格維持原樣。
-  const sign=v=>(v<0?'−':'');
-  setTxt('cup-sum-kpi-orders',total.qty?fmtN(total.qty):'—');
-  setTxt('cup-sum-kpi-rev',total.rev?'NT$'+fmtN(Math.round(total.rev)):'—');
-  setTxt('cup-sum-kpi-profit',total.rev||total.pure?sign(total.pure)+'NT$'+fmtN(Math.round(total.pure)):'—');
-  setTxt('cup-sum-kpi-rate',total.rate!==null?total.rate.toFixed(2)+'%':'—');
-  setNeg('cup-sum-kpi-profit',total.pure<0);
-
-  const fillCard=(shopLabel,d)=>{
-    setTxt(`cup-sum-${shopLabel}-orders`,(d.qty?fmtN(d.qty):'0')+' 筆訂單');
-    setTxt(`cup-sum-${shopLabel}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
-    setTxt(`cup-sum-${shopLabel}-profit`,d.rev||d.pure?sign(d.pure)+fmtN(Math.round(d.pure)):'—');
-    setTxt(`cup-sum-${shopLabel}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
-    setNeg(`cup-sum-${shopLabel}-profit`,d.pure<0);
-  };
-  fillCard('麻吉',majhi);
-  fillCard('露營館',camp);
-  fillCard('買斷',buyout);
-
-  const fillTblRow=(prefix,d,qtyKey)=>{
-    setTxt(`cup-tbl-${prefix}-${qtyKey}`,d.qty?fmtN(d.qty):'—');
-    setTxt(`cup-tbl-${prefix}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
-    setTxt(`cup-tbl-${prefix}-cost`,d.cost?fmtN(Math.round(d.cost)):'—');
-    setTxt(`cup-tbl-${prefix}-fee`,d.fee?fmtN(Math.round(d.fee)):'—');
-    setTxt(`cup-tbl-${prefix}-ret`,d.ret?fmtN(Math.round(d.ret)):'—');
-    setTxt(`cup-tbl-${prefix}-tax`,d.tax?fmtN(Math.round(d.tax)):'—');
-    setTxt(`cup-tbl-${prefix}-material`,d.material?fmtN(Math.round(d.material)):'—');
-    // 表格檢視的純利也要補負號（同上方卡片的 sign；fmtN 是 Math.abs），不然虧損會顯示成正數、跟同列的負純利率對不上。
-    //   先四捨五入再判斷正負：-0.4 這種會變 0 的不要顯示成「−0」（這格沒有紅字，不必跟 setNeg 對齊）。
-    const pureR=Math.round(d.pure);
-    setTxt(`cup-tbl-${prefix}-profit`,d.rev||d.pure?sign(pureR)+fmtN(pureR):'—');
-    setTxt(`cup-tbl-${prefix}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
-  };
-  fillTblRow('mall',mall,'orders');
-  fillTblRow('麻吉',majhi,'orders');
-  fillTblRow('露營館',camp,'orders');
-  fillTblRow('bo',buyout,'qty');
-  fillTblRow('total',total,'orders');
-
-  renderCupTrendChart(month);
-}
-let _cupTrendChart=null;
-// 近 6 個月營收/純利趨勢：以目前選的月份為終點，往前推 6 個月，抓 KPI 三個賣場加總。
-function renderCupTrendChart(endMonth){
-  const emptyEl=document.getElementById('cup-sum-trend-empty');
-  const wrapEl=document.getElementById('cup-sum-trend-wrap');
-  const canvas=document.getElementById('cup-sum-trend-chart');
-  if(!emptyEl||!wrapEl||!canvas)return;
-  const rows=getKpiRows();
-  const[endY,endM]=endMonth.split('-').map(Number);
-  const months=[];
-  for(let i=5;i>=0;i--){
-    let y=endY,m=endM-i;
-    while(m<=0){m+=12;y--;}
-    months.push(`${y}-${String(m).padStart(2,'0')}`);
-  }
-  const labels=months.map(m=>m.slice(5)+'月');
-  const revData=[],pureData=[];
-  let hasAny=false;
-  months.forEach(m=>{
-    const row=rows.find(r=>r.month===m);
-    const majhi=_cupKpiShopData(row,'商城-好麻吉'),camp=_cupKpiShopData(row,'商城-露營館'),buyout=_cupKpiShopData(row,'酷澎買斷');
-    const rev=majhi.rev+camp.rev+buyout.rev,pure=majhi.pure+camp.pure+buyout.pure;
-    if(rev)hasAny=true;
-    revData.push(Math.round(rev));pureData.push(Math.round(pure));
-  });
-  if(!hasAny){
-    emptyEl.style.display='block';wrapEl.style.display='none';
-    if(_cupTrendChart){_cupTrendChart.destroy();_cupTrendChart=null;}
-    return;
-  }
-  emptyEl.style.display='none';wrapEl.style.display='block';
-  if(_cupTrendChart)_cupTrendChart.destroy();
-  _cupTrendChart=new Chart(canvas.getContext('2d'),{
-    type:'line',
-    data:{labels,datasets:[
-      {label:'營收',data:revData,borderColor:'#0ea5e9',backgroundColor:'#0ea5e9',tension:.3},
-      {label:'純利',data:pureData,borderColor:'#10b981',backgroundColor:'#10b981',tension:.3},
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>fmtN(v)}}}}
-  });
-}
+// ── 酷澎｜總表：2026-11-19 起改成淨利表口徑的 cupRenderOverview（照 MOMO／PChome 總表），舊的 KPI 版（卡片式＋原始表格）已移除 ──
 
 function momoShopHTML(shop,platform='momo'){
   const isCoupang=platform==='coupang';
@@ -28481,7 +28200,7 @@ function setCoupangShop(shop,btn){
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
   // 酷澎頁的成本一律接雲端成本表：不看本機有沒有（本機有舊表也要訂閱，不然一直用舊表算）。momoCostEnsureCloud 會開 MOMO 組訂閱（載過不重訂），
   //   訂閱照既有規則套用（有 dirty 的不覆蓋）、發 momoCostByOriginReady → _cupRedrawIfVisible 重畫；接上後再補一次重畫。
-  try{ momoCostEnsureCloud().then(ok=>{ if(ok) _cupRedrawIfVisible(); else console.warn('[酷澎] 成本表 20 秒內沒有接上雲端，暫用本機成本表'); }); }catch(e){}
+  try{ momoCostEnsureCloud().then(ok=>{ if(ok) _cupRedrawIfVisible(); else console.warn('[酷澎] 成本表 20 秒內沒有接上雲端，暫用本機成本表'); cupOvCostSettled(ok); }); }catch(e){}
   // 換通路先清已選未處理的檔案（_cupFiles 是兩家共用的全域）：杜絕「好麻吉選的檔切到露營館直接產表」。同一家重畫不清（上傳分頁靠 _cupFiles 顯示已選檔名）。
   if(_cupFilesShop && _cupFilesShop!==shop) cupClearStagedFiles();
   //   另一家的畫面也清掉：兩家的上傳分頁用同一組 id（cup-order-status／cup-gen-btn…），舊的留在 DOM 裡，getElementById 會抓到隱藏那家的，
@@ -28495,7 +28214,7 @@ function setCoupangShop(shop,btn){
   if(el){
     el.classList.add('active');
     if(shop==='總表'){
-      if(!el.dataset.init){ el.innerHTML=coupangSummaryHTML(); el.dataset.init='1'; syncCoupangSummaryFromKpi(); }
+      cupRenderOverview();   // 每次進來重畫（淨利表口徑；資料沒到齊顯示載入中）
     }else{
       cupRenderShop(shop);   // PR-3：子分頁殼（總表/訂單明細/商品同步）；每次進來重繪（子分頁狀態會變）
     }
@@ -31595,6 +31314,145 @@ window.__cupOvSnap=function(month){ const o={ month };
     o[s]={ has:d.has, rev:d.rev, net:d.net, cRev:d.cRev, rate:d.rate, qty:d.qty, stNum:d.stNum, stDen:d.stDen, stPct:d.stPct, counts:a.counts, suggestions:a.suggestions.map(x=>x.html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()) }; });
   return o; };
 
+// ══════ 酷澎｜總表（2026-11-19，Vanessa；照 pchomeRenderOverview：月份 → 口徑說明 → 提示 → 四張大數字卡 → 各通路分析 → 趨勢／淨利率 → 營收佔比／通路比較 → 銷量 Top 10）══════
+//   口徑＝淨利表（cupOvShopData，跟個別通路頁上方五張卡同一套），好麻吉＋露營館合計；買斷沒有淨利表資料，只放一張空卡。🔴 不讀 KPI 月結表。
+//   重畫：酷澎報表、共用成本表、商品主檔三種雲端資料到達都重畫（cupOvRedrawIfActive）；成本表或報表還沒到 ⇒ 顯示載入中，不把「缺成本」當結果。
+//   樣式用現成的 mm-*；通路顏色與少數間距在 css/profit.css 的 cup-ov-*（不寫 inline style）。
+const CUP_OV_COLOR={ '麻吉':'#c0392b', '露營館':'#1d4ed8' };   // 圖表用；同通路列那兩個點（CSS 的 --cup-maji／--cup-luying 同值）。露營館的藍＝首頁「酷澎露營館」（app.js PLATFORM）
+const CUP_OV_DOTCLS={ '麻吉':'cup-ov-dot-maji', '露營館':'cup-ov-dot-luying' };
+let _cupOvMonth='';            // 總表目前月份 'YYYY-MM'；空＝最新一個有報表的月份
+let _cupOvCharts=[];
+let _cupOvCostTimedOut=false;  // 成本表 20 秒內沒接上雲端 ⇒ 不再等，用本機成本表畫（頁首黃字說明）
+let _cupOvRedrawT=null, _cupOvRepT=null;
+function cupOvDestroyCharts(){ _cupOvCharts.forEach(c=>{ try{ c.destroy(); }catch(e){} }); _cupOvCharts=[]; }
+function cupOvSetMonth(v){ _cupOvMonth=v; cupRenderOverview(); }
+function cupOvMonths(){ const s=new Set(); CUP_OVERLAP_SHOPS.forEach(sh=>cupAvailableMonths(sh).forEach(m=>s.add(m))); return [...s].sort(); }   // 任一館有報表的月份，由小到大
+function cupOvActive(){ const el=document.getElementById('coupang-content-總表'); return !!(el&&el.classList.contains('active')&&el.offsetParent); }
+function cupOvRedrawIfActive(){ clearTimeout(_cupOvRedrawT); _cupOvRedrawT=setTimeout(()=>{ try{ if(cupOvActive()) cupRenderOverview(); }catch(e){ console.warn('[酷澎總表] 重畫失敗',e); } }, 300); }
+['coupangReportReady','momoCostByOriginReady','coupangProductsCloudReady'].forEach(ev=>window.addEventListener(ev, cupOvRedrawIfActive));
+function cupOvCostSettled(ok){ if(!ok) _cupOvCostTimedOut=true; cupOvRedrawIfActive(); }   // setCoupangShop 等成本表接上雲端（或逾時）後呼叫
+// 還在等哪一種資料（''＝可以畫）
+function _cupOvWaiting(){
+  if(!_cupOvCostTimedOut && !momoCostMatchesCloud()) return '共用成本表';
+  if(!_cupRepSubAt) _cupRepSubAt=Date.now();
+  if(!_cupReportsReady()){ if(!_cupOvRepT) _cupOvRepT=setTimeout(()=>{ _cupOvRepT=null; cupOvRedrawIfActive(); }, 15500); return '訂單報表'; }   // 訂閱開了 15 秒都沒有報表 ⇒ 當成到齊
+  return '';
+}
+// 「查看 {通路}」：切到該通路頁的總表分頁、同一個月（那一館沒有這個月的報表就維持它原本選的月份）
+function cupOvGoShop(shop){
+  if(_cupOvMonth && cupAvailableMonths(shop).indexOf(_cupOvMonth)>=0) _cupSelMonth[shop]=_cupOvMonth;
+  _cupSub[shop]='profit';
+  const b=[...document.querySelectorAll('.stab')].find(x=>(x.getAttribute('onclick')||'').indexOf("setCoupangShop('"+shop+"'")>=0);
+  setCoupangShop(shop, b||null);
+}
+function _cupOvMarginCls(v){ return v>=25?'cup-ov-m-good':(v>=15?'cup-ov-m-mid':'cup-ov-m-bad'); }   // 門檻同 MOMO（≥25 綠／≥15 橘／其他紅）
+function cupOvAnlzCardHTML(it, span){
+  const esc=_momoEsc, shop=it.shop, disp=cupShopDisplay(shop), spanCls=span?' mm-anlz-span':'';
+  const head=(muted)=>'<div class="mm-anlz-head"><span class="mm-anlz-dot '+(CUP_OV_DOTCLS[shop]||'cup-ov-dot-none')+'"></span><span class="mm-anlz-name'+(muted?' muted':'')+'">'+esc(disp)+'</span></div>';
+  if(it.buyout){   // 買斷：沒有淨利表資料，空卡、不放按鈕
+    return '<div class="mm-anlz-card empty'+spanCls+'"><div class="mm-anlz-head"><span class="mm-anlz-dot cup-ov-dot-none"></span><span class="mm-anlz-name muted">買斷</span></div>'
+      +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">買斷還沒有淨利表資料，數字請看 KPI 月結表。</div></div></div>'; }
+  if(!it.anlz.hasProducts){   // 這一館這個月沒有訂單報表
+    return '<div class="mm-anlz-card empty'+spanCls+'">'+head(true)
+      +'<div class="mm-anlz-sugg"><div class="mm-anlz-empty-hint">這個月沒有訂單報表</div></div>'
+      +'<button class="mm-anlz-btn" onclick="cupOvGoShop(\''+shop+'\')">查看 '+esc(disp)+'</button></div>'; }
+  const T=it.shopT, rev=T.rev||0, margin=T.rate;
+  let ptHtml='';
+  if(it.ptSuppressed) ptHtml='<span class="mm-anlz-pt muted">—</span>';
+  else if(it.prevMargin!=null && margin!=null){ const d=margin-it.prevMargin; ptHtml='<span class="mm-anlz-pt '+(d>=0?'cup-ov-m-good':'cup-ov-m-bad')+'">'+(d>=0?'▲':'▼')+' '+Math.abs(d).toFixed(1)+'pt</span>'; }
+  const suggHtml=it.anlz.noAnomaly?'<div class="mm-anlz-ok">本期無異常項目</div>':it.anlz.suggestions.map(x=>'<div class="mm-anlz-sg">'+x.html+'</div>').join('');
+  return '<div class="mm-anlz-card'+spanCls+'">'+head(false)
+    +'<div class="mm-anlz-metrics">營收 <b>'+momoMoney(rev)+'</b> · 淨利率 <b'+(margin!=null?' class="'+_cupOvMarginCls(margin)+'"':'')+'>'+(margin!=null?momoPct(margin):'—')+'</b> '+ptHtml+'</div>'
+    +'<div class="mm-anlz-sugg">'+suggHtml+'</div>'
+    +'<button class="mm-anlz-btn" onclick="cupOvGoShop(\''+shop+'\')">查看 '+esc(disp)+'</button></div>';
+}
+function cupRenderOverview(){
+  const el=document.getElementById('coupang-content-總表'); if(!el) return;
+  const esc=_momoEsc;
+  cupOvDestroyCharts();
+  const waiting=_cupOvWaiting();
+  if(waiting){ el.innerHTML='<div class="empty"><div class="empty-icon">⏳</div><div class="empty-hint">載入中…（等'+esc(waiting)+'）</div></div>'; return; }
+  const months=cupOvMonths();
+  if(!months.length){ el.innerHTML='<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無資料——先到好麻吉／露營館的「訂單明細」上傳訂單報表。</div></div>'; return; }
+  if(!_cupOvMonth||months.indexOf(_cupOvMonth)<0) _cupOvMonth=months[months.length-1];
+  const m=_cupOvMonth, prevM=cupPrevMonth(m), SH=CUP_OVERLAP_SHOPS;
+  const inc=momoPeriodIncomplete(m), open=!!inc;   // 當月＝未完
+  const monthOpts=months.slice().reverse().map(x=>'<option value="'+esc(x)+'"'+(x===m?' selected':'')+'>'+x.slice(0,4)+'/'+(+x.slice(5,7))+'</option>').join('');
+  const perShop={}, prevShop={}; SH.forEach(sh=>{ perShop[sh]=cupOvShopData(sh, m); prevShop[sh]=cupOvShopData(sh, prevM); });
+  const sumT=list=>{ let rev=0,net=0,cRev=0,qty=0,has=false; list.forEach(t=>{ if(!t||!t.has) return; has=true; rev+=t.rev||0; net+=t.net||0; cRev+=t.cRev||0; qty+=t.qty||0; }); return { rev, net, cRev, qty, margin:(cRev>0?net/cRev*100:null), hasData:has }; };
+  const T=sumT(SH.map(sh=>perShop[sh])), prevT=sumT(SH.map(sh=>prevShop[sh]));
+  const hasPrev=prevT.hasData && !open, prevLbl=(+prevM.slice(5,7))+'月';
+  const mute={txt:'—', cls:'cup-st-flat'};
+  const kd=(cur,prev)=>{ if(!hasPrev||!prev) return mute; const d=(cur-prev)/Math.abs(prev)*100, up=d>=0; return { txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%', cls:up?'cup-st-up':'cup-st-down' }; };
+  const dMargin=(hasPrev&&T.margin!=null&&prevT.margin!=null)?{ txt:((T.margin-prevT.margin>=0?'+':'')+(T.margin-prevT.margin).toFixed(1)+'pp'), cls:'cup-st-flat' }:mute;
+  const netTxt=(T.net<0?'−':'')+momoMoney(Math.abs(T.net));   // 負數：紅字＋U+2212
+  const cards=[
+    { label:'總營收', info:'好麻吉＋露營館的營收合計（淨額，已扣賣家優惠券）。', val:momoMoney(T.rev), d:kd(T.rev,prevT.rev) },
+    { label:'總淨利', info:'好麻吉＋露營館的淨利合計（只算有成本的商品；已扣商品成本、平台費用與營業稅）。', val:netTxt, valCls:(T.net<0?'mm-neg':''), d:kd(T.net,prevT.net) },
+    { label:'加權淨利率', info:'加權淨利率＝總淨利 ÷ 有成本商品的營收（兩個通路合計；跟個別通路頁同一個算法）。', val:(T.margin!=null?momoPct(T.margin):'—'), valCls:(T.margin!=null?_cupOvMarginCls(T.margin):'cup-st-flat'), d:dMargin },
+    { label:'總銷量', val:Math.round(T.qty).toLocaleString()+' 件', d:kd(T.qty,prevT.qty) }
+  ];
+  const cardHTML=cards.map(c=>'<div class="mm-kpi"><div class="mm-kpi-l">'+c.label+(c.info?' <span class="mm-info" title="'+esc(c.info)+'">?</span>':'')+'</div><div class="mm-kpi-v'+(c.valCls?' '+c.valCls:'')+'">'+c.val+'</div><div class="mm-kpi-d '+c.d.cls+'">'+c.d.txt+'<span class="base"> vs '+esc(prevLbl)+'</span></div></div>').join('');
+  // 提示：成本表逾時、當月未完、某館這個月沒有報表
+  const noRep=SH.filter(sh=>!perShop[sh].has).map(sh=>cupShopDisplay(sh));
+  const notes=[];
+  if(_cupOvCostTimedOut && !momoCostMatchesCloud()) notes.push('⚠ 共用成本表還沒接上雲端，暫用這台電腦的成本表計算；接上後會自動重算。');
+  if(open) notes.push('⚠ 本月尚未結束（'+inc.day+'/'+inc.total+' 天）：數字為累計至今，<b>不產出成長／衰退結論</b>。');
+  // 舊格式報表（沒扣賣家券；判斷同個別通路頁 _cupRowsOld）：趨勢圖涵蓋的月份裡有就提示，不管現在選哪個月
+  const oldList=[]; months.filter(x=>x<=m).forEach(x=>SH.forEach(sh=>{ const rp=cupLoadReport(sh, x); if(_cupRowsOld((rp&&rp.rows)||null)) oldList.push(cupShopDisplay(sh)+' '+x.slice(0,4)+'/'+x.slice(5,7)); }));
+  if(oldList.length) notes.push('⚠ '+esc(oldList.join('、'))+' 是舊格式報表（營收沒有扣賣家優惠券），這個月的營收與淨利偏高；到該通路「訂單明細」重新上傳 DeliveryList 後會更新。');
+  if(noRep.length) notes.push('⚠ '+esc(noRep.join('、'))+' 這個月沒有訂單報表，合計只含有報表的通路。');
+  const noteHtml=notes.map(t=>'<div class="mm-banner mm-banner-warn cup-ov-banner">'+t+'</div>').join('');
+  // 各通路分析卡：有報表的在前、依影響金額大到小；買斷空卡固定最後
+  const items=SH.map(sh=>{ const anlz=cupShopAnalysis(sh, m, prevM, open); let prevMargin=null, ptSuppressed=open;
+    if(!ptSuppressed){ const pt=prevShop[sh]; prevMargin=(pt&&pt.has&&pt.rate!=null)?pt.rate:null; if(prevMargin==null) ptSuppressed=true; }
+    return { shop:sh, anlz, shopT:perShop[sh], prevMargin, ptSuppressed }; });
+  items.sort((a,b)=>((a.anlz.hasProducts?0:1)-(b.anlz.hasProducts?0:1))||(b.anlz.topImpact-a.anlz.topImpact));
+  items.push({ buyout:true });
+  const odd=items.length%2===1, anlzCards=items.map((it,i)=>cupOvAnlzCardHTML(it, odd&&i===items.length-1)).join('');
+  const totalMissN=items.reduce((a,it)=>a+((it.anlz&&it.anlz.missN)||0),0);
+  const anlzSection='<div class="mm-anlz-wrap"><div class="mm-anlz-title">各通路分析</div><div class="mm-anlz-grid">'+anlzCards+'</div><div class="mm-anlz-foot">依影響金額排序 · 缺成本共 '+totalMissN+' 項'+(open?' · ⚠ 本月未完·未產出成長/衰退':'')+'</div></div>';
+  const topShops=SH.filter(sh=>perShop[sh].has), oddT=topShops.length%2===1, mLbl=m.slice(0,4)+'/'+(+m.slice(5,7));
+  const topCards=topShops.map((sh,i)=>'<div class="mm-ov-card'+(oddT&&i===topShops.length-1?' mm-anlz-span':'')+'"><div class="mm-ov-h">'+esc(cupShopDisplay(sh))+' 銷量 Top 10（'+esc(mLbl)+'）</div><div class="mm-ov-canvas"><canvas id="cup-ov-top10-'+sh+'"></canvas></div></div>').join('');
+  el.innerHTML='<div class="mm-row cup-ov-head"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupOvSetMonth(this.value)">'+monthOpts+'</select></span>'
+      +'<span class="cup-ov-right">通路總覽 · 好麻吉＋露營館（合計）</span></div>'
+    +'<div class="cup-ov-note">本頁是淨利表口徑：好麻吉＋露營館合計，不含買斷，也不含 KPI 另外扣的耗材與退貨運費。月結數字請看 KPI。</div>'
+    +noteHtml+'<div class="mm-kpis cup-ov-kpis">'+cardHTML+'</div>'+anlzSection
+    +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-trend"></canvas></div></div>'
+    +'<div class="mm-ov-card"><div class="mm-ov-h">各通路淨利率（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-margin"></canvas></div></div></div>'
+    +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收佔比（'+esc(mLbl)+'）</div><div class="mm-ov-canvas"><canvas id="cup-ov-pie"></canvas></div></div>'
+    +'<div class="mm-ov-card"><div class="mm-ov-h">通路比較：淨利率／動銷率</div><div class="mm-ov-canvas"><canvas id="cup-ov-cmp"></canvas></div></div></div>'
+    +'<div class="mm-anlz-grid">'+topCards+'</div>';
+  cupOvBuildCharts(m, perShop, months);
+}
+function cupOvBuildCharts(m, perShop, allMonths){
+  cupOvDestroyCharts();
+  if(typeof Chart==='undefined') return;
+  const SH=CUP_OVERLAP_SHOPS, disp=cupShopDisplay;
+  const months=allMonths.filter(x=>x<=m), labels=months.map(x=>(+x.slice(5,7))+'月');
+  const revArr=[], netArr=[], marginBy={}; SH.forEach(sh=>{ marginBy[sh]=[]; });
+  months.forEach(x=>{ let rev=0, net=0; SH.forEach(sh=>{ const t=(x===m)?perShop[sh]:cupOvShopData(sh, x); if(t.has){ rev+=t.rev||0; net+=t.net||0; } marginBy[sh].push((t.has&&t.rate!=null)?+t.rate.toFixed(1):null); }); revArr.push(Math.round(rev)); netArr.push(Math.round(net)); });
+  const mk=(id,cfg)=>{ const c=document.getElementById(id); if(c) _cupOvCharts.push(new Chart(c.getContext('2d'),cfg)); };
+  const baseOpt=extra=>Object.assign({responsive:true,maintainAspectRatio:false},extra);
+  mk('cup-ov-trend',{type:'line',data:{labels,datasets:[
+    {label:'營收',data:revArr,borderColor:'#5b5fcf',backgroundColor:'#5b5fcf',tension:.3},
+    {label:'淨利',data:netArr,borderColor:'#10b981',backgroundColor:'#10b981',tension:.3}]},
+    options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>momoMoney(v)}}}})});
+  mk('cup-ov-margin',{type:'line',data:{labels,datasets:SH.filter(sh=>marginBy[sh].some(v=>v!=null)).map(sh=>({label:disp(sh),data:marginBy[sh],borderColor:CUP_OV_COLOR[sh],backgroundColor:CUP_OV_COLOR[sh],tension:.3,spanGaps:true}))},
+    options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>v+'%'}}}})});
+  const live=SH.filter(sh=>perShop[sh].has && perShop[sh].rev>0.5);
+  mk('cup-ov-pie',{type:'doughnut',data:{labels:live.map(disp),datasets:[{data:live.map(sh=>Math.round(perShop[sh].rev)),backgroundColor:live.map(sh=>CUP_OV_COLOR[sh])}]},
+    options:baseOpt({plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>c.label+' '+momoMoney(c.parsed)}}}})});
+  mk('cup-ov-cmp',{type:'bar',data:{labels:live.map(disp),datasets:[
+    {label:'淨利率%',data:live.map(sh=>perShop[sh].rate!=null?+perShop[sh].rate.toFixed(1):0),backgroundColor:'#5b5fcf'},
+    {label:'動銷率%',data:live.map(sh=>perShop[sh].stPct!=null?+perShop[sh].stPct.toFixed(1):0),backgroundColor:'#10b981'}]},
+    options:baseOpt({indexAxis:'y',plugins:{legend:{position:'top'}},scales:{x:{ticks:{callback:v=>v+'%'}}}})});
+  SH.filter(sh=>perShop[sh].has).forEach(sh=>{
+    const top=perShop[sh].rows.filter(x=>(Number(x.qty)||0)>0).slice().sort((a,b)=>(b.qty||0)-(a.qty||0)).slice(0,10).map(x=>({name:String(x.name||x.code||'—'), qty:Number(x.qty)||0}));
+    mk('cup-ov-top10-'+sh,{type:'bar',data:{labels:top.map(x=>x.name.length>12?x.name.slice(0,12)+'…':x.name),datasets:[{label:'銷量',data:top.map(x=>Math.round(x.qty)),backgroundColor:CUP_OV_COLOR[sh]||'#5b5fcf'}]},
+      options:baseOpt({indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{title:c=>top[c[0].dataIndex].name,label:c=>Math.round(c.parsed.x).toLocaleString()+' 件'}}},
+        scales:{y:{afterFit:sc=>{ try{ sc.width=Math.max(sc.width,146); }catch(e){} },ticks:{font:{size:11},autoSkip:false,crossAlign:'far'}},x:{ticks:{precision:0}}}})}); });
+}
 /* ═══════════════ 酷澎 PR-3 介面對齊（比照 MO+ momoRenderShop）：子分頁殼 + 總表 + 訂單明細（上傳）═══════════════ */
 const _cupSub={};   // shop → 'profit'|'upload'|'sync'
 const CUP_SUBTABS=[['總表','profit'],['訂單明細','upload'],['商品同步','sync']];   // 商品同步＝PR-3b 佔位（需 price_inventory 提供上架/庫存）
@@ -34589,7 +34447,7 @@ Object.assign(window, {
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
   setReconTab,reconPayoutPick,clearRecon,setReconMonth,
-  coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
+  cupOvSetMonth,cupOvGoShop,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleNameExcl,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,

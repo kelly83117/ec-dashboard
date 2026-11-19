@@ -700,11 +700,6 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
    正數維持 .mm-kpi-v 原本的深色、不上綠 —— 同一張卡上出現兩種綠會很明顯。
    ⚠ 只給「本期淨利／總淨利」這種方向性金額用；加權淨利率的門檻色仍走各自的 valColor。 */
 .mm-kpi-v.mm-neg{color:var(--danger);}
-/* 酷澎｜總表的「總純利」與各店「純利」大數字：深色，負數紅（A-310，#476）。
-   這兩處不在 .mm-kpi 版面裡（那一整塊是舊的 inline style），所以另給一個 class；
-   深色沿用同一列「營收／純利率」本來就在用的 #374151，新的紅走 --danger。 */
-.cup-sum-profit-v{color:#374151;}
-.cup-sum-profit-v.mm-neg{color:var(--danger);}
 .mm-kpi-d{font-size:11px;font-weight:600;}
 .mm-kpi-d .base{color:#c7cad1;font-weight:400;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
@@ -2303,3 +2298,16 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-st-flat{color:var(--text-muted);}
 .cup-st-src{margin-bottom:4px;font-size:11px;line-height:1.6;color:var(--text-muted);}
 .cup-st-src:empty{display:none;}
+/* 酷澎｜總表（2026-11-19，照 MOMO／PChome 總表）：版面用現成的 mm-*，這裡只補通路顏色、淨利率三段顏色與幾個間距。不碰 --bg。 */
+:root{--cup-maji:#c0392b;--cup-luying:#1d4ed8;}   /* 同通路列那兩個點；露營館的藍＝首頁「酷澎露營館」 */
+.cup-ov-dot-maji{background:var(--cup-maji);}
+.cup-ov-dot-luying{background:var(--cup-luying);}
+.cup-ov-dot-none{background:var(--text-faint);}
+.cup-ov-m-good,.mm-anlz-metrics b.cup-ov-m-good{color:var(--success);}
+.cup-ov-m-mid,.mm-anlz-metrics b.cup-ov-m-mid{color:var(--warn);}
+.cup-ov-m-bad,.mm-anlz-metrics b.cup-ov-m-bad{color:var(--danger);}
+.cup-ov-head{margin-bottom:6px;align-items:center;}
+.cup-ov-right{margin-left:auto;font-size:12px;color:var(--text-muted);}
+.cup-ov-note{margin-bottom:12px;font-size:12px;line-height:1.6;color:var(--text-muted);}
+.cup-ov-banner{margin-bottom:10px;}
+.cup-ov-kpis{margin-bottom:16px;}
