@@ -2258,3 +2258,41 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-ps-shadow{margin-top:3px;color:var(--text-muted);font-size:11px;}
 .cup-ps-bad{color:var(--danger);font-weight:700;}
 .cup-pm-wait{margin-bottom:8px;color:var(--text-muted);font-size:12px;}
+/* 酷澎商品彈窗「定價與成本」試算版（2026-11-19）。前綴 cup-pc-；顏色走 :root 變數，不碰 --bg。 */
+.cup-pc{font-size:13px;color:var(--text);}
+.cup-pc-inputs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+.cup-pc-f{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.cup-pc-lbl{font-size:12px;font-weight:700;color:var(--text-muted);}
+.cup-pc-in{width:100%;box-sizing:border-box;height:40px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:15px;font-weight:700;font-family:inherit;font-variant-numeric:tabular-nums;}
+.cup-pc-in:focus{outline:none;border-color:var(--primary);}
+.cup-pc-in-chg{border-color:var(--warn);background:var(--warn-soft);}
+.cup-pc-orig{min-height:15px;font-size:11px;color:var(--warn);}
+.cup-pc-hint{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:2px;font-size:11px;color:var(--text-muted);}
+.cup-pc-card{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-top:12px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--primary-soft);}
+.cup-pc-card-t{font-size:12px;color:var(--text-muted);}
+.cup-pc-card-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:2px;}
+.cup-pc-card-v{font-size:28px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+.cup-pc-delta{font-size:14px;font-weight:700;}
+.cup-pc-up{color:var(--success);}
+.cup-pc-down{color:var(--danger);}
+.cup-pc-why{font-size:12px;color:var(--text-muted);}
+.cup-pc-card-r{text-align:right;font-size:12px;color:var(--text-muted);line-height:1.7;}
+.cup-pc-card-r b{color:var(--text);}
+.cup-pc-feenote{cursor:help;}
+.cup-pc-tbl{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+.cup-pc-tbl td{padding:6px 8px;border-bottom:1px solid var(--border);}
+.cup-pc-td-l{color:var(--text-muted);}
+.cup-pc-td-v{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.cup-pc-td-n{color:var(--text-muted);font-size:11px;}
+.cup-pc-tr-net td{border-bottom:none;font-weight:700;}
+.cup-pc-tr-net .cup-pc-td-l{color:var(--text);}
+.cup-pc-neg{color:var(--danger);}
+.cup-pc-na{color:var(--text-muted);font-weight:400;}
+.cup-pc-card-v.cup-pc-na{font-weight:800;}
+.cup-pc-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+.cup-pc-bar-l{font-size:12px;color:var(--text-muted);}
+.cup-pc-bar-r{display:flex;gap:8px;flex-wrap:wrap;}
+.cup-pc-btn{height:36px;padding:0 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit;cursor:pointer;}
+.cup-pc-btn:disabled{opacity:.5;cursor:not-allowed;}
+.cup-pc-btn-pri{border-color:var(--primary);color:var(--primary);font-weight:700;}
+@media (max-width:560px){.cup-pc-inputs{grid-template-columns:1fr;}.cup-pc-card-r{text-align:left;}}

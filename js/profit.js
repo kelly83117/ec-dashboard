@@ -32423,10 +32423,133 @@ function cupSkuMonthly(shop, code){
   const firstActive=all.findIndex(s=>s.active);
   return firstActive<=0 ? all : all.slice(firstActive);          // 去掉上架前的 leading 0；中間/結尾的 0（賣不動）保留
 }
+// ── 商品彈窗「定價與成本」試算版（2026-11-19，Vanessa；照 MOMO／PChome 的試價工作台）──
+//   🔴 純試算：只改 _cupPC（記憶體）。輸入、還原都不呼叫任何 save／Store 寫入／_markPending／成本表寫入。
+//   預設值＝本月實際（成本 r.cost÷qty、售價 r.grossRev÷qty、賣家券 r.sellerCoupon÷qty）→ 沒改任何格時試算淨利率＝總表該列 r.netRate。
+//   每件：扣券後營收 n＝售價−賣家券；平台費＝n×(deal+flow+freeShip)＋每件固定額；營業稅＝cupVatOf(n)；淨利＝n−成本−平台費−營業稅；淨利率＝淨利÷n。
+//   每件固定額＝(r.fee − r.rev×費率)÷qty＝本月實際的 $2/單與運費金流攤到每件（不封底：報表逐商品四捨五入後實際平台費可能比 營收×費率 低，這時是負的）；本月沒有銷量＝0。
+let _cupPC=null;   // 目前彈窗的試算狀態：每次（重）畫彈窗重建
+// ─── harness 抽取標記：CUP-PC-PURE-BEGIN
+function cupPCFeeRate(){ const R=COUPANG_FEE_RATES; return (R.deal||0)+(R.flow||0)+(R.freeShip||0); }
+function cupPCFixedPerUnit(r){ const q=Number(r&&r.qty)||0; if(!(q>0)) return 0; return ((Number(r.fee)||0)-(Number(r.rev)||0)*cupPCFeeRate())/q; }   // 不封底（2026-11-19 Gini 決定）：可以是負的，沒改任何格時才會每一列都等於總表淨利率
+function cupPCCalc(v, feeRate, fixed){
+  if(!v||v.price==null) return null;
+  const n=v.price-(v.coupon||0), has=(v.cost!=null);
+  const fee=n*feeRate+(fixed||0), tax=cupVatOf(n);
+  const net=has?(n-v.cost-fee-tax):null;
+  return { n, cost:has?v.cost:null, gross:has?(n-v.cost):null, fee, tax, net, rate:(net!=null&&n>0)?net/n:null };
+}
+// 兩位小數內相同＝沒改（輸入格顯示到小數兩位；使用者照畫面的值打回去不算修改）
+function _cupPCSame(a,b){ return (a==null&&b==null)||(a!=null&&b!=null&&Math.abs(a-b)<0.005+1e-9); }
+function _cupPCMoney(x){ if(x==null||!isFinite(x)) return '—'; const y=Math.round(x*100)/100; return (y<0?'−':'')+'$'+Math.abs(y).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _cupPCPct(x){ if(x==null||!isFinite(x)) return '—'; let s=(x*100).toFixed(1); if(parseFloat(s)===0) s='0.0'; return s.replace('-','−')+'%'; }
+// 平台費那行小字＋滑鼠提示：每件固定額（四捨五入到分）≥0 寫「＋ 每件 $X」，<0 寫「，每件調整 −$X」（負號 U+2212）
+function cupPCFeeNote(feeRate, fixed){
+  const pctTxt=(feeRate*100).toFixed(2).replace(/\.?0+$/,'')+'%', neg=(Math.round((Number(fixed)||0)*100)/100)<0;
+  return { pctTxt, neg, part:neg?(pctTxt+'，每件調整 '+_cupPCMoney(fixed)):(pctTxt+' ＋ 每件 '+_cupPCMoney(fixed)),
+    title:neg?'報表的平台費是整張訂單照比例攤到商品、再四捨五入成整數，所以每件會有一點零頭；試算沿用本月這個零頭。'
+             :'報表的平台費是整張訂單照比例攤到商品、再四捨五入成整數；費率以外還有每單 $2 發票費與運費金流，攤到每件就是這個金額；試算沿用本月這個金額。' };
+}
+// ─── harness 抽取標記：CUP-PC-PURE-END
+// 主檔目前售價：同一個 code 的選項（優先取最新一次清單裡的；都不在最新清單才用全部），只讀本機主檔
+function cupPCMasterPrice(shop, code){
+  let doc=null; try{ doc=cupLoadProducts(shop); }catch(e){ doc=null; }
+  const all=((doc&&doc.items)||[]).filter(p=>p&&String(p.code||'')===String(code)&&Number(p.price)>0);
+  if(!all.length) return null;
+  const latest=doc.latestExport||'', cur=latest?all.filter(p=>p.lastSeen===latest):[], use=cur.length?cur:all;
+  const ps=use.map(p=>Number(p.price));
+  return { min:Math.min.apply(null,ps), max:Math.max.apply(null,ps), n:use.length };
+}
+function cupPCInit(shop, r){
+  const q=Number(r.qty)||0, hasCost=(r.costStatus==='ok');
+  const master=cupPCMasterPrice(shop, r.code);
+  let o;
+  if(q>0) o={ cost:hasCost?(Number(r.cost)||0)/q:null, price:(Number(r.grossRev)||0)/q, coupon:(Number(r.sellerCoupon)||0)/q };
+  else { const u=hasCost?Number((momoLoadCostByOrigin()||{})[r.code]):NaN;   // 本月沒有銷量：成本用成本表單位成本、售價用主檔售價（多個選項取最低）、賣家券 0
+    o={ cost:isFinite(u)?u:null, price:master?master.min:null, coupon:0 }; }
+  return { shop, code:r.code, q, orig:o, cur:Object.assign({},o), feeRate:cupPCFeeRate(), fixed:cupPCFixedPerUnit(r), actual:(r.netRate!=null?r.netRate:null), master, costStatus:r.costStatus };
+}
+function _cupPCVal(x){ return x==null?'':String(Math.round(x*100)/100); }
+function _cupPCChangedKeys(S){ return ['cost','price','coupon'].filter(k=>!_cupPCSame(S.cur[k],S.orig[k])); }
+function cupPCPaneHTML(S){
+  const esc=_momoEsc, m=S.master;
+  const field=(k,label,ph)=>`<label class="cup-pc-f"><span class="cup-pc-lbl">${label}</span>
+      <input id="cup-pc-${k}" class="cup-pc-in" type="number" step="any" inputmode="decimal" value="${esc(_cupPCVal(S.orig[k]))}" placeholder="${esc(ph||'')}" oninput="cupPCInput('${k}',this.value)">
+      <span class="cup-pc-orig" id="cup-pc-${k}-n"></span></label>`;
+  const masterTxt=m?('主檔售價 '+(m.min===m.max?_cupPCMoney(m.min).replace('.00',''):_cupPCMoney(m.min).replace('.00','')+'～'+_cupPCMoney(m.max).replace('.00',''))+(m.n>1?'（'+m.n+' 個選項）':'')):'';
+  const costPh=S.costStatus==='ok'?'':(S.costStatus==='barcode'?'沒有成本，可填來試算':'缺成本，可填來試算');
+  return `<div class="cup-pc">
+    <div class="cup-pc-inputs">${field('cost','成本／件',costPh)}${field('price','售價（含稅）／件','')}${field('coupon','賣家券／件','')}</div>
+    <div class="cup-pc-hint">${masterTxt?`<span>${esc(masterTxt)}</span>`:''}<span>改了只是試算，不會存</span>${S.q>0?'':'<span>本月沒有銷量，平台費只算費率部分</span>'}</div>
+    <div class="cup-pc-card" id="cup-pc-card"></div>
+    <table class="cup-pc-tbl"><tbody id="cup-pc-tbl"></tbody></table>
+    <div class="cup-pc-bar"><span class="cup-pc-bar-l" id="cup-pc-bar-l"></span>
+      <span class="cup-pc-bar-r"><button type="button" id="cup-pc-reset" class="cup-pc-btn" onclick="cupPCReset()">全部還原</button><button type="button" class="cup-pc-btn cup-pc-btn-pri" onclick="cupPCToOptlog()">帶入優化紀錄</button></span></div>
+  </div>`;
+}
+function cupPCRefresh(){
+  const S=_cupPC; if(!S) return; const card=document.getElementById('cup-pc-card'); if(!card) return;
+  const c1=cupPCCalc(S.cur,S.feeRate,S.fixed), ch=_cupPCChangedKeys(S);
+  ['cost','price','coupon'].forEach(k=>{ const el=document.getElementById('cup-pc-'+k), nt=document.getElementById('cup-pc-'+k+'-n'), on=ch.indexOf(k)>=0;
+    if(el) el.classList.toggle('cup-pc-in-chg',on);
+    if(nt) nt.textContent=on?('原 '+(S.orig[k]==null?'—':_cupPCMoney(S.orig[k]))):''; });
+  // 結果卡
+  const rate=c1?c1.rate:null;
+  const why=rate!=null?'':(!c1?'填了售價才算':(c1.cost==null?'填了成本才算':'扣券後營收要大於 0 才算'));
+  let delta='';
+  if(ch.length && rate!=null && S.actual!=null){ const d=(rate-S.actual)*100; if(Math.abs(d)>1e-9) delta=`<span class="cup-pc-delta ${d>0?'cup-pc-up':'cup-pc-down'}">${d>0?'▲':'▼'} ${Math.abs(d).toFixed(1)}pp</span>`; }
+  const fn=cupPCFeeNote(S.feeRate,S.fixed), pctTxt=fn.pctTxt;
+  card.innerHTML=`<div class="cup-pc-card-l"><div class="cup-pc-card-t">試算淨利率</div>
+      <div class="cup-pc-card-row"><span class="cup-pc-card-v${rate!=null&&rate<0?' cup-pc-neg':''}${rate==null?' cup-pc-na':''}" id="cup-pc-rate">${_cupPCPct(rate)}</span>${delta}${why?`<span class="cup-pc-why">${why}</span>`:''}</div></div>
+    <div class="cup-pc-card-r"><div>本月實際 <b id="cup-pc-actual">${_cupPCPct(S.actual)}</b></div>
+      <div class="cup-pc-feenote" id="cup-pc-feenote" title="${_momoEsc(fn.title)}">平台費：費率 ${fn.part}（本月實際）</div></div>`;
+  // 逐件拆解
+  const tb=document.getElementById('cup-pc-tbl');
+  if(tb){ const noCost=(S.costStatus==='missing'?'缺成本':'—');
+    const v=(x,neg)=>`<td class="cup-pc-td-v${(neg&&x!=null&&x<0)?' cup-pc-neg':''}">${_cupPCMoney(x)}</td>`;
+    const row=(label,cell,note,cls)=>`<tr${cls?` class="${cls}"`:''}><td class="cup-pc-td-l">${label}</td>${cell}<td class="cup-pc-td-n">${note}</td></tr>`;
+    const txt=t=>`<td class="cup-pc-td-v cup-pc-na">${t}</td>`;
+    tb.innerHTML= row('扣券後營收／件', c1?v(c1.n,true):txt('—'), '售價 − 賣家券')
+      + row('成本／件', (c1&&c1.cost!=null)?v(c1.cost):(S.cur.cost!=null?v(S.cur.cost):txt(noCost)), '莫筆克單位成本')
+      + row('毛利／件', (c1&&c1.gross!=null)?v(c1.gross,true):txt(c1?noCost:'—'), '扣券後營收 − 成本')
+      + row('平台費用／件', c1?v(c1.fee):txt('—'), '扣券後營收 × '+fn.part)
+      + row('營業稅／件', c1?v(c1.tax):txt('—'), '扣券後營收 × 5/105')
+      + row('淨利／件', (c1&&c1.net!=null)?v(c1.net,true):txt(c1?noCost:'—'), '毛利 − 平台費用 − 營業稅', 'cup-pc-tr-net'); }
+  const bl=document.getElementById('cup-pc-bar-l'); if(bl) bl.textContent='本月賣 '+S.q.toLocaleString()+' 件'+(ch.length?'　·　已改 '+ch.length+' 格（只是試算，不會存）':'');
+  const rb=document.getElementById('cup-pc-reset'); if(rb) rb.disabled=!ch.length;
+}
+function cupPCInput(kind, val){
+  const S=_cupPC; if(!S) return; let v=_momoPCNum(val);
+  if(kind==='coupon' && v==null) v=0;                       // 賣家券留空＝0
+  S.cur[kind]=_cupPCSame(v,S.orig[kind])?S.orig[kind]:v;    // 打回畫面上的原值＝沒改（用未四捨五入的原值算）
+  cupPCRefresh();
+}
+function cupPCReset(){
+  const S=_cupPC; if(!S) return; S.cur=Object.assign({},S.orig);
+  ['cost','price','coupon'].forEach(k=>{ const el=document.getElementById('cup-pc-'+k); if(el) el.value=_cupPCVal(S.orig[k]); });
+  cupPCRefresh();
+}
+// 把這次試算組成一句話，填進「優化紀錄」分頁的新增欄（type 預設「調價」）；只填、不送出（照 momoPCComposeNote／momoPCToOptlog）
+function cupPCComposeNote(){
+  const S=_cupPC; if(!S) return ''; const ch=_cupPCChangedKeys(S); if(!ch.length) return '';
+  const nm={cost:'成本',price:'售價',coupon:'賣家券'}, money=x=>x==null?'—':'$'+(Math.round(x*100)/100);
+  const c0=cupPCCalc(S.orig,S.feeRate,S.fixed), c1=cupPCCalc(S.cur,S.feeRate,S.fixed), r0=c0?c0.rate:null, r1=c1?c1.rate:null;
+  return ch.map(k=>nm[k]+' '+money(S.orig[k])+'→'+money(S.cur[k])).join('，')+((r0!=null||r1!=null)?'，淨利率 '+_cupPCPct(r0)+'→'+_cupPCPct(r1):'');
+}
+function cupPCToOptlog(){
+  const S=_cupPC; if(!S) return; const txt=cupPCComposeNote();
+  if(!txt){ if(typeof showToast==='function') showToast('沒有試算的修改','info'); return; }
+  cupAnaTab('optlog');
+  const ts=document.getElementById('momo-optlog-type'), ni=document.getElementById('momo-optlog-note'); if(!ni) return;
+  if(ts) ts.value='調價'; ni.value='試算：'+txt; ni.focus();
+}
+// Console 只讀：目前彈窗的試算狀態（驗收用；不以 __cloud 開頭、不寫任何東西）
+window.__cupPCState=function(){ const S=_cupPC; if(!S) return null;
+  return { shop:S.shop, code:S.code, qty:S.q, feeRate:S.feeRate, fixed:S.fixed, actual:S.actual, master:S.master, orig:Object.assign({},S.orig), cur:Object.assign({},S.cur), changed:_cupPCChangedKeys(S), calc:cupPCCalc(S.cur,S.feeRate,S.fixed) }; };
 function cupRenderAnalysis(shop, r){
   const ov=document.getElementById('cup-analysis-overlay'); if(!ov) return;
   const esc=_momoEsc, money=momoMoney, pct=v=>(v==null?'—':(v*100).toFixed(1)+'%');
-  const q=Number(r.qty)||0, per=(v)=> (q>0 && v!=null)? v/q : null;
+  const q=Number(r.qty)||0;
   const missing=(r.costStatus==='missing'), barcode=(r.costStatus==='barcode');
   const costTxt = r.costStatus==='ok' ? money(r.cost) : (barcode?'—（純數字條碼）':'缺成本');
   const grossTxt = r.costStatus==='ok' ? money(r.gross) : (barcode?'—':'缺成本');
@@ -32468,16 +32591,9 @@ function cupRenderAnalysis(shop, r){
       <button onclick="cupAnaCostSave('${shop}','${r.code}')" style="margin-left:6px;padding:4px 14px;border:none;border-radius:6px;background:#10b981;color:#fff;font-size:12px;font-weight:700;cursor:pointer">存</button>
       <div style="font-size:11px;color:#9ca3af;margin-top:5px">寫入共用成本表（cost_by_origin）→ 甲配／MO+／酷澎三平台共用、補一次全受惠。</div>
     </div>` : (barcode?`<div style="margin-top:12px;font-size:12px;color:#9ca3af">此商品代碼為純數字條碼，本就無莫筆克成本表對應（非漏補），不計成本。</div>`:'');
-  const pricingPane=`<table style="width:100%;border-collapse:collapse;font-size:13px">
-    ${mrow('件數',q.toLocaleString(),'')}
-    ${mrow('定價／件',per(r.grossRev)!=null?money(per(r.grossRev)):'—','選項價格')}
-    ${mrow('賣家券／件',per(r.sellerCoupon)!=null?money(per(r.sellerCoupon)):'—','')}
-    ${mrow('淨額／件',per(r.rev)!=null?money(per(r.rev)):'—','營收基礎')}
-    ${mrow('成本／件',(r.costStatus==='ok'&&per(r.cost)!=null)?money(per(r.cost)):(barcode?'—':'缺成本'),'莫筆克單位成本')}
-    ${mrow('毛利／件',(r.costStatus==='ok'&&per(r.gross)!=null)?money(per(r.gross)):(barcode?'—':'缺成本'),'')}
-    ${mrow('營業稅／件',per(r.tax)!=null?money(per(r.tax)):'—','淨額 × 5/105')}
-    ${mrow('淨利／件',(r.costStatus==='ok'&&per(r.net)!=null)?money(per(r.net)):(barcode?'—':'缺成本'),'')}
-  </table>${costEdit}`;
+  // 定價與成本：試算版（2026-11-19，Vanessa）。純試算、不存；缺成本的紅色補成本區（costEdit）原樣接在下方。
+  _cupPC=cupPCInit(shop, r);
+  const pricingPane=cupPCPaneHTML(_cupPC)+costEdit;
   ov.innerHTML=`<div class="ana-modal" style="width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3;gap:12px">
       <div style="min-width:0"><div style="font-size:16px;font-weight:800;line-height:1.35">${esc(r.name||r.code)}</div>
@@ -32492,6 +32608,7 @@ function cupRenderAnalysis(shop, r){
     </div></div>`;
   // 優化紀錄：直接複用 MO+ 的區塊（讀寫 ec_momo_optlog|<賣場>，新增/編輯/刪除與 MO+ 完全相同）
   momoRenderOptlogSection(shop, r.code);
+  cupPCRefresh();   // 定價與成本試算：依 _cupPC 畫結果卡／拆解表（只讀記憶體）
   // 圖表（innerHTML 後同步建；存實例供關閉/重畫時 destroy）
   _cupAnalysisCharts.forEach(c=>{ try{ c.destroy(); }catch{} }); _cupAnalysisCharts=[];
   if(typeof Chart==='undefined') return;
@@ -34368,7 +34485,7 @@ Object.assign(window, {
   renderCoupangTableBody,cupSetSub,cupSelectMonth,cupOpenMissingCostPanel,cupMissCostSave,cupExportExcel,cupRenderShop,
   toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
-  cupSetSort,cupOnSearch,cupOpenAnalysis,cupCloseAnalysis,cupAnaTab,cupAnaCostSave,
+  cupSetSort,cupOnSearch,cupOpenAnalysis,cupCloseAnalysis,cupAnaTab,cupAnaCostSave,cupPCInput,cupPCReset,cupPCToOptlog,
   setShopViewMode,
   momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoOpenColPicker,momoColToggle,momoColDragStart,momoColDragOver,momoColDragEnter,momoColDragLeave,momoColDrop,momoColDragEnd,momoColResetOrder,momoColShowAll,
