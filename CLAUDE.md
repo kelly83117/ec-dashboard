@@ -239,6 +239,10 @@ ESM 有個致命陷阱必須牢記：
   - **已知問題（沒修、照原樣搬）**：同步是逐品號聯集，改品號後舊品號的紀錄會被雲端併回來（甲配有 25 筆同 id 出現在新舊品號底下），刪除商品也一樣。
   - 除錯（都是唯讀，不以 `__cloud` 開頭）：`__optlogState()`、`__profitDocStats({compute:true}).optlog`。本機測試 `__optlogMock('乙配')`、`__optlogMock('乙配',{residueSku:'品號'})`（只在 localhost、資料只在記憶體）。
 - **雲端文件容量提醒**（app.js `__profitCapCheck`，只有管理員）：app/profit ≥85% 黃卡、≥95% 紅卡；`app/growth_*`、`app/optlog_*` 任一份 ≥70% 黃卡、≥90% 紅卡（`__profitCapDocs`），卡片寫出是哪一份。索引比例也算。
+  - 2026-11-19 加 `momo_products/*`（標籤「MOMO 商品主檔」）與 `app/insight_*`（「洞察表資料」），門檻同 70%／90%。要列哪些文件、名稱與標籤由 `__profitCapGroups(s)` 給，`__profitCapDocs(groups)` 只管門檻與排序。
+  - 🔴 **不為了提醒多讀任何東西**：firebase.js `capDocSnaps` 只記既有訂閱收到的快照（洞察表開站就訂閱；MOMO 商品主檔要進過 MOMO 或酷澎頁），`__profitDocStats()` 的 `momoProducts`／`insight` 沒訂閱到就沒有那一項（不是 0）。
+  - 推 `momo_products` 前的單檔上限防線（profit.js `_momoDocCapGuard`，三處 `__cloudMomo.setShop` 都先過）：用 `window.__momoDocMeasure`（Firestore 實際大小，唯讀、不以 `__cloud` 開頭）量這一包，超過 `MOMO_DOC_BLOCK_RATIO`（95%）就 throw「…已接近雲端單檔上限…」、不推、dirty 與 lastpushed 不動。新增直接呼叫 `setShop` 的地方要接這支（`scripts/cap-docs.test.cjs` 會數）。
+  - `MOMO_DOC_WARN_KB`（700，存檔時用 JSON 長度量）的彈窗與 toast 只有管理員看得到，其他人只留 console；門檻與量法沒動。Console 只讀：`window.__momoLastDocCap`。
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
@@ -385,6 +389,11 @@ ESM 有個致命陷阱必須牢記：
   - **商品彈窗「定價與成本」試算**（profit.js `cupPC*`，狀態 `_cupPC`，純函式在 `CUP-PC-PURE-BEGIN/END`）：三格輸入（成本、售價含稅、賣家券，每件），預設值＝本月實際，所以沒改任何格時試算淨利率＝總表該列 `r.netRate`。
     每件平台費＝扣券後營收 ×（`COUPANG_FEE_RATES` 的 deal＋flow＋freeShip）＋每件固定額；固定額＝(r.fee − r.rev×費率)÷qty，🔴 **不封底、可以是負的**（封底會讓一成多的商品對不上總表）。
     純試算：輸入、還原都不存；「帶入優化紀錄」只預填共用的 `#momo-optlog-note`。Console 只讀 `__cupPCState()`；node 測試 `scripts/coupang-pricing-calc.test.cjs`。
+  - **合併商品頁**（2026-11-19，Inna；搜尋框旁「合併商品頁｜全部規格」，兩館預設合併）：同一個酷澎編號（dispId）底下的原廠編號收成一列合計，點外層列展開。只影響表格怎麼排，
+    上方五張卡、動銷率、階層分布、缺成本橫幅、匯出、商品彈窗仍以原廠編號為單位；「全部規格」＝改版前的畫面。偏好存本機 `ec_pagemode_coupang`（不經 Store、不同步），展開狀態只在記憶體（切月份／切通路重設）。
+    純函式在 profit.js `CUP-PG-PURE-BEGIN/END`（`cupGroupByPage`／`cupPageAgg`／`cupGroupSort`／`cupGroupFilter`），node 測試 `scripts/coupang-page-merge.test.cjs`。
+    規則：dispId 有多個（"A/B"）整筆歸到本月列數最多的那一頁、同數取前面的，成員列標「另掛 N 頁」；只有一個成員不成組；合計照 `cupKpi`（成本／毛利／淨利與兩個比率只算有成本的成員，外層標「含 N 個缺成本」）；排序用外層合計、搜尋任一成員符合就展開且只列符合的。
+    🔴 外層列的調整欄（`onCupPageNoteChange`）只是對每個成員呼叫單筆的 `onCupNoteChange`，不可以另寫寫入路徑；成員內容不一致時顯示「各規格不同（N 筆）」、不能直接改。
   - **個別通路頁的動銷率卡**（`cupRenderSellThrough`）：大字「33.4% (466 / 1,396)」、第二行比上月（上月訂單報表 × **同一份目前清單**，▲綠▼紅）、卡片下方一行「動銷率來源」（`#cup-st-src-{通路}`）。
     算法仍是 `cupProductsListed`＋`cupSellThroughCalc`，通路健檢的 `__healthCoupangSt` 沒動；雲端主檔晚到只重畫這一格與來源行（`_cupStArgs`）。
   - **酷澎｜總表**（`cupRenderOverview`，照 `pchomeRenderOverview`；樣式用現成的 `mm-*`，通路顏色等少數在 `cup-ov-*`）：🔴 **淨利表口徑、不讀 KPI 月結表**——好麻吉＋露營館合計，不含買斷（只放一張空卡），也不含 KPI 另外扣的耗材與退貨運費；舊的 KPI 版卡片與「原始表格」已移除。

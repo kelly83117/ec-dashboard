@@ -2318,3 +2318,20 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-buyout-box{max-width:720px;padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);}
 .cup-buyout-title{margin-bottom:8px;font-size:15px;font-weight:700;color:var(--text);}
 .cup-buyout-text{font-size:13px;line-height:1.8;color:var(--text-muted);}
+/* 酷澎淨利表「合併商品頁」（2026-11-19，Inna）：搜尋框旁的切換、商品頁外層列、展開後的規格列。顏色都走變數，不動 --bg。 */
+:root{--cup-pg-row-bg:var(--surface);--cup-pg-mem-bg:#f9fafb;--cup-pg-seg-on:#0ea5e9;--cup-pg-shadow:2px 0 5px -2px rgba(15,23,42,.18);}
+.cup-pm-seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface);}
+.cup-pm-btn{padding:6px 12px;border:none;background:transparent;font-size:13px;font-weight:600;color:var(--text-muted);cursor:pointer;}
+.cup-pm-btn+.cup-pm-btn{border-left:1px solid var(--border);}
+.cup-pm-btn.on{background:var(--cup-pg-seg-on);color:var(--surface);}
+.mm-ptbl tr.cup-pg-row,.mm-ptbl tr.cup-pg-mem{cursor:pointer;}
+.mm-ptbl tr.cup-pg-row>td{background:var(--cup-pg-row-bg);font-weight:600;}
+.mm-ptbl tr.cup-pg-mem>td{background:var(--cup-pg-mem-bg);}
+.mm-ptbl td.cup-pg-stk-code{position:sticky;left:0;z-index:2;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.mm-ptbl td.cup-pg-stk-name{position:sticky;left:120px;z-index:2;box-shadow:var(--cup-pg-shadow);}
+.mm-ptbl td.cup-pg-mem-code{padding-left:26px;}
+.cup-pg-arrow{display:inline-block;width:16px;color:var(--text-muted);}
+.cup-pg-flag{margin-top:2px;font-size:10px;font-weight:600;color:var(--danger);}
+.cup-pg-tag{display:inline-block;margin-top:2px;padding:0 6px;border-radius:999px;background:var(--warn-soft);font-size:10px;font-weight:600;color:var(--text-muted);}
+.cup-pg-note-inp{width:120px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12px;font-weight:400;outline:none;}
+.cup-pg-note-mixed{font-size:12px;font-weight:600;color:var(--warn);cursor:pointer;text-decoration:underline dotted;}

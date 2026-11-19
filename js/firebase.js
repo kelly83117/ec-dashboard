@@ -79,6 +79,10 @@ try {
   // MOMO 優化紀錄獨立文件 app/optlog_{店} 列管的店（#436 第 ④ 塊）：ec_momo_optlog|{店} 的 {店} 實際會出現的名字（含補成本寫入的 PChome、博客來、FriDay、酷澎及酷澎兩家）。
   //   🔴 新增會寫優化紀錄的店要加進來；沒列的照舊寫 app/profit，資料不會掉，profit.js 開站與同步時會 Console 警告。
   const OPTLOG_SHOPS = ['甲配', '乙配', 'MO+麻吉', 'MO+森之旅', 'MO+玩樂', 'PChome', '博客來', 'FriDay', '酷澎', '麻吉', '露營館'];
+  // 容量提醒（2026-11-19）：MOMO 商品主檔（momo_products/*）與洞察表（app/insight_*）最近一次訂閱收到的文件快照（DocumentSnapshot 本身，要算才 .data()）。
+  //   🔴 只記「本來就訂閱到的」：不為了量大小多讀任何東西。訂閱還沒到（例如沒進過 MOMO／酷澎頁）⇒ 沒有那一份的數字，__profitDocStats 裡就沒有那一項（不是 0）。
+  const capDocSnaps = { momo: {}, insight: {} };   // momo：doc id（jia／yi／mo_*）→ snap；insight：通路 → snap
+  let capDocTouch = null;                          // 收到新快照時叫一次（＝下方 _pdSchedule，只有管理員才會真的算）
   const PROFIT_ARCHIVE_DOCS = ['profit_notes_2026', 'profit_notes_2026_2'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   // #436 第 ⑤ 塊：之後的廣告調整封存＝notes_archive collection，每通路每月一份（doc id「通路__YYYY-MM」）。上面兩片維持唯讀照常讀。
@@ -564,7 +568,18 @@ try {
         const m = profitDocMeasure(naParts[id].raw || {}, NOTES_ARCHIVE_COL + '/' + id);
         notesArchive[id] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
       });
-      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog, notesArchive });
+      const momoProducts = {};   // MOMO 商品主檔（momo_products/{jia|yi|mo_*}；MOMO 組訂閱還沒到的不報）
+      Object.keys(capDocSnaps.momo).forEach(id => {
+        const data = capDocSnaps.momo[id].data() || {};
+        const m = profitDocMeasure(data, 'momo_products/' + id);
+        momoProducts[id] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio, shop: data.shop || MOMO_DOCID_SHOP[id] || id };
+      });
+      const insight = {};        // 洞察表（app/insight_{通路}；訂閱還沒到、文件不存在的不報）
+      Object.keys(capDocSnaps.insight).forEach(s => {
+        const m = profitDocMeasure(capDocSnaps.insight[s].data() || {}, 'app/insight_' + s);
+        insight[s] = { bytes: m.bytes, ratio: m.ratio, idx: m.idx, idxRatio: m.idxRatio };
+      });
+      profitDocStatsCache = Object.assign(main, { at: Date.now(), ms: Date.now() - t0, archives, growth, optlog, notesArchive, momoProducts, insight });
       profitDocStatsDirty = false;
       try { window.dispatchEvent(new CustomEvent('profitDocStatsReady')); } catch (e) {}
       return profitDocStatsCache;
@@ -578,6 +593,13 @@ try {
         const go = () => { if (_pdIsAdmin()) _pdCompute(); };
         if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(go, { timeout: 5000 }); else setTimeout(go, 0);
       }, 10000);
+    };
+    capDocTouch = _pdSchedule;
+    // 推 momo_products 之前量「這一包寫上去會多大」（profit.js _momoDocCapGuard 用）：純計算、不讀不寫。刻意不以 __cloud 開頭。
+    //   文件形狀同 __cloudMomo.setShop：{ shop, items, updatedAt }（updatedAt 是時間戳，8 位元組，這裡用數字代替）。
+    window.__momoDocMeasure = (shop, items) => {
+      const m = profitDocMeasure({ shop, items: items || [], updatedAt: 0 }, 'momo_products/' + (MOMO_SHOP_DOCID[shop] || shop));
+      return { bytes: m.bytes, ratio: m.bytes / PROFIT_DOC_LIMIT_BYTES, limit: PROFIT_DOC_LIMIT_BYTES };
     };
     // 唯讀觀測點：回快取（還沒算過＝null）。opts.compute＝快取過期時當場算一次（只限管理員；app.js 登入後的檢查用）。
     window.__profitDocStats = (opts) => {
@@ -904,6 +926,8 @@ try {
       try {
         onSnapshot(momoProductsColRef, snap => {
           const changed = [];
+          snap.forEach(d => { capDocSnaps.momo[d.id] = d; });   // 容量提醒：記下雲端這一份的快照（不管下面的守衛有沒有套用到本機）
+          _pdSchedule();
           snap.forEach(d => {
             const data = d.data() || {};
             const shop = data.shop || MOMO_DOCID_SHOP[d.id] || d.id;   // 反查優先讀 doc.shop，fallback 對照表
@@ -1474,7 +1498,11 @@ try {
     getDocForShop: (shop) => insightShopRefs[shop] ? getDoc(insightShopRefs[shop]) : Promise.resolve({ exists: () => false, data: () => ({}) }),
     subscribeShop: (shop, cb) => {
       if (!insightShopRefs[shop]) return () => {};
-      return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
+      return onSnapshot(insightShopRefs[shop], snap => {
+        // 容量提醒：記下這份快照（app.js 開站就訂閱四個通路，不另外讀）
+        try { if (snap.exists()) capDocSnaps.insight[shop] = snap; else delete capDocSnaps.insight[shop]; if (capDocTouch) capDocTouch(); } catch (e) {}
+        cb(snap.exists() ? snap.data() : {});
+      });
     },
     // ── #269 第 2 塊：洞察表調整紀錄「逐商品交易寫入」（目前尚無呼叫端）──
     // runTransaction 讀 app/insight_{shop} 的 [ec.insight_{shop}_notes][code] → applyFn(目前內容) 算出

@@ -21,7 +21,8 @@ const RE = new Function('return ' + m[1])();
 // ── ① 這次補的：要被擋 ──
 const ADDED = ['pchomeOpenSyncPreview', 'pchomeConfirmSync', 'syncAffRptToCloud', 'deleteProfitNote',
   'kpiBooksMissCostSave', 'kpiFridayMissCostSave', 'kpiCoupangMissCostSave', 'momoMoPlusCostInlineSave', 'cupAnaCostSave',
-  'momoPCSave', 'momoPCSaveConfirm', 'pchomePCSave', 'pchomePCSaveConfirm', 'pchomeAddOptlogModal', 'pchomeDeleteOptlog'];
+  'momoPCSave', 'momoPCSaveConfirm', 'pchomePCSave', 'pchomePCSaveConfirm', 'pchomeAddOptlogModal', 'pchomeDeleteOptlog',
+  'onCupPageNoteChange'];   // 2026-11-19：酷澎合併商品頁外層列的調整欄（oninput 直接存，對每個規格呼叫 onCupNoteChange）
 ADDED.forEach(n => {
   ok(RE.test(n + "('a','b')"), n + '：onclick 會被擋');
   ok(RE.test("if(event.key==='Enter')" + n + "('a','b')"), n + '：包在 Enter 判斷裡也會被擋');
@@ -41,6 +42,7 @@ const ALLOW = ["cupPCInput('cost',this.value)", 'cupPCReset()', 'cupPCToOptlog()
   "onMonthChange('好麻吉',true)", "onHalfChange('好麻吉','first',null,true)", "setSearch('好麻吉',this.value)", "setSort('好麻吉','rev','asc')",
   "cupOpenAnalysis('麻吉','X')", "momoOpenAnalysis('甲配','X')", "pchomeOpenAnalysis('轉單','X')", "openNotePopup('好麻吉|2026/11|first','E1')",
   'pchomeCloseSyncPreview()', 'momoCloseSyncPreview()', 'closeProfitNoteModal()', "momoCancelOptlogEdit('甲配','X')",
+  "cupSetPageMode('麻吉','merge')", "cupTogglePage('麻吉','123')", "event.stopPropagation();cupTogglePage('麻吉','123',true)",
   "splitSearch(this)", "splitAddRow()", "splitRemoveRow(0)", "momoOpenColPicker('甲配',this)", "toggleHiddenCol('好麻吉','rev')"];
 ALLOW.forEach(h => ok(!RE.test(h), '不擋：' + h));
 
@@ -55,6 +57,13 @@ ok(/el\.getAttribute\('onkeydown'\)/.test(app.slice(app.indexOf('function __roIs
 // 兩個 Enter 直接存的輸入框，模板寫法沒有變
 ok(/onkeydown="if\(event\.key==='Enter'\)momoMoPlusCostInlineSave\(/.test(src), 'MO+ 內嵌成本輸入框的 Enter 寫法還在');
 ok(/onkeydown="if\(event\.key===\\'Enter\\'\)pchomeAddOptlogModal\(/.test(src), 'PChome 優化紀錄輸入框的 Enter 寫法還在');
+
+// 酷澎合併商品頁：成員列的調整欄仍然是 onCupNoteChange（後面多接一個只重畫外層那一格的 cupPageNoteSync）→ 要被擋；外層列存檔只走 onCupNoteChange
+ok(RE.test("onCupNoteChange('麻吉','A1',this.value);cupPageNoteSync('麻吉','123')"), '合併模式成員列的調整欄會被擋');
+ok(!RE.test("cupPageNoteSync('麻吉','123')"), 'cupPageNoteSync 本身不寫入、不擋');
+{ const i = src.indexOf('\nfunction onCupPageNoteChange('), body = src.slice(i, src.indexOf('\n}\n', i));
+  ok(/onCupNoteChange\(shop, r\.code, value\)/.test(body), '外層列存檔呼叫單筆的 onCupNoteChange');
+  ok(!/localStorage|_markPending|_cupNote(Key|Items)Dirty|__cloud/.test(body), '外層列存檔沒有另寫寫入路徑'); }
 
 console.log((fail ? '✗ 有失敗：' : '✓ 全過：') + pass + ' 通過 / ' + fail + ' 失敗');
 process.exit(fail ? 1 : 0);
