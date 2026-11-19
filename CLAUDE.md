@@ -381,6 +381,16 @@ ESM 有個致命陷阱必須牢記：
   - **Console**：`__cupProductsMergeShadow(shop)`（只算）、`__cupProductsMergeEnforce(shop)`（單通路真寫、不看閘門，C3 驗收才用）、`__cupProductsState()`（含 cloud 欄位）、`__cupLastMergePlan`。本機測試 `__cupProductsMock({shop, newer, newerSkus, latestExport, fromCache, shardsSeen, from})`／`__cupProductsMock(null)`：只在 localhost／127.0.0.1 定義、只改記憶體；開著時 enforce 一律拒絕。node 測試 `scripts/coupang-products.test.cjs`。
   - **回滾**：先把閘門改回 false（只算不寫）並部署。要清雲端：刪掉 `coupang_products` 的 8 份 doc（或用 v3 備份還原），再清各電腦的 `ec_coupang_products_lastpushed|*`。程式回滾＝還原 C2／C3 的 commit（firebase.js 物件與 profit.js 要一起）。⚠ 雲端 → 本機只在本機沒有待推時才蓋，回滾不會丟掉還沒推的本機上傳。
   - 待辦：管理員容量提醒（app.js `__profitCapDocs`）還沒納入 `coupang_products/*`，目前只有 shadow log 與存檔時的每片大小。
+- 酷澎淨利表畫面（2026-11-19，Vanessa；都只讀、不寫任何東西，沒有新增雲端物件，本機防寫物件數不變）：
+  - **商品彈窗「定價與成本」試算**（profit.js `cupPC*`，狀態 `_cupPC`，純函式在 `CUP-PC-PURE-BEGIN/END`）：三格輸入（成本、售價含稅、賣家券，每件），預設值＝本月實際，所以沒改任何格時試算淨利率＝總表該列 `r.netRate`。
+    每件平台費＝扣券後營收 ×（`COUPANG_FEE_RATES` 的 deal＋flow＋freeShip）＋每件固定額；固定額＝(r.fee − r.rev×費率)÷qty，🔴 **不封底、可以是負的**（封底會讓一成多的商品對不上總表）。
+    純試算：輸入、還原都不存；「帶入優化紀錄」只預填共用的 `#momo-optlog-note`。Console 只讀 `__cupPCState()`；node 測試 `scripts/coupang-pricing-calc.test.cjs`。
+  - **個別通路頁的動銷率卡**（`cupRenderSellThrough`）：大字「33.4% (466 / 1,396)」、第二行比上月（上月訂單報表 × **同一份目前清單**，▲綠▼紅）、卡片下方一行「動銷率來源」（`#cup-st-src-{通路}`）。
+    算法仍是 `cupProductsListed`＋`cupSellThroughCalc`，通路健檢的 `__healthCoupangSt` 沒動；雲端主檔晚到只重畫這一格與來源行（`_cupStArgs`）。
+  - **酷澎｜總表**（`cupRenderOverview`，照 `pchomeRenderOverview`；樣式用現成的 `mm-*`，通路顏色等少數在 `cup-ov-*`）：🔴 **淨利表口徑、不讀 KPI 月結表**——好麻吉＋露營館合計，不含買斷（只放一張空卡），也不含 KPI 另外扣的耗材與退貨運費；舊的 KPI 版卡片與「原始表格」已移除。
+    數字來自 `cupOvShopData(通路, 月)`（＝個別通路頁五張卡同一套 `cupEnrichRows`→`cupKpi`＋動銷率）；分析卡 `cupShopAnalysis` 是規則 1～5（門檻共用 `MOMO_ANALYSIS_CFG`，純函式在 `CUP-OV-PURE-BEGIN/END`）：規則 3 的上月淨利率是用目前成本回算（成本沒有歷史版本），規則 4 斷貨只在該通路最新一個有報表的月份產出（庫存是清單當下的數字）。
+    重畫：`coupangReportReady`／`momoCostByOriginReady`／`coupangProductsCloudReady` 與成本表接上雲端時（`cupOvRedrawIfActive`）；成本表或報表沒到齊顯示載入中，不把「缺成本」當結果。趨勢圖涵蓋的月份有舊格式報表（`_cupRowsOld`）時頁首黃字提醒。
+    新增酷澎通路要改 `CUP_OVERLAP_SHOPS`、`CUP_OV_COLOR`／`CUP_OV_DOTCLS` 與 css 的 `--cup-*`。Console 只讀 `__cupOvSnap('YYYY-MM')`；node 測試 `scripts/coupang-overview.test.cjs`。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
