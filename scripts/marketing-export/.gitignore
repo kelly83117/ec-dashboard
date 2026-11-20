@@ -1,0 +1,4 @@
+.private-input/
+*.local.json
+.env*
+!.env.example
