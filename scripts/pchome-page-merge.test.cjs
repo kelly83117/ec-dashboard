@@ -106,10 +106,12 @@ const G = P.pchomeGroupByPage(rows, idsOf);
   ok(JSON.stringify(map) === c, '不改動傳進來的資料');
   eq(P.pchomeOptlogPageList(null, ['A1'], 'P-A'), [], '沒有資料 → 空');
   const h = C.pchomeOptlogCellInnerHTML(L, null, { esc, types: ['調價'], nameOf: u => u, page: true });
-  ok(h.includes('共 3 筆') && !h.includes('pchomeOptlogCellEdit') && !h.includes('pchomeOptlogCellOpen'), '外層格子：共 N 筆、點了不新增、沒有開彈窗', h);
-  ok(h.includes('>掛在別的料號、標這一頁<'), '外層格子顯示最近一筆');
+  ok(h.includes('共 3 筆') && h.includes('pchomeOptlogPageCellEdit(this)') && !h.includes('pchomeOptlogCellEdit(') && !h.includes('pchomeOptlogCellOpen'), '外層格子：共 N 筆、點了走整頁新增（不是規格的）、沒有開彈窗', h);
+  ok(h.includes('>掛在別的料號、標這一頁<') && h.includes('<span class="pch-ol-page">整頁</span>'), '外層格子顯示最近一筆，整頁紀錄標「整頁」');
   const e0 = C.pchomeOptlogCellInnerHTML([], null, { esc, types: ['調價'], nameOf: u => u, page: true });
-  ok(e0.includes('尚無優化紀錄') && !e0.includes('onclick'), '外層沒有紀錄 → 灰字、不能點新增');
+  ok(e0.includes('輸入整頁優化紀錄…') && e0.includes('pchomeOptlogPageCellEdit(this)'), '外層沒有紀錄 → 灰字、點了替整頁新增');
+  const ed = C.pchomeOptlogCellInnerHTML([], { type: '調價', note: '' }, { esc, types: ['調價'], nameOf: u => u, page: true });
+  ok(ed.includes('pchomeOptlogPageCellSave(this)') && !ed.includes('pchomeOptlogCellSave(') && ed.includes('pchomeOptlogCellCancel()'), '外層編輯中：Enter／✓ 存整頁、Esc／✕ 取消');
   const plain = C.pchomeOptlogCellInnerHTML(L, null, { esc, types: ['調價'], nameOf: u => u });
   ok(plain.includes('pchomeOptlogCellEdit(this)') && plain.includes('pchomeOptlogCellOpen(this)'), '不帶 page → 跟原本一樣（可新增、可開彈窗）'); }
 

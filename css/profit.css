@@ -2372,3 +2372,6 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .pch-ol-main.pch-ol-ro{cursor:pointer;}
 .pch-ol-n.pch-ol-n-ro{cursor:default;}
 .pch-ol-n.pch-ol-n-ro:hover{color:var(--text-muted);text-decoration:none;}
+/* 整頁優化紀錄（塊 3）：合併商品頁外層記的那一筆，在規格列、商品彈窗前面標「整頁」。 */
+:root{--pch-ol-page-bg:var(--warn-soft);--pch-ol-page-fg:var(--warn);}
+.pch-ol-page{flex-shrink:0;margin-right:4px;padding:0 5px;border-radius:4px;background:var(--pch-ol-page-bg);color:var(--pch-ol-page-fg);font-size:10px;font-weight:700;white-space:nowrap;}

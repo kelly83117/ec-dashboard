@@ -23,7 +23,8 @@ const ADDED = ['pchomeOpenSyncPreview', 'pchomeConfirmSync', 'syncAffRptToCloud'
   'kpiBooksMissCostSave', 'kpiFridayMissCostSave', 'kpiCoupangMissCostSave', 'momoMoPlusCostInlineSave', 'cupAnaCostSave',
   'momoPCSave', 'momoPCSaveConfirm', 'pchomePCSave', 'pchomePCSaveConfirm', 'pchomeAddOptlogModal', 'pchomeDeleteOptlog',
   'onCupPageNoteChange',   // 2026-11-19：酷澎合併商品頁外層列的調整欄（oninput 直接存，對每個規格呼叫 onCupNoteChange）
-  'pchomeOptlogCellEdit', 'pchomeOptlogCellSave'];   // 2026-11-19：PChome 總表「優化紀錄」欄（點格子開編輯、儲存鈕／Enter 存檔）
+  'pchomeOptlogCellEdit', 'pchomeOptlogCellSave',   // 2026-11-19：PChome 總表「優化紀錄」欄（點格子開編輯、儲存鈕／Enter 存檔）
+  'pchomeOptlogPageCellEdit', 'pchomeOptlogPageCellSave'];   // 2026-11-20：PChome 合併商品頁外層「優化紀錄」（替整頁新增一筆）
 ADDED.forEach(n => {
   ok(RE.test(n + "('a','b')"), n + '：onclick 會被擋');
   ok(RE.test("if(event.key==='Enter')" + n + "('a','b')"), n + '：包在 Enter 判斷裡也會被擋');
@@ -44,6 +45,7 @@ const ALLOW = ["cupPCInput('cost',this.value)", 'cupPCReset()', 'cupPCToOptlog()
   "cupOpenAnalysis('麻吉','X')", "momoOpenAnalysis('甲配','X')", "pchomeOpenAnalysis('轉單','X')", "openNotePopup('好麻吉|2026/11|first','E1')",
   'pchomeCloseSyncPreview()', 'momoCloseSyncPreview()', 'closeProfitNoteModal()', "momoCancelOptlogEdit('甲配','X')",
   "cupSetPageMode('麻吉','merge')", "cupTogglePage('麻吉','123')", "event.stopPropagation();cupTogglePage('麻吉','123',true)",
+  "pchomeSetPageMode('轉單','merge')", "pchomeTogglePage('轉單','DDBK72-A900KK915')",   // 2026-11-20：PChome 合併商品頁的切換模式、展開收合是檢視
   "event.stopPropagation();pchomeOptlogCellOpen(this)", 'pchomeOptlogCellCancel()', "pchomeOptlogCellDraft('note',this.value)", "pchomeOptlogCellDraft('type',this.value)", 'event.stopPropagation()',
   "splitSearch(this)", "splitAddRow()", "splitRemoveRow(0)", "momoOpenColPicker('甲配',this)", "toggleHiddenCol('好麻吉','rev')"];
 ALLOW.forEach(h => ok(!RE.test(h), '不擋：' + h));
