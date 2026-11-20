@@ -35583,7 +35583,7 @@ function pchomeSaveOptlog(shop,map){ var k=pchomeOptlogKey(shop);
 function pchomeAddOptlog(shop, sku, entry){ if(!shop||!sku) return;
   var map=pchomeLoadOptlog(shop); map[sku]=map[sku]||[];
   var by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
-  map[sku].push({ id:'popt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:momoNowParts().date, time:momoNowParts().time, shop:shop, sku:sku, by:by, type:(entry&&entry.type)||'其他', note:(entry&&entry.note)||'' });
+  map[sku].push(pchomeOptlogMakeEntry(shop, sku, entry, by, momoNowParts().date, momoNowParts().time, 'popt_'+Date.now()+'_'+Math.floor(Math.random()*100000)));   // entry.page 有值＝整頁紀錄（合併商品頁外層）；沒有＝跟改版前同一個物件
   pchomeSaveOptlog(shop, map);
   try{ pchomeUpdateDailyProgress({silent:true}); }catch(e){}   // optlog 新增 → 工作日誌 pchome-summary 即時更新（照 momoAddOptlog 16639；編輯/新增/手動優化都經此 pchomeAddOptlog）
 }
@@ -35659,13 +35659,20 @@ async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_op
   if(plan.hasTomb&&snap&&snap.metadata&&snap.metadata.fromCache) throw new Error('讀不到雲端優化紀錄現值（只拿到本機快取），這次不推，資料還在本機。');   // 有刪除要處理時，不能拿快取當雲端現值
   if(plan.writeTomb) await window.__cloudPchomeOptlog.setField(pchomeOptlogTombField(shop), momoFsSanitizeDeep(plan.tomb));   // 墓碑先寫：就算下一步失敗，雲端也只是「有墓碑、紀錄還在」，下次同步會再濾
   await window.__cloudPchomeOptlog.setField(shop, momoFsSanitizeDeep(plan.merged));   // 每 shop 一欄
+  var pageNew=pchomeOptlogPageNewIds(cd, shop, plan.merged), vdBack;   // 整頁紀錄（有 page）：雲端原本沒有的那幾筆，寫完也要讀回確認。沒有 page 的資料永遠是空陣列 ⇒ 下面跟改版前一樣
   if(plan.hasTomb){   // A-347：讀回確認才算推成功（丟錯 ⇒ syncToCloud 列為失敗、待同步留著）
     var vs=await window.__cloudPchomeOptlog.getDoc();
-    var vd=(vs&&vs.exists&&vs.exists()&&!(vs.metadata&&vs.metadata.fromCache))?(vs.data()||{}):null;
-    var why=pchomeOptlogWriteConfirmed(plan, shop, vd);
+    var vd=(vs&&vs.exists&&vs.exists()&&!(vs.metadata&&vs.metadata.fromCache))?(vs.data()||{}):null; vdBack=vd;
+    var why=pchomeOptlogWriteConfirmed(plan, shop, vd)||pchomeOptlogPageConfirmed(pageNew, shop, vd);
     if(why){ console.error('[pchome optlog] 寫入未確認：'+why+'。dirty 沒有清，資料還在本機。'); throw new Error('PChome 優化紀錄寫入未確認（'+why+'），資料還在本機，請稍後再按同步重試。'); }
     pchomeOptlogTombSave(shop, plan.tomb);   // 本機墓碑跟雲端對齊（含清掉過期的）
   }else if(Object.keys(localTomb).length) pchomeOptlogTombSave(shop, plan.tomb);   // 墓碑全部過期：本機那份也清掉（本機原本就沒有墓碑時不會走到這裡）
+  if(pageNew.length&&!plan.hasTomb){   // 只有新的整頁紀錄、沒有刪除：一樣讀回確認（照 A-347），不符就丟錯、待同步留著
+    var vs2=await window.__cloudPchomeOptlog.getDoc();
+    vdBack=(vs2&&vs2.exists&&vs2.exists()&&!(vs2.metadata&&vs2.metadata.fromCache))?(vs2.data()||{}):null;
+    var why2=pchomeOptlogPageConfirmed(pageNew, shop, vdBack);
+    if(why2){ console.error('[pchome optlog] 寫入未確認：'+why2+'。dirty 沒有清，資料還在本機。'); throw new Error('PChome 優化紀錄寫入未確認（'+why2+'），資料還在本機，請稍後再按同步重試。'); }
+  }
   var k=pchomeOptlogKey(shop);
   try{ localStorage.setItem(k,JSON.stringify(plan.merged)); }catch(e){}
   try{ if(Store._profitMem) Store._profitMem[k]=plan.merged; }catch(e){}
@@ -36841,6 +36848,7 @@ function pchomeRenderOptlogSection(shop, 料號){
   var rows=list.length? list.map(function(e,i){return {e:e,i:i};}).reverse().map(function(o){ var e=o.e,i=o.i;
     return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">'
       +'<span style="flex-shrink:0;font-size:11px;color:#94a3b8;width:74px">'+_momoEsc(e.date||'')+'</span>'
+      +(e.page?'<span class="pch-ol-page" title="'+_momoEsc('整頁紀錄：在合併商品頁外層記的，代表整個商品頁（商編 '+e.page+'），只算一筆')+'">整頁</span>':'')   // 沒有 page 的紀錄：這一段是空字串，跟改版前一樣
       +'<span style="flex-shrink:0;font-size:11px;font-weight:700;color:#4f46e5;background:#eef2ff;border-radius:5px;padding:1px 7px">'+_momoEsc(e.type||'其他')+'</span>'
       +'<span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">'+_momoEsc(e.note||'')+(e.by?' <span style="color:#94a3b8">· '+_momoEsc(momoOptlogUserToName(e.by)||e.by)+'</span>':'')+'</span>'
       +'<a onclick="pchomeDeleteOptlog(\''+shop+'\',\''+_momoEsc(料號)+'\','+i+',\''+_momoEsc(e.id==null?'':e.id)+'\')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>';
@@ -36901,28 +36909,43 @@ function pchomeOptlogCellView(list, nameOf){
   var d=String(e.date||''), m=d.match(/^\d{4}-(\d{2})-(\d{2})$/), md=m?(m[1]+'/'+m[2]):d;
   var by=e.by?String((nameOf?nameOf(e.by):'')||e.by):'';
   var type=String(e.type||'其他'), note=String(e.note||'');
-  return { n:arr.length, type:type, note:note, md:md, by:by, meta:[md,by].filter(Boolean).join(' '),
+  var v={ n:arr.length, type:type, note:note, md:md, by:by, meta:[md,by].filter(Boolean).join(' '),
     title:'【'+type+'】'+note+'\n'+[d+(e.time?' '+e.time:''), by].filter(Boolean).join(' · ') };
+  if(e.page){ v.page=String(e.page); v.title='（整頁）'+v.title; }   // 最近一筆是整頁紀錄（合併商品頁外層新增的）；沒有 page 的紀錄回傳物件跟改版前一樣
+  return v;
 }
 var PCHOME_OL_UNSAVED_MSG='尚未儲存：按 Enter 儲存，或按 Esc 放棄';
 // 格子內層 HTML（外觀照酷澎「調整」欄：一行、像輸入框的框；沿用 .cup-pg-note-inp）。edit＝null（檢視）或 {type,note}（輸入中）。deps＝{esc, types, nameOf}。
 //   🔴 跟酷澎調整欄不同：這裡每按一次 Enter 是「新增一筆優化紀錄」，不是覆蓋同一段文字。
+//   deps.page＝合併商品頁外層（整頁）格子：handler 換成 pchomeOptlogPageCellEdit／Save，「共 N 筆」不是連結（整頁沒有單一彈窗）。
+//   不帶 deps.page、紀錄也沒有 page 欄 ⇒ 輸出跟改版前一字不差（scripts/pchome-optlog-cell.test.cjs、pchome-page-merge.test.cjs）。
 function pchomeOptlogCellInnerHTML(list, edit, deps){
-  var esc=deps.esc, EDIT='onclick="event.stopPropagation();pchomeOptlogCellEdit(this)"';
+  // handler 一律寫成完整字面字串（scripts/ro-ui-whitelist.test.cjs 靠字面比對抓改名）；兩組只差 Page。
+  var pg=!!deps.page, esc=deps.esc;
+  var EDIT=pg?'onclick="event.stopPropagation();pchomeOptlogPageCellEdit(this)"':'onclick="event.stopPropagation();pchomeOptlogCellEdit(this)"';
+  var KD=pg?' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogPageCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()">'
+           :' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()">';
+  var OKB=pg?'<button type="button" class="pch-ol-btn pch-ol-ok" title="儲存（Enter）" aria-label="儲存" onclick="pchomeOptlogPageCellSave(this)">✓</button>'
+            :'<button type="button" class="pch-ol-btn pch-ol-ok" title="儲存（Enter）" aria-label="儲存" onclick="pchomeOptlogCellSave(this)">✓</button>';
   if(edit){
     var types=deps.types||[], cur=(types.indexOf(edit.type)>=0)?edit.type:(types[0]||'其他');
     return '<div class="pch-ol-row" onclick="event.stopPropagation()">'
       +'<select class="pch-ol-sel" aria-label="紀錄類型" onchange="pchomeOptlogCellDraft(\'type\',this.value)">'
         +types.map(function(t){ return '<option value="'+esc(t)+'"'+(t===cur?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
-      +'<input class="cup-pg-note-inp pch-ol-inp'+(edit.warn?' pch-ol-warn':'')+'" type="text" value="'+esc(edit.note||'')+'" placeholder="輸入後按 Enter 或 ✓ 儲存" oninput="pchomeOptlogCellDraft(\'note\',this.value)"'
-        +' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)pchomeOptlogCellSave(this);else if(event.key===\'Escape\')pchomeOptlogCellCancel()">'
-      +'<button type="button" class="pch-ol-btn pch-ol-ok" title="儲存（Enter）" aria-label="儲存" onclick="pchomeOptlogCellSave(this)">✓</button>'
+      +'<input class="cup-pg-note-inp pch-ol-inp'+(edit.warn?' pch-ol-warn':'')+'" type="text" value="'+esc(edit.note||'')+'" placeholder="'+(pg?'整頁記一筆，按 Enter 或 ✓ 儲存':'輸入後按 Enter 或 ✓ 儲存')+'" oninput="pchomeOptlogCellDraft(\'note\',this.value)"'
+        +KD
+      +OKB
       +'<button type="button" class="pch-ol-btn" title="取消（Esc）" aria-label="取消" onclick="pchomeOptlogCellCancel()">✕</button>'
       +(edit.warn?'<div class="pch-ol-hint">'+PCHOME_OL_UNSAVED_MSG+'</div>':'')+'</div>';
   }
-  var v=pchomeOptlogCellView(list, deps.nameOf);
+  var v=pchomeOptlogCellView(list, deps.nameOf), PB=(v&&v.page)?'<span class="pch-ol-page">整頁</span>':'';   // 最近一筆是整頁紀錄 ⇒ 前面標「整頁」
+  if(pg){   // 合併商品頁外層（整頁聯集）：點一下替整頁新增一筆；「共 N 筆」＝整頁所有規格合計，不是連結
+    if(!v) return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="點一下替整頁新增一筆優化紀錄（只記一筆）">輸入整頁優化紀錄…</div></div>';
+    return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main" '+EDIT+' title="'+esc('整頁所有規格的紀錄（最近一筆）；點一下替整頁新增一筆\n'+v.title)+'">'+PB+'<span class="pch-ol-type">'+esc(v.type)+'</span><span class="pch-ol-note">'+esc(v.note)+'</span></div>'
+      +'<span class="pch-ol-n pch-ol-n-ro" title="整頁所有規格合計">共 '+v.n+' 筆</span></div>';
+  }
   if(!v) return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="點一下新增優化紀錄">輸入優化紀錄…</div></div>';
-  return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main" '+EDIT+' title="'+esc(v.title)+'"><span class="pch-ol-type">'+esc(v.type)+'</span><span class="pch-ol-note">'+esc(v.note)+'</span></div>'
+  return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main" '+EDIT+' title="'+esc(v.title)+'">'+PB+'<span class="pch-ol-type">'+esc(v.type)+'</span><span class="pch-ol-note">'+esc(v.note)+'</span></div>'
     +'<a class="pch-ol-n" onclick="event.stopPropagation();pchomeOptlogCellOpen(this)" title="看全部優化紀錄">共 '+v.n+' 筆</a></div>';
 }
 // PCH-OLCELL-PURE-END
@@ -36930,29 +36953,34 @@ var _pchomeOlEdit=null;          // 目前編輯中的那一格 {shop,sku,type,n
 var _pchomeOlLastType='調價';    // 這次開站內上一次用的類型（只在記憶體）
 function pchomeOptlogCellHTML(shop, sku){
   var list=(pchomeLoadOptlog(shop)||{})[sku];
-  var ed=(_pchomeOlEdit&&_pchomeOlEdit.shop===shop&&String(_pchomeOlEdit.sku)===String(sku))?_pchomeOlEdit:null;
+  var ed=(_pchomeOlEdit&&!_pchomeOlEdit.page&&_pchomeOlEdit.shop===shop&&String(_pchomeOlEdit.sku)===String(sku))?_pchomeOlEdit:null;   // 外層（整頁）格子編輯中時 page 有值，不算這一格
   return pchomeOptlogCellInnerHTML(list, ed, {esc:_momoEsc, types:PCHOME_OPTLOG_TYPES, nameOf:momoOptlogUserToName});
 }
 function pchomeOptlogTdHTML(shop, sku){ return '<td class="tl pch-ol-td" data-pch-ol-shop="'+_momoEsc(shop)+'" data-pch-ol="'+_momoEsc(sku)+'" onclick="event.stopPropagation()">'+pchomeOptlogCellHTML(shop, sku)+'</td>'; }
 function _pchomeOlTd(shop, sku){ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return null;
   var tds=c.querySelectorAll('td[data-pch-ol]'); for(var i=0;i<tds.length;i++){ if(tds[i].getAttribute('data-pch-ol')===String(sku)) return tds[i]; } return null; }
 function _pchomeOlCtx(el){ var td=(el&&el.closest)?el.closest('td[data-pch-ol]'):null; return td?{td:td, shop:td.getAttribute('data-pch-ol-shop'), sku:td.getAttribute('data-pch-ol')}:null; }
-function pchomeOptlogCellRefresh(shop, sku){ try{ var td=_pchomeOlTd(shop, sku); if(td) td.innerHTML=pchomeOptlogCellHTML(shop, sku); }catch(e){} }
+function pchomeOptlogCellRefresh(shop, sku){ try{ var td=_pchomeOlTd(shop, sku); if(td) td.innerHTML=pchomeOptlogCellHTML(shop, sku); }catch(e){} pchomeOptlogPageCellsRefresh(shop); }   // 合併商品頁：外層（整頁）格子跟著重畫；沒有外層格子＝no-op
 // 整欄重畫（雲端優化紀錄晚到時用）：只動這一欄的 td；編輯中那一格有焦點就不動（不打斷輸入）。
 function pchomeOptlogCellsRefreshAll(shop){ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return;
   [].forEach.call(c.querySelectorAll('td[data-pch-ol]'), function(td){ if(td.contains(document.activeElement)) return;
-    var h=pchomeOptlogCellHTML(shop, td.getAttribute('data-pch-ol')); if(td.innerHTML!==h) td.innerHTML=h; }); }
+    var h=pchomeOptlogCellHTML(shop, td.getAttribute('data-pch-ol')); if(td.innerHTML!==h) td.innerHTML=h; }); pchomeOptlogPageCellsRefresh(shop); }
+// 編輯中的那一格可能是規格列（{shop,sku}）或合併商品頁外層（{shop,sku:第一個規格,page}）。下面三支把兩種都照顧到。
+function _pchomeOlSame(a, b){ return !!(a&&b&&a.shop===b.shop&&String(a.sku)===String(b.sku)&&String(a.page||'')===String(b.page||'')); }
+function _pchomeOlEditTd(e){ return !e?null:(e.page?_pchomeOlPgTd(e.shop, e.page):_pchomeOlTd(e.shop, e.sku)); }
+function _pchomeOlRefreshEdit(e){ if(!e) return; if(!e.page){ pchomeOptlogCellRefresh(e.shop, e.sku); return; }
+  try{ var td=_pchomeOlPgTd(e.shop, e.page); if(td) td.innerHTML=pchomeOptlogPageCellHTML(e.shop, e.page); }catch(x){} }
 function pchomeOptlogCellEdit(el){
   var x=_pchomeOlCtx(el); if(!x) return;
-  var prev=_pchomeOlEdit;
-  if(prev&&(prev.shop!==x.shop||String(prev.sku)!==String(x.sku))&&pchomeOptlogCellLeave(_pchomeOlDraftNow())==='stay'&&_pchomeOlWarn()) return;   // 原格有還沒存的文字：留在原格（不丟、不自動存）
+  var prev=_pchomeOlEdit, me={shop:x.shop, sku:x.sku};
+  if(prev&&!_pchomeOlSame(prev,me)&&pchomeOptlogCellLeave(_pchomeOlDraftNow())==='stay'&&_pchomeOlWarn()) return;   // 原格有還沒存的文字：留在原格（不丟、不自動存）
   _pchomeOlEdit={shop:x.shop, sku:x.sku, type:_pchomeOlLastType, note:''};
-  if(prev&&(prev.shop!==x.shop||String(prev.sku)!==String(x.sku))) pchomeOptlogCellRefresh(prev.shop, prev.sku);   // 一次只開一格：前一格放棄
+  if(prev&&!_pchomeOlSame(prev,me)) _pchomeOlRefreshEdit(prev);   // 一次只開一格：前一格放棄
   x.td.innerHTML=pchomeOptlogCellHTML(x.shop, x.sku);
   var inp=x.td.querySelector('.pch-ol-inp'); if(inp){ try{ inp.focus({preventScroll:true}); }catch(e){ inp.focus(); } }
 }
 function pchomeOptlogCellDraft(kind, v){ if(!_pchomeOlEdit) return; if(kind==='type') _pchomeOlEdit.type=v; else _pchomeOlEdit.note=v; }   // 只記在記憶體（整張表重畫時草稿還在）
-function pchomeOptlogCellCancel(){ var e=_pchomeOlEdit; _pchomeOlEdit=null; if(e) pchomeOptlogCellRefresh(e.shop, e.sku); }
+function pchomeOptlogCellCancel(){ var e=_pchomeOlEdit; _pchomeOlEdit=null; if(e) _pchomeOlRefreshEdit(e); }
 function pchomeOptlogCellSave(el){
   var x=_pchomeOlCtx(el); if(!x) return;
   var sel=x.td.querySelector('.pch-ol-sel'), inp=x.td.querySelector('.pch-ol-inp');
@@ -36969,11 +36997,11 @@ function pchomeOptlogCellOpen(el){
   if(document.getElementById('pch-ana-tab-optlog')) pchomeAnaSwitchTab('optlog');
 }
 // ── 沒存就離開（2026-11-19）：輸入框有字時點別格／點格子外面 ⇒ 留在原格、警示色、重新取得焦點、顯示提示；不丟、不自動存。空的 ⇒ 直接收起來。──
-function _pchomeOlDraftNow(){ var e=_pchomeOlEdit; if(!e) return ''; var td=_pchomeOlTd(e.shop, e.sku), inp=td&&td.querySelector('.pch-ol-inp'); return inp?inp.value:(e.note||''); }   // 以畫面上輸入框的現值為準
+function _pchomeOlDraftNow(){ var e=_pchomeOlEdit; if(!e) return ''; var td=_pchomeOlEditTd(e), inp=td&&td.querySelector('.pch-ol-inp'); return inp?inp.value:(e.note||''); }   // 以畫面上輸入框的現值為準
 // 回 true＝已經在原格提示（呼叫端要中止原本的動作）；原格不在畫面上（找不到、被隱藏）回 false＝不擋（草稿留在記憶體，那一格再畫出來時還在）。
 function _pchomeOlWarn(){
   var e=_pchomeOlEdit; if(!e) return false;
-  var td=_pchomeOlTd(e.shop, e.sku); if(!td||!td.isConnected||td.offsetParent===null) return false;
+  var td=_pchomeOlEditTd(e); if(!td||!td.isConnected||td.offsetParent===null) return false;
   var inp=td.querySelector('.pch-ol-inp'), row=td.querySelector('.pch-ol-row'); if(!inp||!row) return false;
   e.warn=true; e.note=inp.value;
   inp.classList.add('pch-ol-warn');
@@ -36983,9 +37011,9 @@ function _pchomeOlWarn(){
 }
 function _pchomeOlOutsideClick(ev){
   var e=_pchomeOlEdit; if(!e) return;
-  var td=_pchomeOlTd(e.shop, e.sku); if(!td||!td.isConnected||td.offsetParent===null) return;   // 原格不在畫面上：不擋
+  var td=_pchomeOlEditTd(e); if(!td||!td.isConnected||td.offsetParent===null) return;   // 原格不在畫面上：不擋
   if(td.contains(ev.target)) return;
-  if(pchomeOptlogCellLeave(_pchomeOlDraftNow())==='close'){ _pchomeOlEdit=null; pchomeOptlogCellRefresh(e.shop, e.sku); return; }   // 空的：收起來，這一下點擊照常進行
+  if(pchomeOptlogCellLeave(_pchomeOlDraftNow())==='close'){ _pchomeOlEdit=null; _pchomeOlRefreshEdit(e); return; }   // 空的：收起來，這一下點擊照常進行
   if(_pchomeOlWarn()){ ev.preventDefault(); ev.stopImmediatePropagation(); }   // 有字：這一下點擊不生效（不開彈窗、不切格、不重畫表格）
 }
 document.addEventListener('click', _pchomeOlOutsideClick, true);   // capture：趕在列的 onclick、別格的 pchomeOptlogCellEdit 之前
@@ -37033,7 +37061,7 @@ function pchomeOpenDpDetail(person, date, combo){
   PCHOME_OPTLOG_DP_SHOPS.forEach(function(shop){ var nameBy={}; (pchomeLoadProducts()||[]).forEach(function(p){ nameBy[p.料號]=p.商品名||''; });
     var map=pchomeLoadOptlog(shop)||{};
     Object.keys(map).forEach(function(sku){ (map[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==date) return; if((momoOptlogUserToName(e.by))!==person) return; if((shop+PCHOME_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
-      rows.push({shop:shop, sku:sku, name:nameBy[sku]||'', type:e.type||'其他', note:e.note||'', time:e.time||''}); }); }); });
+      rows.push({shop:shop, sku:sku, name:(nameBy[sku]||'')+(e.page?'（整頁）':''), type:e.type||'其他', note:e.note||'', time:e.time||''}); }); }); });   // 整頁紀錄只有一筆，名稱後面標「（整頁）」
   // 'PChome·補成本' 這類 → 去 ec_momo_optlog|PChome 找（sku＝原廠編號＝PChome 料號）
   if(String(combo).indexOf(PCHOME_MOMO_OPTLOG_SHOP+PCHOME_OPTLOG_DP_SEP)===0){
     var nb={}; try{ (pchomeLoadProducts()||[]).forEach(function(p){ nb[p.料號]=p.商品名||''; }); }catch(e){}
@@ -37231,12 +37259,23 @@ function pchomeDeleteProduct(shop){
   if(!confirm('確定刪除商品？\n\n原廠編號：'+p.料號+'\n名稱：'+(p.商品名||'(未命名)')+'\n\n⚠ 此操作無法復原。')) return;
   var idx=products.indexOf(p); if(idx<0) return; products.splice(idx,1);
   pchomeSaveProducts(products);
-  try{ var om=pchomeLoadOptlog(shop)||{}; if(om[p.料號]){ delete om[p.料號]; pchomeSaveOptlog(shop,om); } }catch(e){}
+  var _pgMoved=null;
+  try{ var om=pchomeLoadOptlog(shop)||{}; if(om[p.料號]){
+    // 整頁紀錄（有 page，合併商品頁外層記的）：搬到同頁剩下規格碼最小的料號（新 id＋舊 id 進墓碑，見 pchomeOptlogPageMovePlan）；整頁都刪光才跟著刪。
+    //   沒有 page 的紀錄照舊跟著料號刪掉。
+    var _i=0, mv=pchomeOptlogPageMovePlan(om[p.料號], pchomeProductsOfShop(shop), function(){ _i++; return 'popt_'+(Date.now()+_i)+'_'+Math.floor(Math.random()*100000); });
+    if(mv.moves.length){ var tomb=pchomeOptlogTombLoad(shop), _by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+      mv.moves.forEach(function(m){ if(m.from.id!=null) tomb[String(m.from.id)]={ at:Date.now(), by:_by }; });
+      pchomeOptlogTombSave(shop, tomb);   // 先記墓碑、再改清單（同 pchomeDeleteOptlog）
+      mv.moves.forEach(function(m){ (om[m.to]=om[m.to]||[]).push(m.entry); });
+      _pgMoved={ n:mv.moves.length, to:mv.moves.map(function(m){ return m.to; }).filter(function(v,i,a){ return a.indexOf(v)===i; }) };
+      console.info('[pchome optlog] 刪除 '+p.料號+'：整頁紀錄 '+mv.moves.length+' 筆搬到 '+_pgMoved.to.join('、')+'（舊 id 進墓碑）', mv.moves.map(function(m){ return {from:m.from.id, to:m.to, id:m.entry.id}; })); }
+    delete om[p.料號]; pchomeSaveOptlog(shop,om); } }catch(e){ console.error('[pchome optlog] 刪除商品時處理優化紀錄失敗',e); }
   try{ var hm=pchomeLoadHistory()||{}; if(hm[p.料號]){ delete hm[p.料號]; pchomeSaveHistory(hm); } }catch(e){}
   _pchomeBatchSel[shop]='';
   pchomeRefreshSyncBtn(shop);
   pchomeRenderBatchEditList(shop); pchomeRenderBatchEditForm(shop);
-  if(typeof showToast==='function') showToast('已刪除商品','success');
+  if(typeof showToast==='function') showToast(_pgMoved?('已刪除商品；整頁優化紀錄 '+_pgMoved.n+' 筆已搬到 '+_pgMoved.to.join('、')):'已刪除商品','success');
 }
 function pchomeRenderBatchAdd(shop){
   var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
@@ -37995,7 +38034,7 @@ function pchomeLogiTipLines(x){ var L=[];
   if((x.運費||0)>0.005) L.push('運費 '+pchomeMoney(x.運費)+'（每箱 '+(x.運費每箱!=null?x.運費每箱:PCHOME_BOX_FREIGHT)+(x.運費來源?'，'+x.運費來源:'')+'；按箱營收比例分攤）');
   if((x.包材||0)>0.005) L.push('包材 '+pchomeMoney(x.包材)+'（每筆訂單 $'+PCHOME_PACKAGING_COST+'，依訂單內營收比例分攤）');
   return L.length?('\n───────\n'+L.join('\n')+'\n＝ 費用合計 '+pchomeMoney(x.費用合計)+'（未稅）'):''; }
-function pchomeSetProfitMonth(shop,key){ _pchomeProfitMonth[shop]=key; pchomeRenderSub(shop); }
+function pchomeSetProfitMonth(shop,key){ _pchomeProfitMonth[shop]=key; pchomePageResetOpen(shop); pchomeRenderSub(shop); }
 function pchomeProfitSetSort(shop,col){ var c=_pchomeProfitSort[shop]; _pchomeProfitSort[shop]=(!c||c.col!==col)?{col:col,dir:'desc'}:(c.dir==='desc'?{col:col,dir:'asc'}:null); pchomeRenderSub(shop); }   // 點欄名切換 desc→asc→取消（比照 momoProfitSetSort）
 // ══════════ PChome 總表：欄位管理 + 標籤 + 篩選（全部照 momo 甲配，pchome- 前綴、沿用共用 col-picker/mm-fp CSS 與 momoUiW 欄寬 helper）══════════
 // 單一權威欄位定義（顯示欄＋數值篩選欄都由此導出）。name 固定首欄、tags 左欄；fmt 供數值篩選判斷可篩欄。
@@ -38330,8 +38369,8 @@ function pchomeOpenFilterPanel(shop,btn){
 var _pchomeViewMode={};   // shop → 'billing'(帳務月,預設) | 'calendar'(日曆月)。期間模式切換；帳務月模式完全不動。
 var _pchomeHierMetric={};   // shop → 'margin'(淨利率,含運費包材,預設) | 'itemMargin'(商品淨利率,運費包材前)。階層圖口徑切換（刻意偏離 MO+ 硬切：PChome 運費包材我方實付，預設看含運費真實口徑，才看得到加運費後才轉虧的商品）。
 var _pchomeCalMonth={};   // shop → 選中的日曆月（日曆月模式；與帳務月選擇各自獨立）
-function pchomeSetViewMode(shop,m){ _pchomeViewMode[shop]=m; pchomeRenderSub(shop); }
-function pchomeSetCalMonth(shop,key){ _pchomeCalMonth[shop]=key; pchomeRenderSub(shop); }
+function pchomeSetViewMode(shop,m){ _pchomeViewMode[shop]=m; pchomePageResetOpen(shop); pchomeRenderSub(shop); }
+function pchomeSetCalMonth(shop,key){ _pchomeCalMonth[shop]=key; pchomePageResetOpen(shop); pchomeRenderSub(shop); }
 
 // ══════════ 日曆月模式（期間切換；帳務月模式完全不走這裡）══════════
 //   定案（2026-10-01）：營收/銷量/成本/毛利 一律由訂單明細按【轉單日期的日曆月】落月；
@@ -38532,6 +38571,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
   var discToggle=discCount>0?'<button class="mm-chip'+(showDisc?' on':'')+'" style="'+(showDisc?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'')+'" onclick="pchomeToggleDisc(\''+shop+'\')">'+(showDisc?'隱藏已下架':'顯示已下架（'+discCount+'）')+'</button>':'';
   var toolbar='<div class="mm-row" id="pchome-toolbar-'+shop+'" style="margin:14px 0 8px;gap:12px;align-items:center">'
     +momoSearchBox(shop,'pchome-search-'+shop,_pchomeSearch[shop]||'','搜尋 商品名 / 商編 / 原編','pchomeOnSearch','flex:1;min-width:180px;max-width:320px')
+    +pchomePageModeHtml(shop)
     +'<span class="mm-stat"><span class="mm-stat-item">上架 <b>'+pchomeNum(calc.activeCount||0)+'</b></span><span class="mm-stat-item">商編 <b>'+pchomeNum(pchomeBaseCount(shop,calc))+'</b></span><span class="mm-stat-item">有售 <b>'+pchomeNum(calc.bizCount||0)+'</b></span></span>'
     +discToggle
     +'<span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="pchome-filter-chip-'+shop+'" class="mm-chip'+(fc?' on':'')+'" style="'+(fc?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'')+'" onclick="pchomeOpenFilterPanel(\''+shop+'\',this)">🏷 標籤 / 篩選'+(fc?'（'+fc+'）':'')+'</button></span>'
@@ -38573,6 +38613,300 @@ function pchomeDxByCode(calc, shop){
   if(precise) calc.soldBases.forEach(function(b){ den[b]=1; num[b]=1; });   // 精確口徑：只有「自己有銷售」的商編算有售（同 MOMO 商品頁／蝦皮商品 ID）；賣出的商編一定進分母
   return {num:Object.keys(num).length, den:Object.keys(den).length};
 }
+/* ═══ PCH-PG-PURE-BEGIN：PChome 淨利表「合併商品頁」（2026-11-20）純函式；node 測試 scripts/pchome-page-merge.test.cjs 用標記抽取，不碰 DOM／Store／localStorage ═══
+   只管表格怎麼排：同一個 PChome 商品頁（商編＝商品編號去最後一段，pchomeBaseCode）底下的規格（料號）收成一列合計，點開看各規格。
+   上方大數字、動銷率、匯出 Excel、商品彈窗、批次維護、階層圖都不經過這裡（仍以料號為單位）。結構照酷澎 CUP-PG-PURE。 */
+// 一個料號（本賣場檢視，寄倉要先過 pchomeShopView）掛在哪些商品頁：商品編號逐一去最後一段、去重、保留順序。
+function pchomePageIdsOf(p){
+  var pn=p&&p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), out=[];
+  arr.forEach(function(v){ var b=pchomeBaseCode(v); if(b&&out.indexOf(b)<0) out.push(b); });
+  return out;
+}
+// 規格碼：這個料號在 pageId 那一頁的商品編號最後一段（同頁有兩個取小的）；沒有回 ''。
+function pchomeSpecCodeOf(p, pageId){
+  var pn=p&&p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), best=null;
+  arr.forEach(function(v){ v=String(v||'').trim(); if(!v||pchomeBaseCode(v)!==pageId) return; var seg=v.split('-'), s=seg.length>1?seg[seg.length-1]:'';
+    if(best===null||s<best) best=s; });
+  return best===null?'':best;
+}
+// 這一頁的「第一個規格」：規格碼最小（-001 在 -002 前）；同碼比料號；沒有規格碼的排最後。不跟著畫面排序變。
+//   list＝[{料號, spec}]；回料號（空清單回 ''）。
+function pchomePageAnchor(list){
+  var L=(list||[]).filter(function(x){ return x&&x.料號!=null&&String(x.料號)!==''; }).slice();
+  if(!L.length) return '';
+  L.sort(function(a,b){ var sa=String(a.spec||''), sb=String(b.spec||'');
+    if(!sa&&sb) return 1; if(sa&&!sb) return -1; if(sa!==sb) return sa<sb?-1:1;
+    var ca=String(a.料號), cb=String(b.料號); return ca<cb?-1:(ca>cb?1:0); });
+  return String(L[0].料號);
+}
+// 一組數值「全部一樣」或「有不同」。vals 裡 null＝沒有值。
+function pchomePageUniq(vals){
+  var V=vals||[], nn=V.filter(function(v){ return v!=null&&isFinite(Number(v)); }).map(Number);
+  var same=nn.length>0&&nn.length===V.length&&nn.every(function(v){ return v===nn[0]; });
+  return { same:same, value:same?nn[0]:null, allNull:nn.length===0, min:nn.length?Math.min.apply(null,nn):null, max:nn.length?Math.max.apply(null,nn):null, n:nn.length, nulls:V.length-nn.length };
+}
+// 一個商品頁的合計（形狀跟一列一樣，表格同一套 cell 直接畫）。
+//   營收、銷量、費用、費用合計＝全部成員相加；成本只加有成本的；商品淨利／淨利＝成員畫面上有數字的才加（「—」不加），
+//   比率＝加總後 ÷ 同一批成員的營收合計（同酷澎 cRev）；一個都沒有 ⇒ null（顯示「—」）。
+//   成本、供貨價、售價：全部一樣 ⇒ 那個值；不一樣 ⇒ null，另放 costInfo／supplyInfo／priceInfo（畫面顯示「各規格不同」或範圍）。
+function pchomePageAgg(pageId, members){
+  var M=members||[], S=function(arr,k){ return arr.reduce(function(s,x){ return s+(Number(x[k])||0); },0); };
+  var pM=M.filter(function(x){ return x.淨利!=null; }), ipM=M.filter(function(x){ return x.商品淨利!=null; });
+  var pRev=S(pM,'營收'), ipRev=S(ipM,'營收');
+  var 淨利=pM.length?S(pM,'淨利'):null, 商品淨利=ipM.length?S(ipM,'商品淨利'):null;
+  var top=M[0]||{}; M.forEach(function(x){ if((Number(x.營收)||0)>(Number(top.營收)||0)) top=x; });   // 名稱＝營收最高的成員（同額取前面）
+  var cost=pchomePageUniq(M.map(function(x){ return x.costKnown?x.unitCost:null; })), sup=pchomePageUniq(M.map(function(x){ return x.供貨價; })), price=pchomePageUniq(M.map(function(x){ return x.售價; }));
+  var ck=M.filter(function(x){ return x.costKnown; });
+  return { isGroup:true, pageId:pageId, n:M.length, 料號:pageId, 商品編號:pageId, 商品名:top.商品名||'',
+    營收:S(M,'營收'), 銷量:S(M,'銷量'), 費用:S(M,'費用'), 費用合計:S(M,'費用合計'), 成本:ck.length?S(ck,'成本'):null,
+    商品淨利:商品淨利, 商品淨利率:(商品淨利!=null&&ipRev>0)?商品淨利/ipRev:null, 淨利:淨利, 淨利率:(淨利!=null&&pRev>0)?淨利/pRev:null,
+    unitCost:cost.value, 供貨價:sup.value, 售價:price.value, costKnown:cost.same, costInfo:cost, supplyInfo:sup, priceInfo:price,
+    missN:M.filter(function(x){ return x.hasBiz&&!x.costKnown; }).length, discN:M.filter(function(x){ return x.discontinued; }).length,
+    hasBiz:M.some(function(x){ return x.hasBiz; }), discontinued:M.length>0&&M.every(function(x){ return x.discontinued; }) };
+}
+// rows＝一期的逐料號列（calc.skus）；idsOf(row)＝那個料號掛的商品頁清單（pchomePageIdsOf）。回 { items, multi, stats }：
+//   items＝[{type:'single',row} | {type:'group',pageId,members,agg}]，順序＝各自第一個成員在 rows 裡的位置。
+//   歸屬：只掛一頁 ⇒ 那一頁；掛多頁 ⇒ 整筆歸到「本期掛在它底下的列最多」的那一頁、同數取商品編號寫在前面的（同酷澎）；
+//         沒有商品頁 ⇒ 自成一列。只有一個成員 ⇒ 不成組（type:'single'）。multi＝{ 料號: 另外還掛幾頁 }。
+function pchomeGroupByPage(rows, idsOf){
+  var R=(rows||[]).filter(Boolean), cnt={}, multi={}, order=[], byPage={};
+  var ids=function(r){ var a=idsOf?idsOf(r):[]; return Array.isArray(a)?a:[]; };
+  R.forEach(function(r){ ids(r).forEach(function(id){ cnt[id]=(cnt[id]||0)+1; }); });
+  R.forEach(function(r){ var I=ids(r);
+    if(!I.length){ order.push({type:'single',row:r}); return; }
+    var pick=I[0]; I.forEach(function(id){ if(cnt[id]>cnt[pick]) pick=id; });
+    if(I.length>1) multi[String(r.料號)]=I.length-1;
+    var g=Object.prototype.hasOwnProperty.call(byPage,pick)?byPage[pick]:null;
+    if(!g){ g=byPage[pick]={type:'group',pageId:pick,members:[]}; order.push(g); }
+    g.members.push(r); });
+  var items=order.map(function(it){
+    if(it.type!=='group') return it;
+    if(it.members.length<2) return {type:'single',row:it.members[0]};
+    return {type:'group',pageId:it.pageId,members:it.members,agg:pchomePageAgg(it.pageId,it.members)}; });
+  var gs=items.filter(function(it){ return it.type==='group'; });
+  return { items:items, multi:multi, stats:{ rows:R.length, groups:gs.length, grouped:gs.reduce(function(s,g){ return s+g.members.length; },0),
+    singles:items.length-gs.length, maxMembers:gs.reduce(function(m,g){ return Math.max(m,g.members.length); },0), multiRows:Object.keys(multi).length } };
+}
+// 跟兩支表格（帳務月／日曆月）同一個比法：kf＝欄位 → 取值；sort 有對應欄 ⇒ null 排最後、字串比大小、數字相減；沒有對應欄 ⇒ 依料號升冪。
+function pchomeRowCmp(kf, sort){
+  if(sort&&kf&&kf[sort.col]){ var dir=(sort.dir==='asc')?1:-1, f=kf[sort.col];
+    return function(a,b){ var va=f(a),vb=f(b); if(va==null&&vb==null)return 0; if(va==null)return 1; if(vb==null)return -1; if(typeof va==='string')return va<vb?-dir:(va>vb?dir:0); return (va-vb)*dir; }; }
+  return function(a,b){ return String(a.料號)<String(b.料號)?-1:1; };
+}
+// 排序：外層用合計比、組內成員用同一個比法。不改動傳進來的陣列。
+function pchomeGroupSort(items, cmp){
+  if(!cmp) return items;
+  var key=function(it){ return it.type==='group'?it.agg:it.row; };
+  return items.map(function(it){ return it.type==='group'?Object.assign({},it,{members:it.members.slice().sort(cmp)}):it; })
+    .sort(function(x,y){ return cmp(key(x),key(y)); });
+}
+// 搜尋／篩選（成員判斷，Gini 2026-11-20 定案）：pass(row)＝這一列畫不畫（已下架、標籤、數值、優化紀錄、搜尋全包在裡面）。
+//   單列 ⇒ 照 pass；組 ⇒ 至少一個成員通過才留下，shown＝通過的成員；force＝使用者有在搜尋或篩選 ⇒ 自動展開（forceOpen）。
+//   外層合計仍是整頁（不跟著篩選變）。
+function pchomeGroupFilter(items, pass, force){
+  var out=[];
+  (items||[]).forEach(function(it){
+    if(it.type!=='group'){ if(pass(it.row)) out.push(it); return; }
+    var shown=it.members.filter(pass); if(!shown.length) return;
+    out.push(Object.assign({},it,{shown:shown, forceOpen:!!force})); });
+  return out;
+}
+// 搜尋比對（跟兩支表格的搜尋同一個字串）。q 要先 trim + toLowerCase。
+function pchomeRowSearchHit(x, q){ return !q||(String(x.商品名||'')+' '+String(x.商品編號||'')+' '+String(x.料號||'')).toLowerCase().indexOf(q)>=0; }
+// 外層「優化紀錄」格子要顯示的紀錄（整頁聯集）：成員料號底下的紀錄（標了別頁 page 的不算）＋任何料號底下標了這一頁 page 的紀錄；
+//   同 id 只留一筆（沒有 id 的用整筆內容當 key）。map＝{料號:[紀錄]}。不改動傳進來的資料。
+function pchomeOptlogPageList(map, skus, pageId){
+  var M=(map&&typeof map==='object'&&!Array.isArray(map))?map:{}, seen={}, out=[];
+  var add=function(e){ if(!e||typeof e!=='object') return; var k=(e.id!=null)?'i:'+String(e.id):'j:'+JSON.stringify(e); if(seen[k]) return; seen[k]=1; out.push(e); };
+  (skus||[]).forEach(function(s){ var arr=M[s]; if(Array.isArray(arr)) arr.forEach(function(e){ if(e&&typeof e==='object'&&(!e.page||e.page===pageId)) add(e); }); });
+  Object.keys(M).forEach(function(s){ var arr=M[s]; if(Array.isArray(arr)) arr.forEach(function(e){ if(e&&typeof e==='object'&&e.page&&e.page===pageId) add(e); }); });
+  return out;
+}
+/* ═══ PCH-PG-PURE-END ═══ */
+/* ═══ PCH-OLPAGE-PURE-BEGIN：整頁優化紀錄（塊 3，2026-11-20）純函式；node 測試 scripts/pchome-optlog-page.test.cjs ═══
+   整頁紀錄＝合併商品頁外層新增的那一筆：只記一筆、掛在那一頁「規格碼最小」的料號底下、多一個 page 欄（＝商編）。
+   🔴 沒有 page 的紀錄：產生、顯示、同步合併、墓碑、工作日誌都跟改版前一樣（只有帶 page 時才多一個欄位）。 */
+// 新增一筆優化紀錄的物件。key 順序跟改版前 pchomeAddOptlog 寫死的一樣；entry.page 有值才在最後多一個 page。
+function pchomeOptlogMakeEntry(shop, sku, entry, by, date, time, id){
+  var e={ id:id, date:date, time:time, shop:shop, sku:sku, by:by, type:(entry&&entry.type)||'其他', note:(entry&&entry.note)||'' };
+  if(entry&&entry.page) e.page=String(entry.page);
+  return e;
+}
+// 這次同步要寫上雲、雲端原本沒有的整頁紀錄 id（推完要讀回確認它們真的在）。沒有 page 的紀錄不算 ⇒ 舊資料永遠是空陣列。
+function pchomeOptlogPageNewIds(cloudDoc, shop, merged){
+  var cd=(cloudDoc&&typeof cloudDoc==='object')?cloudDoc:{}, co=(cd[shop]&&typeof cd[shop]==='object')?cd[shop]:{}, have={}, out=[];
+  Object.keys(co).forEach(function(s){ (Array.isArray(co[s])?co[s]:[]).forEach(function(e){ if(e&&e.id!=null) have[String(e.id)]=1; }); });
+  Object.keys(merged||{}).forEach(function(s){ (Array.isArray(merged[s])?merged[s]:[]).forEach(function(e){ if(e&&e.page&&e.id!=null&&!have[String(e.id)]&&out.indexOf(String(e.id))<0) out.push(String(e.id)); }); });
+  return out;
+}
+// 讀回確認：ids 都在雲端這個通路欄裡。回 ''＝確認；其他＝原因。
+function pchomeOptlogPageConfirmed(ids, shop, vd){
+  if(!ids||!ids.length) return '';
+  if(!vd||typeof vd!=='object') return '讀不回雲端現值';
+  var opt=(vd[shop]&&typeof vd[shop]==='object')?vd[shop]:{}, have={};
+  Object.keys(opt).forEach(function(s){ (Array.isArray(opt[s])?opt[s]:[]).forEach(function(e){ if(e&&e.id!=null) have[String(e.id)]=1; }); });
+  var miss=ids.filter(function(id){ return !have[String(id)]; });
+  return miss.length?('整頁紀錄有 '+miss.length+' 筆沒寫進雲端'):'';
+}
+// 刪除商品時，被刪料號底下的整頁紀錄要搬到「同頁剩下的規格裡規格碼最小的」料號。
+//   list＝被刪料號底下的紀錄；remain＝刪除後同賣場的商品（本賣場檢視）；mkId()＝產生新 id。
+//   回 { moves:[{from, to, entry}], drop:[紀錄] }：entry＝換新 id、sku 改成新料號、記 movedFrom（舊 id）的複本；整頁都刪光 ⇒ drop（跟著刪）。
+//   🔴 為什麼換新 id：同步是「逐料號、依 id 聯集」，雲端舊料號底下還有那筆；舊 id 要記墓碑才不會被併回來，
+//      墓碑是整份濾 id，新料號底下那筆若沿用舊 id 也會被濾掉。所以新 id＋舊 id 進墓碑，才不會重複也不會復活。
+function pchomeOptlogPageMovePlan(list, remain, mkId){
+  var moves=[], drop=[];
+  (Array.isArray(list)?list:[]).forEach(function(e){
+    if(!e||typeof e!=='object'||!e.page) return;
+    var pg=String(e.page);
+    var L=(remain||[]).filter(function(p){ return pchomePageIdsOf(p).indexOf(pg)>=0; }).map(function(p){ return {料號:String(p.料號||'').trim(), spec:pchomeSpecCodeOf(p,pg)}; });
+    var to=pchomePageAnchor(L);
+    if(!to){ drop.push(e); return; }
+    var n={}; Object.keys(e).forEach(function(k){ n[k]=e[k]; });
+    n.id=mkId(); n.sku=to; n.movedFrom=(e.id!=null)?String(e.id):'';
+    moves.push({from:e, to:to, entry:n});
+  });
+  return { moves:moves, drop:drop };
+}
+/* ═══ PCH-OLPAGE-PURE-END ═══ */
+// 「全部規格」等價性快照（唯讀，不寫雲端、不讀雲端；不以 __cloud 開頭）。
+//   對轉單／寄倉 × 帳務月每個月份 × 日曆月每個月份 × 幾種排序／已下架／搜尋，各畫一次表格本體，記 {長度:FNV-1a 雜湊} 與逐料號列的雜湊。
+//   opts.mode＝'all'（預設）或 'merge'；opts.fns＝{bill,cal} 換成別支函式（改前改後在同一頁對照用）。畫完還原所有畫面狀態。
+window.__pchomeTblSnap=function(opts){ opts=opts||{};
+  var fnv=function(s){ var h=0x811c9dc5; for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; } return ('0000000'+h.toString(16)).slice(-8); };
+  var bill=(opts.fns&&opts.fns.bill)||pchomeBillBodyHTML, cal=(opts.fns&&opts.fns.cal)||pchomeCalBodyHTML;
+  var LS='ec_pagemode_pchome', pm=null; try{ pm=localStorage.getItem(LS); localStorage.setItem(LS, opts.mode==='merge'?'merge':'all'); }catch(e){}
+  var SH=['轉單','寄倉'], ST=[_pchomeProfitMonth,_pchomeCalMonth,_pchomeProfitSort,_pchomeSearch,_pchomeShowDisc,_pchomeViewMode,_pchomeRenderedRows], saved=ST.map(function(o){ var c={}; SH.forEach(function(s){ c[s]={has:Object.prototype.hasOwnProperty.call(o,s), v:o[s]}; }); return c; });
+  var V=[['預設',{}],['淨利率升冪',{sort:{col:'margin',dir:'asc'}}],['商品降冪',{sort:{col:'name',dir:'desc'}}],['銷量降冪',{sort:{col:'qty',dir:'desc'}}],['標籤欄',{sort:{col:'tags',dir:'desc'}}],['顯示已下架',{disc:true}],['搜尋包',{q:'包'}]];
+  var out={ at:new Date().toISOString(), mode:opts.mode||'all', data:{}, cells:{}, rows:{} };
+  try{
+    out.data.products=fnv(JSON.stringify(pchomeLoadProducts()||[])); out.data.billMonths=pchomeAllMonths(); out.data.calMonths=pchomeCalendarMonths();
+    SH.forEach(function(s){ out.data['optlog|'+s]=fnv(JSON.stringify(pchomeLoadOptlog(s)||{})); });
+    SH.forEach(function(shop){ [['bill',out.data.billMonths],['cal',out.data.calMonths]].forEach(function(pair){ pair[1].forEach(function(m){ V.forEach(function(v){
+      if(pair[0]==='bill') _pchomeProfitMonth[shop]=m; else _pchomeCalMonth[shop]=m;
+      if(v[1].sort) _pchomeProfitSort[shop]=v[1].sort; else delete _pchomeProfitSort[shop];
+      _pchomeSearch[shop]=v[1].q||''; _pchomeShowDisc[shop]=!!v[1].disc;
+      var html=(pair[0]==='bill'?bill:cal)(shop)||'', k=shop+'|'+pair[0]+'|'+m+'|'+v[0], rr=_pchomeRenderedRows[shop];
+      out.cells[k]=html.length+':'+fnv(html);
+      out.rows[k]=rr&&rr.sorted?(rr.sorted.length+':'+fnv(rr.sorted.map(function(x){ return x.料號; }).join('|'))):'none'; }); }); }); });
+  } finally {
+    ST.forEach(function(o,i){ SH.forEach(function(s){ var c=saved[i][s]; if(c.has) o[s]=c.v; else delete o[s]; }); });
+    try{ if(pm==null) localStorage.removeItem(LS); else localStorage.setItem(LS, pm); }catch(e){}
+  }
+  out.n=Object.keys(out.cells).length;
+  return out;
+};
+// ══════ 合併商品頁：模式、展開狀態、表格本體（帳務月／日曆月共用；2026-11-20）══════
+//   模式偏好＝純本機畫面偏好（兩個賣場共用一份，同酷澎 ec_pagemode_coupang）。🔴 不經 Store、不進待同步；key 不是 ec_pchome_ 開頭，同步掃描撿不到。
+var _PCH_PAGEMODE_LS='ec_pagemode_pchome';
+function pchomePageMode(){ try{ return localStorage.getItem(_PCH_PAGEMODE_LS)==='all'?'all':'merge'; }catch(e){ return 'merge'; } }
+function pchomeSetPageMode(shop,mode){
+  try{ localStorage.setItem(_PCH_PAGEMODE_LS, mode==='all'?'all':'merge'); }catch(e){}
+  document.querySelectorAll('.pch-pm-seg .cup-pm-btn').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-mode')===pchomePageMode()); });
+  pchomeRenderProfitBody(shop);
+}
+function pchomePageModeHtml(shop){
+  var m=pchomePageMode(), b=function(k,t){ return '<button type="button" class="cup-pm-btn'+(m===k?' on':'')+'" data-mode="'+k+'" onclick="pchomeSetPageMode(\''+shop+'\',\''+k+'\')">'+t+'</button>'; };
+  return '<span class="cup-pm-seg pch-pm-seg" title="合併商品頁：同一個 PChome 商品頁（商編）的規格收成一列合計，點開看各規格。全部規格：一個料號一列。">'+b('merge','合併商品頁')+b('all','全部規格')+'</span>';
+}
+// 展開狀態只放記憶體：切月份、切帳務月／日曆月就清掉（全部收合）。_pchomePageGroups＝目前畫面上各商品頁的成員與第一個規格（外層優化紀錄格子用）。
+var _pchomePageOpen={}, _pchomePageGroups={};
+function pchomePageResetOpen(shop){ if(shop) delete _pchomePageOpen[shop]; else Object.keys(_pchomePageOpen).forEach(function(k){ delete _pchomePageOpen[k]; }); }
+function pchomeTogglePage(shop,pageId){
+  var s=_pchomePageOpen[shop]||(_pchomePageOpen[shop]={});
+  if(s[pageId]) delete s[pageId]; else s[pageId]=1;
+  pchomeRenderProfitBody(shop);
+}
+// 外層列的儲存格。只有商品、成本、供貨價、售價、費用、標籤、優化紀錄跟一般列不一樣，其他欄（營收、銷量、商品淨利、淨利與兩個比率）用表格原本的 cell 畫合計。
+function _pchomePageCell(shop, c, it, ctx, open){
+  var esc=_momoEsc, A=it.agg, M=it.members, money=pchomeMoney, rng=function(I){ return I.min===I.max?money(I.min):(money(I.min)+'～'+money(I.max)); };
+  switch(c.k){
+    case 'name': {
+      var shown=it.shown||M, hid=M.length-shown.length, notes='';
+      if(A.missN>0) notes+='<div class="pch-pg-flag" title="淨利、淨利率只算有成本的規格">含 '+A.missN+' 個缺成本</div>';
+      if(hid>0) notes+='<div class="pch-pg-note">'+(it.forceOpen?('篩選中：顯示 '+shown.length+' / '+M.length+' 規格'):(hid+' 個已下架規格未顯示（合計有算）'))+'</div>';
+      return '<td class="tl mm-sticky-col pch-pg-name"><div class="mm-name-wrap"><span class="pch-pg-arrow">'+(open?'▾':'▸')+'</span><span class="mm-name-clip" title="'+esc(A.商品名)+'">'+esc(A.商品名||'—')+'</span></div>'
+        +'<div class="mm-sub-line" title="'+esc('商編 '+it.pageId)+'">商編 '+esc(it.pageId)+' · '+M.length+' 個規格</div>'+notes+'</td>'; }
+    case 'unitCost': { var I=A.costInfo;
+      if(I.same) return '<td class="pch-pg-num" title="'+esc(M.length+' 個規格單價相同')+'">'+money(I.value)+'</td>';
+      if(I.allNull) return ctx.dashCell;
+      return '<td class="pch-pg-num pch-pg-mixed" title="'+esc('各規格成本 '+rng(I)+(I.nulls?('（'+I.nulls+' 個缺成本）'):''))+'">各規格不同</td>'; }
+    case 'supply': case 'price': { var J=(c.k==='supply')?A.supplyInfo:A.priceInfo;
+      if(J.allNull) return ctx.dashCell;
+      if(J.same||J.min===J.max) return '<td class="pch-pg-num">'+money(J.min)+'</td>';
+      return '<td class="pch-pg-num'+(c.k==='price'?' pch-pg-warn':'')+'" title="'+esc((c.k==='price'?'售價':'供貨價')+'各規格不同：'+rng(J))+'">'+rng(J)+'</td>'; }
+    case 'fee': return (A.費用合計>0.005)?('<td class="pch-pg-num" title="'+esc(M.length+' 個規格的費用合計（平台費＋運費＋包材，未稅）；逐項拆解請展開看各規格')+'">'+money(A.費用合計)+'</td>'):ctx.dashCell;
+    case 'tags': { var U=[]; M.forEach(function(x){ (ctx.tagBy[x.料號]||[]).forEach(function(k){ if(U.indexOf(k)<0) U.push(k); }); }); return '<td class="tl">'+pchomeTagChipHTML(U)+'</td>'; }
+    case 'optlog': return pchomeOptlogPageTdHTML(shop, it.pageId);
+    default: return ctx.cell(c, A);
+  }
+}
+// 合併模式的 tbody 列（帳務月／日曆月共用）。ctx＝兩支表格本體裡現成的 sorted（全期逐料號、已排序）、篩選條件、cell、kf、sort。
+//   「全部規格」不會呼叫這裡。_pchomeRenderedRows（匯出 Excel）由呼叫端照舊存逐料號的 shown，不受這裡影響。
+function pchomeGroupedRowsHTML(shop, ctx){
+  var esc=_momoEsc, pBy={};
+  pchomeProductsOfShop(shop).forEach(function(p){ pBy[String(p.料號||'').trim()]=p; });   // 本賣場檢視（寄倉已換成寄倉資料）
+  var G=pchomeGroupByPage(ctx.sorted, function(x){ return pchomePageIdsOf(pBy[String(x.料號||'').trim()]); });
+  var reg=_pchomePageGroups[shop]={};
+  G.items.forEach(function(it){ if(it.type!=='group') return;
+    reg[it.pageId]={ skus:it.members.map(function(m){ return m.料號; }),
+      anchor:pchomePageAnchor(it.members.map(function(m){ return {料號:m.料號, spec:pchomeSpecCodeOf(pBy[String(m.料號||'').trim()], it.pageId)}; })) }; });
+  var q=ctx.q||'';
+  var pass=function(x){ if(x.discontinued&&!ctx.showDisc) return false; if(!pchomeRowPassesFilter(shop,x,ctx.tagBy[x.料號])) return false; return pchomeRowSearchHit(x,q); };   // 同表格原本的篩選＋搜尋
+  var force=!!q||pchomeFilterActiveCount(shop)>0;
+  var items=pchomeGroupFilter(pchomeGroupSort(G.items, pchomeRowCmp(ctx.kf, ctx.sort)), pass, force);
+  var openSet=_pchomePageOpen[shop]||{};
+  var rowTr=function(x, cls){ return '<tr'+(cls?' class="'+cls+'"':'')+' onclick="pchomeOpenAnalysis(\''+shop+'\',\''+esc(x.料號)+'\')" style="cursor:pointer" title="點看單品分析（歷程／優化紀錄）">'+ctx.COLS.map(function(c){ return ctx.cell(c,x); }).join('')+'</tr>'; };
+  var memTr=function(x){ var ex=G.multi[String(x.料號)];
+    return '<tr class="pch-pg-mem" onclick="pchomeOpenAnalysis(\''+shop+'\',\''+esc(x.料號)+'\')" title="點看單品分析（歷程／優化紀錄）">'+ctx.COLS.map(function(c){
+      var h=ctx.cell(c,x); if(c.k!=='name') return h;
+      h=h.replace('<td class="tl mm-sticky-col">','<td class="tl mm-sticky-col pch-pg-mem-name">');
+      return ex?h.replace(/<\/td>$/,'<div class="pch-pg-tag" title="這個料號同時掛在 '+(ex+1)+' 個商品頁，報表分不出各頁各賣多少，整筆算在這一頁">另掛 '+ex+' 頁</div></td>'):h; }).join('')+'</tr>'; };
+  return items.map(function(it){
+    if(it.type!=='group') return rowTr(it.row);
+    var open=!!it.forceOpen||!!openSet[it.pageId];
+    var head='<tr class="pch-pg-row'+(open?' open':'')+'" onclick="pchomeTogglePage(\''+shop+'\',\''+esc(it.pageId)+'\')" title="點一下'+(open?'收合':'展開')+'各規格">'+ctx.COLS.map(function(c){ return _pchomePageCell(shop,c,it,ctx,open); }).join('')+'</tr>';
+    return head+(open?it.shown.map(memTr).join(''):'');
+  }).join('');
+}
+// 外層「優化紀錄」格子（整頁聯集）。點一下替整頁新增一筆（塊 3）：只記一筆、掛在第一個規格（規格碼最小）底下、多存 page＝商編。
+//   🔴 儲存只走 pchomeAddOptlog（收尾同規格列 pchomeOptlogCellSave），沒有另外的寫入路徑。
+//   唯讀帳號：pchomeOptlogPageCellEdit／pchomeOptlogPageCellSave 在 app.js __RO_WRITE_RE 裡。
+function pchomeOptlogPageCellHTML(shop, pageId){
+  var g=(_pchomePageGroups[shop]||{})[pageId], list=pchomeOptlogPageList(pchomeLoadOptlog(shop)||{}, g?g.skus:[], pageId);
+  var ed=(_pchomeOlEdit&&_pchomeOlEdit.page&&_pchomeOlEdit.shop===shop&&String(_pchomeOlEdit.page)===String(pageId))?_pchomeOlEdit:null;
+  return pchomeOptlogCellInnerHTML(list, ed, {esc:_momoEsc, types:PCHOME_OPTLOG_TYPES, nameOf:momoOptlogUserToName, page:true});
+}
+function pchomeOptlogPageTdHTML(shop, pageId){ return '<td class="tl pch-ol-td pch-pg-ol" data-pch-olpg-shop="'+_momoEsc(shop)+'" data-pch-olpg="'+_momoEsc(pageId)+'" onclick="event.stopPropagation()">'+pchomeOptlogPageCellHTML(shop, pageId)+'</td>'; }
+function _pchomeOlPgTd(shop, pageId){ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return null;
+  var tds=c.querySelectorAll('td[data-pch-olpg]'); for(var i=0;i<tds.length;i++){ if(tds[i].getAttribute('data-pch-olpg')===String(pageId)) return tds[i]; } return null; }
+function _pchomeOlPgCtx(el){ var td=(el&&el.closest)?el.closest('td[data-pch-olpg]'):null; if(!td) return null;
+  var shop=td.getAttribute('data-pch-olpg-shop'), page=td.getAttribute('data-pch-olpg'), g=(_pchomePageGroups[shop]||{})[page];
+  return {td:td, shop:shop, page:page, anchor:(g&&g.anchor)||''}; }
+function pchomeOptlogPageCellEdit(el){
+  var x=_pchomeOlPgCtx(el); if(!x) return;
+  if(!x.anchor){ if(typeof showToast==='function') showToast('找不到這一頁的規格，請重新整理後再試','error'); return; }
+  var prev=_pchomeOlEdit, me={shop:x.shop, sku:x.anchor, page:x.page};
+  if(prev&&!_pchomeOlSame(prev,me)&&pchomeOptlogCellLeave(_pchomeOlDraftNow())==='stay'&&_pchomeOlWarn()) return;   // 原格有還沒存的文字：留在原格
+  _pchomeOlEdit={shop:x.shop, sku:x.anchor, page:x.page, type:_pchomeOlLastType, note:''};
+  if(prev&&!_pchomeOlSame(prev,me)) _pchomeOlRefreshEdit(prev);   // 一次只開一格
+  x.td.innerHTML=pchomeOptlogPageCellHTML(x.shop, x.page);
+  var inp=x.td.querySelector('.pch-ol-inp'); if(inp){ try{ inp.focus({preventScroll:true}); }catch(e){ inp.focus(); } }
+}
+function pchomeOptlogPageCellSave(el){
+  var x=_pchomeOlPgCtx(el); if(!x) return;
+  var sel=x.td.querySelector('.pch-ol-sel'), inp=x.td.querySelector('.pch-ol-inp');
+  var type=sel?sel.value:'其他', txt=pchomeOptlogCellNote(inp?inp.value:'');
+  if(!txt){ if(inp){ inp.classList.add('pch-ol-err'); inp.focus(); } return; }   // 空白不存、標紅框
+  if(!x.anchor){ if(typeof showToast==='function') showToast('找不到這一頁的規格，沒有存，請重新整理後再試','error'); return; }
+  pchomeAddOptlog(x.shop, x.anchor, {type:type, note:txt, page:x.page});   // 只記一筆：掛在第一個規格底下、標 page
+  pchomeOptlogClearCache(x.shop); pchomeRefreshSyncBtn(x.shop);   // 收尾同 pchomeOptlogCellSave
+  _pchomeOlLastType=type; _pchomeOlEdit=null;
+  try{ var td=_pchomeOlTd(x.shop, x.anchor); if(td) td.innerHTML=pchomeOptlogCellHTML(x.shop, x.anchor); }catch(e){}   // 展開中的第一個規格那一格
+  x.td.innerHTML=pchomeOptlogPageCellHTML(x.shop, x.page);
+}
+function pchomeOptlogPageCellsRefresh(shop){ try{ var c=document.getElementById('pchome-tbl-'+shop); if(!c) return;
+  [].forEach.call(c.querySelectorAll('td[data-pch-olpg]'), function(td){ if(td.contains(document.activeElement)) return;
+    var h=pchomeOptlogPageCellHTML(shop, td.getAttribute('data-pch-olpg')); if(td.innerHTML!==h) td.innerHTML=h; }); }catch(e){} }
 // 總表表格 body：依目前模式重算 calc→套排序/篩選/搜尋→寫進 #pchome-tbl-<shop>。搜尋只呼叫這支（殼不動、焦點不掉）。
 function pchomeRenderProfitBody(shop){
   var c=document.getElementById('pchome-tbl-'+shop); if(!c) return;
@@ -38646,6 +38980,7 @@ function pchomeBillBodyHTML(shop){
     }
   };
   var bodyRows=shown.map(function(x){ return '<tr onclick="pchomeOpenAnalysis(\''+shop+'\',\''+_momoEsc(x.料號)+'\')" style="cursor:pointer" title="點看單品分析（歷程／優化紀錄）">'+COLS.map(function(c){return cell(c,x);}).join('')+'</tr>'; }).join('');
+  if(pchomePageMode()==='merge') bodyRows=pchomeGroupedRowsHTML(shop, {sorted:sorted, showDisc:showDisc, q:q, tagBy:tagBy, COLS:COLS, cell:cell, kf:kf, sort:sort, dashCell:dashCell});   // 合併商品頁（2026-11-20）：分組→排序→篩選；合計／未分攤列與 _pchomeRenderedRows（匯出）照舊逐料號
   // 未分攤費用列（column-driven；比 .tr-total 輕的小計列）
   var showUnalloc=(calc.未分攤未稅>0.005||calc.dSource==='csv');
   var unallocCell=function(c){
@@ -38730,6 +39065,7 @@ function pchomeCalBodyHTML(shop){
       case 'optlog': return pchomeOptlogTdHTML(shop, x.料號);
       default: return dashCell; } };
   var bodyRows=shown.map(function(x){ return '<tr onclick="pchomeOpenAnalysis(\''+shop+'\',\''+_momoEsc(x.料號)+'\')" style="cursor:pointer" title="點看單品分析（歷程／優化紀錄）">'+COLS.map(function(c){return cell(c,x);}).join('')+'</tr>'; }).join('');
+  if(pchomePageMode()==='merge') bodyRows=pchomeGroupedRowsHTML(shop, {sorted:sorted, showDisc:showDisc, q:q, tagBy:tagBy, COLS:COLS, cell:cell, kf:kf, sort:sort, dashCell:dashCell});   // 合併商品頁（2026-11-20）：分組→排序→篩選；合計／未分攤列與 _pchomeRenderedRows（匯出）照舊逐料號
   var totMargin=(T.營收>0)?T.淨利/T.營收:null;
   var totCell=function(c){ switch(c.k){
       case 'name': return '<td class="tl mm-sticky-col">合計</td>';
@@ -38828,6 +39164,7 @@ function pchomeProfitTabHTML(shop){
     : '';
   var toolbar='<div class="mm-row" id="pchome-toolbar-'+shop+'" style="margin:14px 0 8px;gap:12px;align-items:center">'
     +momoSearchBox(shop,'pchome-search-'+shop,_pchomeSearch[shop]||'','搜尋 商品名 / 商編 / 原編','pchomeOnSearch','flex:1;min-width:180px;max-width:320px')
+    +pchomePageModeHtml(shop)
     +'<span class="mm-stat"><span class="mm-stat-item">上架 <b>'+pchomeNum(calc.activeCount||0)+'</b></span><span class="mm-stat-item">商編 <b>'+pchomeNum(pchomeBaseCount(shop,calc))+'</b></span><span class="mm-stat-item">有售 <b>'+pchomeNum(calc.bizCount||0)+'</b></span></span>'
     +discToggle
     +'<span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="pchome-filter-chip-'+shop+'" class="mm-chip'+(fc?' on':'')+'" style="'+(fc?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'')+'" onclick="pchomeOpenFilterPanel(\''+shop+'\',this)">🏷 標籤 / 篩選'+(fc?'（'+fc+'）':'')+'</button></span>'
@@ -38887,6 +39224,7 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
   pchomeOpenHierarchy, pchomeHierSetMetric, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAnaSwitchTab, pchomeOvSetMonth, pchomePCInput, pchomePCReset, pchomePCToOptlog, pchomePCSave, pchomePCSaveConfirm, pchomeAddOptlogModal, pchomeDeleteOptlog,
   pchomeOptlogCellEdit, pchomeOptlogCellSave, pchomeOptlogCellCancel, pchomeOptlogCellDraft, pchomeOptlogCellOpen, pchomeOptlogCellRefresh,
+  pchomeSetPageMode, pchomeTogglePage, pchomeOptlogPageCellEdit, pchomeOptlogPageCellSave,
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
 // 蝦皮報表登記：開頁補水。放檔尾，呼叫時所有模組層 const 都初始化完了（見 _reportDirtyBoot）。
 try{ _reportDirtyBoot(); }catch(e){ console.error('[報表登記] 開頁處理失敗',e); }

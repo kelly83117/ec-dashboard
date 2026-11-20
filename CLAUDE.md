@@ -423,6 +423,17 @@ ESM 有個致命陷阱必須牢記：
   - 🔴 等價性：本機、雲端墓碑都空時，寫雲端、寫本機的內容跟沒有墓碑時完全一樣（只寫通路那一欄、不多讀）。有墓碑時先寫墓碑欄再寫通路欄，寫完讀回確認（刪掉的 id 不在雲端、墓碑在雲端）才算成功，不符就丟「寫入未確認」、待同步留著。
   - 墓碑保留 180 天（`PCHOME_OL_TOMB_KEEP_MS`，依刪除時間），過期只清墓碑；過期後仍留著那筆的電腦再同步會把它帶回來。雲端套用到本機時也會濾掉雲端墓碑裡的 id（舊分頁寫回來的不顯示）。
   - 純函式在 profit.js `PCH-OLTOMB-PURE-BEGIN/END`，node 測試 `scripts/pchome-optlog-tomb.test.cjs`（等價性拿修改前的 `0439fc7` 當基準，`PCHOME_BACKUP_JSON` 指到 v3 備份時用真實資料）。商品歷程（`ec_pchome_history`）沒有刪除功能、沒有墓碑。
+- **PChome 淨利表「合併商品頁」**（2026-11-20；轉單／寄倉、帳務月／日曆月都有；搜尋框旁「合併商品頁｜全部規格」，預設合併）：同一個商品頁（商編＝商品編號去最後一段，共用 `pchomeBaseCode`）的規格（料號）收成一列合計，點外層列展開。結構照酷澎 `CUP-PG-PURE`。
+  - **只影響表格怎麼排**：上方大數字、動銷率、合計列、未分攤列、匯出 Excel（`_pchomeRenderedRows` 照舊存逐料號的 `shown`）、商品彈窗、批次維護、階層圖仍以料號為單位。偏好存本機 `ec_pagemode_pchome`（不經 Store、不同步），展開狀態只在記憶體（切月份、切帳務月／日曆月就收合）。
+  - 🔴 **「全部規格」＝改版前逐字相同**：`pchomeBillBodyHTML`／`pchomeCalBodyHTML` 只在合併模式多一行改用 `pchomeGroupedRowsHTML`，原本那一行不要動。改這兩支後用唯讀的 `__pchomeTblSnap({mode:'all'})`（各通路 × 各月份 × 排序／已下架／搜尋的表格雜湊）改前改後比對。
+  - **分組**：寄倉要用 `pchomeShopView` 之後的商品編號（寄倉頁跟轉單頁不同）。一個料號掛兩頁 ⇒ 整筆歸到本期成員最多的那頁、同數取商品編號寫在前面的，規格列標「另掛 N 頁」（目前 14 個料號，例 D46-11～20 歸 `DIAX8O-A900KGOYI`）。只有一個成員不成組。
+  - **外層列**：營收、銷量、費用相加；商品淨利、淨利只加成員畫面上有數字的，比率＝加總 ÷ 同一批成員營收；成本不同顯示「各規格不同」、售價／供貨價不同顯示範圍；標籤取成員聯集。
+  - **搜尋／篩選照成員判斷**（Gini 定案）：任一規格符合就留下那一頁、只列符合的規格並自動展開（標「篩選中：顯示 x / N 規格」），外層合計仍是整頁。整頁都已下架、沒開顯示已下架 ⇒ 整組不顯示。
+  - **整頁優化紀錄**：外層「優化紀錄」格顯示整頁所有規格紀錄的聯集（`pchomeOptlogPageList`）；點一下新增＝只記一筆，走 `pchomeAddOptlog`，掛在那一頁**規格碼最小**的料號底下（`pchomePageAnchor`，不跟排序變），紀錄多一個 `page`＝商編。規格列照舊單獨新增（不帶 page）。整頁紀錄在規格列格子、商品彈窗標「整頁」，工作日誌算 1 筆、明細標「（整頁）」。
+    🔴 沒有 page 的紀錄：產生的物件、顯示、同步、墓碑、工作日誌都跟改版前一樣（`scripts/pchome-optlog-page.test.cjs` 拿 `49ce741` 比）。外層的 `pchomeOptlogPageCellEdit`／`pchomeOptlogPageCellSave` 在 app.js `__RO_WRITE_RE`；`pchomeSetPageMode`、`pchomeTogglePage` 是檢視，不可以加。
+  - **讀回確認**：`pchomeSyncOptlog` 有新的整頁紀錄（雲端原本沒有的 page 紀錄 id，`pchomeOptlogPageNewIds`）時，寫完也讀回確認，不在雲端就丟「寫入未確認」、待同步留著。沒有 page 的資料走原路徑（只有刪除時才讀回）。
+  - **批次維護刪除商品**：被刪料號底下的整頁紀錄搬到同頁剩下規格碼最小的料號（`pchomeOptlogPageMovePlan`）：🔴 **換新 id、舊 id 進墓碑**（同步是逐料號依 id 聯集、墓碑是整份濾 id，沿用舊 id 會被濾掉、不記墓碑雲端舊料號那筆會併回來）。整頁都刪光才跟著刪；沒有 page 的紀錄照舊跟著料號刪。只處理目前這個賣場。⚠ 沒重新整理的舊分頁刪掉第一個規格時，整頁紀錄會跟著刪、不會搬。
+  - 純函式在 profit.js `PCH-PG-PURE-BEGIN/END`（分組、合計、排序、篩選）與 `PCH-OLPAGE-PURE-BEGIN/END`（整頁紀錄）；node 測試 `scripts/pchome-page-merge.test.cjs`、`scripts/pchome-optlog-page.test.cjs`（`PCHOME_BACKUP_JSON` 指到 v3 備份時用真實資料）。沒有新增雲端物件或寫入方法，本機防寫物件數不變。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，

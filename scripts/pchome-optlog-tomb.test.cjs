@@ -27,6 +27,8 @@ const fnSrc = (src, name) => { const i = src.indexOf('\nfunction ' + name + '(')
 // 優化紀錄資料層那一段：從 PCHOME_OPTLOG_TYPES 到雲端套用函式結束
 const layer = src => { const a = src.indexOf('var PCHOME_OPTLOG_TYPES=MOMO_OPTLOG_TYPES;'), b = src.indexOf("window.__cloudDrainLatest('__pchomeOptlogCloudLatest'"); if (a < 0 || b < a) throw new Error('找不到優化紀錄資料層'); return src.slice(a, b); };
 const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+// 2026-11-20 起 pchomeAddOptlog／pchomeSyncOptlog 會用到整頁優化紀錄的純函式（PCH-OLPAGE-PURE）；舊版沒有這一段就不放。
+const olpage = src => { const a = src.indexOf('/* ═══ PCH-OLPAGE-PURE-BEGIN'), b = src.indexOf('/* ═══ PCH-OLPAGE-PURE-END'); return (a >= 0 && b > a) ? src.slice(a, b) : ''; };
 
 // 假雲端：一份文件。getDoc 回深拷貝；setField 真的寫（可關掉＝模擬寫入被擋）。
 function makeCloud(doc) {
@@ -46,7 +48,7 @@ function makeMachine(src, cloud, user, nowRef) {
   const window = { __cloudPchomeOptlog: cloud.api, App: { currentUser: { username: user } } };
   const FakeDate = { now: () => nowRef.t };
   let seq = 0;
-  const body = layer(src) + '\n' + fnSrc(src, 'pchomeDeleteOptlog') + '\n' + fnSrc(src, 'momoFsSanitizeDeep') + '\n' + fnSrc(src, 'momoFsSafeKey')
+  const body = layer(src) + '\n' + olpage(src) + '\n' + fnSrc(src, 'pchomeDeleteOptlog') + '\n' + fnSrc(src, 'momoFsSanitizeDeep') + '\n' + fnSrc(src, 'momoFsSafeKey')
     + '\nreturn { pchomeSyncOptlog, pchomeLoadOptlog, pchomeSaveOptlog, pchomeDeleteOptlog, apply: window.__pchomeApplyCloudOptlog,'
     + ' pure: (typeof pchomeOptlogSyncPlan==="function") ? { pchomeOptlogSyncPlan, pchomeOptlogTombApply, pchomeOptlogTombUnion, pchomeOptlogTombClean, pchomeOptlogWriteConfirmed, pchomeOptlogTombField, pchomeOptlogIsTombField, pchomeOptlogPendingDeletes, pchomeOptlogTombLoad, PCHOME_OL_TOMB_KEEP_MS } : null };';
   const api = new Function('window', 'localStorage', 'Store', 'Date', 'console', 'MOMO_OPTLOG_TYPES', 'momoNowParts', '_markPending', 'pchomeDirtyAdd', 'pchomeDirtyGet',

@@ -2354,3 +2354,24 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .pch-ol-btn.pch-ol-ok{border-color:var(--primary);color:var(--primary);font-weight:700;}
 .pch-ol-btn:hover{background:var(--primary-soft);}
 .pch-ol-hint{position:absolute;left:0;top:100%;z-index:5;margin-top:2px;padding:1px 6px;border:1px solid var(--warn);border-radius:4px;background:var(--warn-soft);color:var(--text);font-size:10px;font-weight:600;line-height:1.5;white-space:nowrap;pointer-events:none;}
+/* PChome 淨利表「合併商品頁」（2026-11-20）：同一個商品頁（商編）的規格收成一列，點開看各規格。
+   模式切換沿用酷澎 .cup-pm-seg／.cup-pm-btn；顏色走 :root 變數，不寫死在 JS、不碰 --bg。 */
+:root{--pch-pg-row-bg:var(--surface);--pch-pg-mem-bg:#f9fafb;--pch-pg-mem-indent:26px;}
+.pch-pm-seg{flex-shrink:0;}
+.mm-ptbl tr.pch-pg-row,.mm-ptbl tr.pch-pg-mem{cursor:pointer;}
+.mm-ptbl tr.pch-pg-row>td{background:var(--pch-pg-row-bg);font-weight:600;}
+.mm-ptbl tr.pch-pg-mem>td{background:var(--pch-pg-mem-bg);}
+.mm-ptbl tr.pch-pg-mem>td.pch-pg-mem-name{padding-left:var(--pch-pg-mem-indent);}
+.mm-ptbl td.pch-pg-num{text-align:right;}
+.pch-pg-arrow{display:inline-block;flex-shrink:0;width:16px;color:var(--text-muted);}
+.pch-pg-mixed{color:var(--text-muted);}
+.pch-pg-warn{color:var(--warn);}
+.pch-pg-flag{margin-top:2px;font-size:10px;font-weight:600;color:var(--danger);}
+.pch-pg-note{margin-top:2px;font-size:10px;font-weight:400;color:var(--text-muted);}
+.pch-pg-tag{display:inline-block;margin-top:2px;padding:0 6px;border-radius:999px;background:var(--warn-soft);font-size:10px;font-weight:600;color:var(--text-muted);}
+.pch-ol-main.pch-ol-ro{cursor:pointer;}
+.pch-ol-n.pch-ol-n-ro{cursor:default;}
+.pch-ol-n.pch-ol-n-ro:hover{color:var(--text-muted);text-decoration:none;}
+/* 整頁優化紀錄（塊 3）：合併商品頁外層記的那一筆，在規格列、商品彈窗前面標「整頁」。 */
+:root{--pch-ol-page-bg:var(--warn-soft);--pch-ol-page-fg:var(--warn);}
+.pch-ol-page{flex-shrink:0;margin-right:4px;padding:0 5px;border-radius:4px;background:var(--pch-ol-page-bg);color:var(--pch-ol-page-fg);font-size:10px;font-weight:700;white-space:nowrap;}
