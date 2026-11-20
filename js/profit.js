@@ -18730,12 +18730,14 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
           const covered=_oc.covered, cogs=_oc.cogs;
           const efr=_ctx.estFee, feeRateEst=efr?efr.rate:null;
           const feeAmt=feeRateEst!=null?eRev*feeRateEst:0;
-          const profit=eRev-feeAmt-cogs;
+          // 2026-11-20：扣營業稅，跟已結算 momoMoPlusMarginCalc 同口徑（營收含稅 ×100/105 再扣成本與費用；改版前沒扣，淨利率高約 4.8pp）
+          const eTax=eRev*5/105;
+          const profit=eRev-eTax-feeAmt-cogs;
           const marginPct=eRev>0?Math.round((profit/eRev)*1000)/10:null;
           const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);
           const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null), (product.listPriceManualBySpec ?? null));
           const fr=momoFeeRateForSku(shop, product.sku);
-          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, itemProfit:null, itemMargin:null, profit, margin:marginPct, cost:cogs, feeD:feeAmt,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
+          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, itemProfit:null, itemMargin:null, profit, margin:marginPct, cost:cogs, feeD:feeAmt, tax:eTax,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
             returnRate:null, retQty:0, retKnown:false,   // 未結算估算（E001）：無結算退貨資料 → 退貨率「—」
             coverage:_oc.coverage, covered, missingOrigins:_oc.missingOrigins, noOriginQty:_oc.noOriginQty,
             e001Origins:_oc.detail, e001OriginLegacy:periodKeys.some(k=>!!(_ed.legacySrc&&_ed.legacySrc[momoPeriodSrcCode(k)])),   // tooltip 用：逐原廠明細；legacy＝該月訂單明細是改版前上傳的
@@ -22174,7 +22176,7 @@ function momoRenderProfitBody(shop, tableOnly){
         if(r.moPlus && r.e001Estimated){
           // 未結算估算列：算式＋逐原廠成本明細（原廠 × 件數 × 單位成本）
           const _ot=momoE001OriginsTip(r.e001Origins, r.e001OriginLegacy);
-          mTip=` title="${('未結算估算：淨利 '+momoMoney(r.profit||0)+' ＝ 營收 '+momoMoney(r.revenue||0)+'（售價×數量）− 成本 '+momoMoney(r.cost||0)+'（未稅）− 估算平台費 '+momoMoney(r.feeD||0)+(r.e001FeeRate!=null?'（費率 '+(r.e001FeeRate*100).toFixed(1)+'%）':'')+'；淨利率 ÷ 營收'+(_ot?'\n'+_ot:'')).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"`;
+          mTip=` title="${('未結算估算：淨利 '+momoMoney(r.profit||0)+' ＝ 營收 '+momoMoney(r.revenue||0)+'（售價×數量，含稅）×100/105（扣營業稅 '+momoMoney(r.tax||0)+'）− 成本 '+momoMoney(r.cost||0)+'（未稅）− 估算平台費 '+momoMoney(r.feeD||0)+(r.e001FeeRate!=null?'（費率 '+(r.e001FeeRate*100).toFixed(1)+'%）':'')+'；淨利率 ÷ 營收'+(_ot?'\n'+_ot:'')).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"`;
         } else if(r.moPlus){
           mTip=` title="淨利 ${momoMoney(r.profit||0)} ＝ 營收 ${momoMoney(r.revenue||0)}（A貨款 ${momoMoney(r.revenueA||0)} ＋ B運費代收 ${momoMoney(r.feeB||0)}，B 同訂單營收攤估）×100/105（扣營業稅 ${momoMoney(r.tax||0)}）− 成本 ${momoMoney(r.cost||0)}（未稅）− 手續費D ${momoMoney(r.feeD||0)}（逐筆）− 代扣運費C ${momoMoney(r.feeC||0)}（逐筆）；淨利率 ÷ (A＋B)"`;
         }
@@ -22336,7 +22338,7 @@ function momoRenderProfitBody(shop, tableOnly){
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
-        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑，未含 B 運費代收、估算亦未扣營業稅）；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑，未含 B 運費代收）；淨利＝營收×100/105（扣營業稅，同已結算）− 成本 − 估算平台費；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
       }
     }
