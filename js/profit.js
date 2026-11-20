@@ -38573,6 +38573,134 @@ function pchomeDxByCode(calc, shop){
   if(precise) calc.soldBases.forEach(function(b){ den[b]=1; num[b]=1; });   // 精確口徑：只有「自己有銷售」的商編算有售（同 MOMO 商品頁／蝦皮商品 ID）；賣出的商編一定進分母
   return {num:Object.keys(num).length, den:Object.keys(den).length};
 }
+/* ═══ PCH-PG-PURE-BEGIN：PChome 淨利表「合併商品頁」（2026-11-20）純函式；node 測試 scripts/pchome-page-merge.test.cjs 用標記抽取，不碰 DOM／Store／localStorage ═══
+   只管表格怎麼排：同一個 PChome 商品頁（商編＝商品編號去最後一段，pchomeBaseCode）底下的規格（料號）收成一列合計，點開看各規格。
+   上方大數字、動銷率、匯出 Excel、商品彈窗、批次維護、階層圖都不經過這裡（仍以料號為單位）。結構照酷澎 CUP-PG-PURE。 */
+// 一個料號（本賣場檢視，寄倉要先過 pchomeShopView）掛在哪些商品頁：商品編號逐一去最後一段、去重、保留順序。
+function pchomePageIdsOf(p){
+  var pn=p&&p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), out=[];
+  arr.forEach(function(v){ var b=pchomeBaseCode(v); if(b&&out.indexOf(b)<0) out.push(b); });
+  return out;
+}
+// 規格碼：這個料號在 pageId 那一頁的商品編號最後一段（同頁有兩個取小的）；沒有回 ''。
+function pchomeSpecCodeOf(p, pageId){
+  var pn=p&&p.商品編號, arr=Array.isArray(pn)?pn:(pn==null?[]:[pn]), best=null;
+  arr.forEach(function(v){ v=String(v||'').trim(); if(!v||pchomeBaseCode(v)!==pageId) return; var seg=v.split('-'), s=seg.length>1?seg[seg.length-1]:'';
+    if(best===null||s<best) best=s; });
+  return best===null?'':best;
+}
+// 這一頁的「第一個規格」：規格碼最小（-001 在 -002 前）；同碼比料號；沒有規格碼的排最後。不跟著畫面排序變。
+//   list＝[{料號, spec}]；回料號（空清單回 ''）。
+function pchomePageAnchor(list){
+  var L=(list||[]).filter(function(x){ return x&&x.料號!=null&&String(x.料號)!==''; }).slice();
+  if(!L.length) return '';
+  L.sort(function(a,b){ var sa=String(a.spec||''), sb=String(b.spec||'');
+    if(!sa&&sb) return 1; if(sa&&!sb) return -1; if(sa!==sb) return sa<sb?-1:1;
+    var ca=String(a.料號), cb=String(b.料號); return ca<cb?-1:(ca>cb?1:0); });
+  return String(L[0].料號);
+}
+// 一組數值「全部一樣」或「有不同」。vals 裡 null＝沒有值。
+function pchomePageUniq(vals){
+  var V=vals||[], nn=V.filter(function(v){ return v!=null&&isFinite(Number(v)); }).map(Number);
+  var same=nn.length>0&&nn.length===V.length&&nn.every(function(v){ return v===nn[0]; });
+  return { same:same, value:same?nn[0]:null, allNull:nn.length===0, min:nn.length?Math.min.apply(null,nn):null, max:nn.length?Math.max.apply(null,nn):null, n:nn.length, nulls:V.length-nn.length };
+}
+// 一個商品頁的合計（形狀跟一列一樣，表格同一套 cell 直接畫）。
+//   營收、銷量、費用、費用合計＝全部成員相加；成本只加有成本的；商品淨利／淨利＝成員畫面上有數字的才加（「—」不加），
+//   比率＝加總後 ÷ 同一批成員的營收合計（同酷澎 cRev）；一個都沒有 ⇒ null（顯示「—」）。
+//   成本、供貨價、售價：全部一樣 ⇒ 那個值；不一樣 ⇒ null，另放 costInfo／supplyInfo／priceInfo（畫面顯示「各規格不同」或範圍）。
+function pchomePageAgg(pageId, members){
+  var M=members||[], S=function(arr,k){ return arr.reduce(function(s,x){ return s+(Number(x[k])||0); },0); };
+  var pM=M.filter(function(x){ return x.淨利!=null; }), ipM=M.filter(function(x){ return x.商品淨利!=null; });
+  var pRev=S(pM,'營收'), ipRev=S(ipM,'營收');
+  var 淨利=pM.length?S(pM,'淨利'):null, 商品淨利=ipM.length?S(ipM,'商品淨利'):null;
+  var top=M[0]||{}; M.forEach(function(x){ if((Number(x.營收)||0)>(Number(top.營收)||0)) top=x; });   // 名稱＝營收最高的成員（同額取前面）
+  var cost=pchomePageUniq(M.map(function(x){ return x.costKnown?x.unitCost:null; })), sup=pchomePageUniq(M.map(function(x){ return x.供貨價; })), price=pchomePageUniq(M.map(function(x){ return x.售價; }));
+  var ck=M.filter(function(x){ return x.costKnown; });
+  return { isGroup:true, pageId:pageId, n:M.length, 料號:pageId, 商品編號:pageId, 商品名:top.商品名||'',
+    營收:S(M,'營收'), 銷量:S(M,'銷量'), 費用:S(M,'費用'), 費用合計:S(M,'費用合計'), 成本:ck.length?S(ck,'成本'):null,
+    商品淨利:商品淨利, 商品淨利率:(商品淨利!=null&&ipRev>0)?商品淨利/ipRev:null, 淨利:淨利, 淨利率:(淨利!=null&&pRev>0)?淨利/pRev:null,
+    unitCost:cost.value, 供貨價:sup.value, 售價:price.value, costKnown:cost.same, costInfo:cost, supplyInfo:sup, priceInfo:price,
+    missN:M.filter(function(x){ return x.hasBiz&&!x.costKnown; }).length, discN:M.filter(function(x){ return x.discontinued; }).length,
+    hasBiz:M.some(function(x){ return x.hasBiz; }), discontinued:M.length>0&&M.every(function(x){ return x.discontinued; }) };
+}
+// rows＝一期的逐料號列（calc.skus）；idsOf(row)＝那個料號掛的商品頁清單（pchomePageIdsOf）。回 { items, multi, stats }：
+//   items＝[{type:'single',row} | {type:'group',pageId,members,agg}]，順序＝各自第一個成員在 rows 裡的位置。
+//   歸屬：只掛一頁 ⇒ 那一頁；掛多頁 ⇒ 整筆歸到「本期掛在它底下的列最多」的那一頁、同數取商品編號寫在前面的（同酷澎）；
+//         沒有商品頁 ⇒ 自成一列。只有一個成員 ⇒ 不成組（type:'single'）。multi＝{ 料號: 另外還掛幾頁 }。
+function pchomeGroupByPage(rows, idsOf){
+  var R=(rows||[]).filter(Boolean), cnt={}, multi={}, order=[], byPage={};
+  var ids=function(r){ var a=idsOf?idsOf(r):[]; return Array.isArray(a)?a:[]; };
+  R.forEach(function(r){ ids(r).forEach(function(id){ cnt[id]=(cnt[id]||0)+1; }); });
+  R.forEach(function(r){ var I=ids(r);
+    if(!I.length){ order.push({type:'single',row:r}); return; }
+    var pick=I[0]; I.forEach(function(id){ if(cnt[id]>cnt[pick]) pick=id; });
+    if(I.length>1) multi[String(r.料號)]=I.length-1;
+    var g=Object.prototype.hasOwnProperty.call(byPage,pick)?byPage[pick]:null;
+    if(!g){ g=byPage[pick]={type:'group',pageId:pick,members:[]}; order.push(g); }
+    g.members.push(r); });
+  var items=order.map(function(it){
+    if(it.type!=='group') return it;
+    if(it.members.length<2) return {type:'single',row:it.members[0]};
+    return {type:'group',pageId:it.pageId,members:it.members,agg:pchomePageAgg(it.pageId,it.members)}; });
+  var gs=items.filter(function(it){ return it.type==='group'; });
+  return { items:items, multi:multi, stats:{ rows:R.length, groups:gs.length, grouped:gs.reduce(function(s,g){ return s+g.members.length; },0),
+    singles:items.length-gs.length, maxMembers:gs.reduce(function(m,g){ return Math.max(m,g.members.length); },0), multiRows:Object.keys(multi).length } };
+}
+// 跟兩支表格（帳務月／日曆月）同一個比法：kf＝欄位 → 取值；sort 有對應欄 ⇒ null 排最後、字串比大小、數字相減；沒有對應欄 ⇒ 依料號升冪。
+function pchomeRowCmp(kf, sort){
+  if(sort&&kf&&kf[sort.col]){ var dir=(sort.dir==='asc')?1:-1, f=kf[sort.col];
+    return function(a,b){ var va=f(a),vb=f(b); if(va==null&&vb==null)return 0; if(va==null)return 1; if(vb==null)return -1; if(typeof va==='string')return va<vb?-dir:(va>vb?dir:0); return (va-vb)*dir; }; }
+  return function(a,b){ return String(a.料號)<String(b.料號)?-1:1; };
+}
+// 排序：外層用合計比、組內成員用同一個比法。不改動傳進來的陣列。
+function pchomeGroupSort(items, cmp){
+  if(!cmp) return items;
+  var key=function(it){ return it.type==='group'?it.agg:it.row; };
+  return items.map(function(it){ return it.type==='group'?Object.assign({},it,{members:it.members.slice().sort(cmp)}):it; })
+    .sort(function(x,y){ return cmp(key(x),key(y)); });
+}
+// 搜尋／篩選（成員判斷，Gini 2026-11-20 定案）：pass(row)＝這一列畫不畫（已下架、標籤、數值、優化紀錄、搜尋全包在裡面）。
+//   單列 ⇒ 照 pass；組 ⇒ 至少一個成員通過才留下，shown＝通過的成員；force＝使用者有在搜尋或篩選 ⇒ 自動展開（forceOpen）。
+//   外層合計仍是整頁（不跟著篩選變）。
+function pchomeGroupFilter(items, pass, force){
+  var out=[];
+  (items||[]).forEach(function(it){
+    if(it.type!=='group'){ if(pass(it.row)) out.push(it); return; }
+    var shown=it.members.filter(pass); if(!shown.length) return;
+    out.push(Object.assign({},it,{shown:shown, forceOpen:!!force})); });
+  return out;
+}
+// 搜尋比對（跟兩支表格的搜尋同一個字串）。q 要先 trim + toLowerCase。
+function pchomeRowSearchHit(x, q){ return !q||(String(x.商品名||'')+' '+String(x.商品編號||'')+' '+String(x.料號||'')).toLowerCase().indexOf(q)>=0; }
+/* ═══ PCH-PG-PURE-END ═══ */
+// 「全部規格」等價性快照（唯讀，不寫雲端、不讀雲端；不以 __cloud 開頭）。
+//   對轉單／寄倉 × 帳務月每個月份 × 日曆月每個月份 × 幾種排序／已下架／搜尋，各畫一次表格本體，記 {長度:FNV-1a 雜湊} 與逐料號列的雜湊。
+//   opts.mode＝'all'（預設）或 'merge'；opts.fns＝{bill,cal} 換成別支函式（改前改後在同一頁對照用）。畫完還原所有畫面狀態。
+window.__pchomeTblSnap=function(opts){ opts=opts||{};
+  var fnv=function(s){ var h=0x811c9dc5; for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; } return ('0000000'+h.toString(16)).slice(-8); };
+  var bill=(opts.fns&&opts.fns.bill)||pchomeBillBodyHTML, cal=(opts.fns&&opts.fns.cal)||pchomeCalBodyHTML;
+  var LS='ec_pagemode_pchome', pm=null; try{ pm=localStorage.getItem(LS); localStorage.setItem(LS, opts.mode==='merge'?'merge':'all'); }catch(e){}
+  var SH=['轉單','寄倉'], ST=[_pchomeProfitMonth,_pchomeCalMonth,_pchomeProfitSort,_pchomeSearch,_pchomeShowDisc,_pchomeViewMode,_pchomeRenderedRows], saved=ST.map(function(o){ var c={}; SH.forEach(function(s){ c[s]={has:Object.prototype.hasOwnProperty.call(o,s), v:o[s]}; }); return c; });
+  var V=[['預設',{}],['淨利率升冪',{sort:{col:'margin',dir:'asc'}}],['商品降冪',{sort:{col:'name',dir:'desc'}}],['銷量降冪',{sort:{col:'qty',dir:'desc'}}],['標籤欄',{sort:{col:'tags',dir:'desc'}}],['顯示已下架',{disc:true}],['搜尋包',{q:'包'}]];
+  var out={ at:new Date().toISOString(), mode:opts.mode||'all', data:{}, cells:{}, rows:{} };
+  try{
+    out.data.products=fnv(JSON.stringify(pchomeLoadProducts()||[])); out.data.billMonths=pchomeAllMonths(); out.data.calMonths=pchomeCalendarMonths();
+    SH.forEach(function(s){ out.data['optlog|'+s]=fnv(JSON.stringify(pchomeLoadOptlog(s)||{})); });
+    SH.forEach(function(shop){ [['bill',out.data.billMonths],['cal',out.data.calMonths]].forEach(function(pair){ pair[1].forEach(function(m){ V.forEach(function(v){
+      if(pair[0]==='bill') _pchomeProfitMonth[shop]=m; else _pchomeCalMonth[shop]=m;
+      if(v[1].sort) _pchomeProfitSort[shop]=v[1].sort; else delete _pchomeProfitSort[shop];
+      _pchomeSearch[shop]=v[1].q||''; _pchomeShowDisc[shop]=!!v[1].disc;
+      var html=(pair[0]==='bill'?bill:cal)(shop)||'', k=shop+'|'+pair[0]+'|'+m+'|'+v[0], rr=_pchomeRenderedRows[shop];
+      out.cells[k]=html.length+':'+fnv(html);
+      out.rows[k]=rr&&rr.sorted?(rr.sorted.length+':'+fnv(rr.sorted.map(function(x){ return x.料號; }).join('|'))):'none'; }); }); }); });
+  } finally {
+    ST.forEach(function(o,i){ SH.forEach(function(s){ var c=saved[i][s]; if(c.has) o[s]=c.v; else delete o[s]; }); });
+    try{ if(pm==null) localStorage.removeItem(LS); else localStorage.setItem(LS, pm); }catch(e){}
+  }
+  out.n=Object.keys(out.cells).length;
+  return out;
+};
 // 總表表格 body：依目前模式重算 calc→套排序/篩選/搜尋→寫進 #pchome-tbl-<shop>。搜尋只呼叫這支（殼不動、焦點不掉）。
 function pchomeRenderProfitBody(shop){
   var c=document.getElementById('pchome-tbl-'+shop); if(!c) return;
