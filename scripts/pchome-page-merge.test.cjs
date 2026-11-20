@@ -17,7 +17,10 @@ const a = src.indexOf('/* ═══ PCH-PG-PURE-BEGIN'), b = src.indexOf('/* ═
 if (a < 0 || b < a) throw new Error('找不到 PCH-PG-PURE 區塊');
 const baseLine = (src.match(/^function pchomeBaseCode\(v\)\{.*\}$/m) || [])[0];
 if (!baseLine) throw new Error('找不到 pchomeBaseCode');
-const P = new Function(baseLine + '\n' + src.slice(a, b) + '\nreturn { pchomeBaseCode, pchomePageIdsOf, pchomeSpecCodeOf, pchomePageAnchor, pchomePageUniq, pchomePageAgg, pchomeGroupByPage, pchomeRowCmp, pchomeGroupSort, pchomeGroupFilter, pchomeRowSearchHit };')();
+const P = new Function(baseLine + '\n' + src.slice(a, b) + '\nreturn { pchomeBaseCode, pchomePageIdsOf, pchomeSpecCodeOf, pchomePageAnchor, pchomePageUniq, pchomePageAgg, pchomeGroupByPage, pchomeRowCmp, pchomeGroupSort, pchomeGroupFilter, pchomeRowSearchHit, pchomeOptlogPageList };')();
+const oa = src.indexOf('// PCH-OLCELL-PURE-BEGIN'), ob = src.indexOf('// PCH-OLCELL-PURE-END');
+const C = new Function(src.slice(oa, ob) + '\nreturn { pchomeOptlogCellInnerHTML };')();
+const esc = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 // ── 商品頁 ID ──
 eq(P.pchomePageIdsOf({ 商品編號: ['DDBK72-A900KK915-001'] }), ['DDBK72-A900KK915'], '去最後一段');
@@ -93,6 +96,22 @@ const G = P.pchomeGroupByPage(rows, idsOf);
   const allDisc = P.pchomeGroupByPage([R('x1', { discontinued: true }), R('x2', { discontinued: true })], () => ['P-X']);
   eq(P.pchomeGroupFilter(allDisc.items, r => !r.discontinued, false), [], '整頁都已下架、沒開顯示已下架 → 整組不顯示');
   ok(P.pchomeRowSearchHit({ 商品名: '手提化妝包', 商品編號: 'DIBM-AB-001', 料號: 'F1' }, 'dibm-ab'), '搜尋比對商品名／商編／原編'); }
+
+// ── 外層優化紀錄：整頁聯集 ──
+{ const map = { A1: [{ id: 'x1', date: '2026-11-01', time: '10:00', type: '調價', note: 'A1 自己' }], A2: [{ id: 'x2', date: '2026-11-02', time: '10:00', type: '做活動', note: 'A2 自己' }, { id: 'x1', date: '2026-11-01', time: '10:00', type: '調價', note: '重複 id' }],
+    A3: [{ id: 'y1', date: '2026-11-03', time: '10:00', page: 'P-OTHER', note: '別頁的整頁紀錄' }], Z9: [{ id: 'p1', date: '2026-11-04', time: '10:00', page: 'P-A', note: '掛在別的料號、標這一頁' }], B1: [{ id: 'b1', note: '別頁的' }] };
+  const c = JSON.stringify(map);
+  const L = P.pchomeOptlogPageList(map, ['A1', 'A2', 'A3'], 'P-A');
+  eq(L.map(e => e.id), ['x1', 'x2', 'p1'], '聯集：成員自己的＋標這一頁的；同 id 只留一筆；標別頁的不算');
+  ok(JSON.stringify(map) === c, '不改動傳進來的資料');
+  eq(P.pchomeOptlogPageList(null, ['A1'], 'P-A'), [], '沒有資料 → 空');
+  const h = C.pchomeOptlogCellInnerHTML(L, null, { esc, types: ['調價'], nameOf: u => u, page: true });
+  ok(h.includes('共 3 筆') && !h.includes('pchomeOptlogCellEdit') && !h.includes('pchomeOptlogCellOpen'), '外層格子：共 N 筆、點了不新增、沒有開彈窗', h);
+  ok(h.includes('>掛在別的料號、標這一頁<'), '外層格子顯示最近一筆');
+  const e0 = C.pchomeOptlogCellInnerHTML([], null, { esc, types: ['調價'], nameOf: u => u, page: true });
+  ok(e0.includes('尚無優化紀錄') && !e0.includes('onclick'), '外層沒有紀錄 → 灰字、不能點新增');
+  const plain = C.pchomeOptlogCellInnerHTML(L, null, { esc, types: ['調價'], nameOf: u => u });
+  ok(plain.includes('pchomeOptlogCellEdit(this)') && plain.includes('pchomeOptlogCellOpen(this)'), '不帶 page → 跟原本一樣（可新增、可開彈窗）'); }
 
 // ── 真實資料（v3 備份）──
 const BK = process.env.PCHOME_BACKUP_JSON;
