@@ -18725,19 +18725,22 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
       if(_allUnsettled && _ed && _ed.hasPrice && _ed.bySkuRev && _ed.bySkuRev[product.sku]){
         let eRev=0, eQty=0; periodKeys.forEach(k=>{ eRev+=(_ed.bySkuRev[product.sku][k]||0); eQty+=((_ed.bySku[product.sku]&&_ed.bySku[product.sku][k])||0); });
         if(eRev>0 || eQty>0){
-          const origin=(_ed.skuOrigin&&_ed.skuOrigin[product.sku])||product.origin||'';
-          const costMap=momoMoPlusCostMapCached(); const covered=!!(origin && Number(costMap[origin])>0);
-          const cogs=covered?Number(costMap[origin])*eQty:0;
+          // 成本＝Σ 各原廠成本 × 各自數量（2026-11-20；改版前是「合併後第一個原廠 × 整期銷量」，跨月、同月混賣不同規格都會套錯）。缺成本規則同已結算列。
+          const _oc=momoE001OriginsCost(momoE001OriginsQty(_ed, product.sku, periodKeys, product.origin||'', eQty), momoMoPlusCostMapCached());
+          const covered=_oc.covered, cogs=_oc.cogs;
           const efr=_ctx.estFee, feeRateEst=efr?efr.rate:null;
           const feeAmt=feeRateEst!=null?eRev*feeRateEst:0;
-          const profit=eRev-feeAmt-cogs;
+          // 2026-11-20：扣營業稅，跟已結算 momoMoPlusMarginCalc 同口徑（營收含稅 ×100/105 再扣成本與費用；改版前沒扣，淨利率高約 4.8pp）
+          const eTax=eRev*5/105;
+          const profit=eRev-eTax-feeAmt-cogs;
           const marginPct=eRev>0?Math.round((profit/eRev)*1000)/10:null;
           const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);
           const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null), (product.listPriceManualBySpec ?? null));
           const fr=momoFeeRateForSku(shop, product.sku);
-          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, itemProfit:null, itemMargin:null, profit, margin:marginPct, cost:cogs, feeD:feeAmt,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
+          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, itemProfit:null, itemMargin:null, profit, margin:marginPct, cost:cogs, feeD:feeAmt, tax:eTax,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
             returnRate:null, retQty:0, retKnown:false,   // 未結算估算（E001）：無結算退貨資料 → 退貨率「—」
-            coverage:covered?1:0, covered, missingOrigins:covered?[]:[origin||'(無原廠編號)'],
+            coverage:_oc.coverage, covered, missingOrigins:_oc.missingOrigins, noOriginQty:_oc.noOriginQty,
+            e001Origins:_oc.detail, e001OriginLegacy:periodKeys.some(k=>!!(_ed.legacySrc&&_ed.legacySrc[momoPeriodSrcCode(k)])),   // tooltip 用：逐原廠明細；legacy＝該月訂單明細是改版前上傳的
             latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
             listPrice:lp.listPrice, listIsManual:lp.isManual, listManualScope:lp.manualScope, listPriceMaster:lp.masterListPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale,
             feeRate:momoFeeLowerBound(fr), _feeStatus:fr.status, _feeCand:(fr.cand||[]), _feeReason:(fr.reason||null), _feeCur:(fr.cur||null),
@@ -19936,6 +19939,7 @@ function momoParseE001(rows){
   Object.keys(MOMO_E001_COLS).forEach(k=>{ const i=header.findIndex(h=>MOMO_E001_COLS[k].includes(h)); idx[k]=i; if(k!=='price'&&i<0) missing.push(k+'('+MOMO_E001_COLS[k][0]+')'); });   // price 選填：缺則營收估算不可用、銷量仍可
   if(missing.length) return {ok:false, errors:['E001 找不到必要欄位：'+missing.join('、')+'。（表頭應在第 1 列；若這是「對帳明細」請改用上方對帳明細入口。）'], header:header.filter(Boolean).slice(0,12)};
   const bySku={}, bySkuRev={}, skuOrigin={}, byPeriodSold={}, byPeriodRev={};
+  const bySkuOrigin={};   // 品號 → 期別 → 原廠 → 數量（2026-11-20：未結算估算成本逐原廠算；原廠空白或「無」記 MOMO_NO_ORIGIN）。Σ＝bySku
   const intransit={n:0,qty:0}, excluded={n:0}, unknown={};
   let soldRows=0, soldQty=0, soldRev=0, minDate=null, maxDate=null;
   const hasPrice=idx.price>=0;
@@ -19952,13 +19956,14 @@ function momoParseE001(rows){
       (bySku[sku]=bySku[sku]||{})[period]=(bySku[sku][period]||0)+qty;
       (bySkuRev[sku]=bySkuRev[sku]||{})[period]=(bySkuRev[sku][period]||0)+rev;
       if(origin && origin!=='無' && !skuOrigin[sku]) skuOrigin[sku]=origin;
+      { const ok=(origin && origin!=='無')?origin:MOMO_NO_ORIGIN, bp=((bySkuOrigin[sku]=bySkuOrigin[sku]||{})[period]=bySkuOrigin[sku][period]||{}); bp[ok]=(bp[ok]||0)+qty; }
       byPeriodSold[period]=(byPeriodSold[period]||0)+qty; byPeriodRev[period]=(byPeriodRev[period]||0)+rev;
       soldRows++; soldQty+=qty; soldRev+=rev;
     } else if(MOMO_E001_INTRANSIT_STATUS.includes(status)){ intransit.n++; intransit.qty+=momoMoPlusNum(row[idx.qty]); }
     else if(MOMO_E001_EXCLUDED_STATUS.includes(status)){ excluded.n++; }
     else { const key=status||'(空白)'; unknown[key]=(unknown[key]||0)+1; }   // ⚠ 白名單外未知狀態：不靜默丟、計「其他」並附註
   }
-  return { ok:true, bySku, bySkuRev, skuOrigin, byPeriodSold, byPeriodRev, hasPrice, soldRows, soldQty, soldRev, intransit, excluded, unknown,
+  return { ok:true, bySku, bySkuRev, skuOrigin, bySkuOrigin, byPeriodSold, byPeriodRev, hasPrice, soldRows, soldQty, soldRev, intransit, excluded, unknown,
     cutoff:maxDate, srcRange:{from:minDate,to:maxDate}, skuN:Object.keys(bySku).length };
 }
 // MO+ 未結算月費率估算：近 3 月已對帳「總費率」＝(Dtot+Ctot−Btot)/Atot 平均（成交手續費+其他D+運費淨/A）。
@@ -20047,8 +20052,11 @@ function momoE001OwnedUnsettledStat(shop, doc){
 function momoPeriodSrcCode(period){ const m=/^(\d{4})-(\d{2})-H[12]$/.exec(String(period||'')); return m?(m[1].slice(2)+m[2]):null; }
 // 合併多個來源月 E001 doc → 單一 pseudo-doc（形狀同單檔 parse 結果，覆蓋/顯示/相容舊呼叫沿用）。
 //   ⚠ 每期別只採「來源月 src==該期別月份」的 doc（owned period）→ 跨檔同期別不雙計；intransit/unknown/cutoff 為附註用、跨檔彙總。
+//   ⚠ 原廠（2026-11-20）：成本一律讀 bySkuOrigin（品號→期別→原廠→數量，同樣只收主掌期別）。文件沒有 bySkuOrigin（改版前上傳的）
+//     → 用「那份文件自己的」skuOrigin 配它主掌期別的數量合成，並記進 legacySrc（tooltip 提示重傳）。
+//     out.skuOrigin 維持「最舊來源月贏」只給上傳頁的未結算銷量區塊顯示用，🔴 不可再拿來查成本（跨月會套錯規格）。
 function momoMergeE001Docs(docs){
-  const out={bySku:{}, bySkuRev:{}, skuOrigin:{}, byPeriodSold:{}, byPeriodRev:{}, hasPrice:false, srcs:[],
+  const out={bySku:{}, bySkuRev:{}, skuOrigin:{}, bySkuOrigin:{}, legacySrc:{}, byPeriodSold:{}, byPeriodRev:{}, hasPrice:false, srcs:[],
     intransit:{n:0,qty:0}, excluded:{n:0}, unknown:{}, cutoff:null, e001FeeRate:null, e001FeeMonths:null, e001FeeMode:null};
   Object.keys(docs||{}).sort().forEach(src=>{ const d=docs[src]; if(!d) return; out.srcs.push(src); if(d.hasPrice) out.hasPrice=true;
     if(d.e001FeeRate!=null){ out.e001FeeRate=d.e001FeeRate; out.e001FeeMonths=d.e001FeeMonths||null; out.e001FeeMode=d.e001FeeMode||null; }   // 內嵌估算費率（src 由小到大 → 取最新來源月的值）
@@ -20058,6 +20066,11 @@ function momoMergeE001Docs(docs){
     const br=d.byPeriodRev||{}; Object.keys(br).forEach(p=>{ if(own(p)) out.byPeriodRev[p]=(out.byPeriodRev[p]||0)+br[p]; });
     const bs=d.bySku||{}; Object.keys(bs).forEach(sku=>{ Object.keys(bs[sku]||{}).forEach(p=>{ if(own(p)){ (out.bySku[sku]=out.bySku[sku]||{})[p]=(out.bySku[sku][p]||0)+bs[sku][p]; } }); });
     const bsr=d.bySkuRev||{}; Object.keys(bsr).forEach(sku=>{ Object.keys(bsr[sku]||{}).forEach(p=>{ if(own(p)){ (out.bySkuRev[sku]=out.bySkuRev[sku]||{})[p]=(out.bySkuRev[sku][p]||0)+bsr[sku][p]; } }); });
+    const bso=(d.bySkuOrigin&&typeof d.bySkuOrigin==='object')?d.bySkuOrigin:null; if(!bso) out.legacySrc[src]=true;
+    Object.keys(bs).forEach(sku=>{ Object.keys(bs[sku]||{}).forEach(p=>{ if(!own(p)) return;
+      const m=bso ? ((bso[sku]&&bso[sku][p])||null) : {[so[sku]||MOMO_NO_ORIGIN]:bs[sku][p]}; if(!m) return;
+      const t=((out.bySkuOrigin[sku]=out.bySkuOrigin[sku]||{})[p]=out.bySkuOrigin[sku][p]||{});
+      Object.keys(m).forEach(o=>{ t[o]=(t[o]||0)+(Number(m[o])||0); }); }); });
     if(d.intransit){ out.intransit.n+=(d.intransit.n||0); out.intransit.qty+=(d.intransit.qty||0); }
     if(d.excluded){ out.excluded.n+=(d.excluded.n||0); }
     if(d.unknown){ Object.keys(d.unknown).forEach(s=>{ out.unknown[s]=(out.unknown[s]||0)+d.unknown[s]; }); }
@@ -20065,6 +20078,41 @@ function momoMergeE001Docs(docs){
   });
   return out;
 }
+// ─── harness 抽取標記：E001-ORIGIN-PURE-BEGIN（未結算估算成本：逐原廠數量 × 各自成本，2026-11-20；純函式，node 測試 scripts/e001-origin.test.cjs）
+// 某品號在 periodKeys 的逐原廠數量。ed＝momoMergeE001Docs 的結果；fallbackOrigin＝商品主檔主原廠（product.origin）。
+//   逐原廠數量加總對不上本期銷量 eQty 時，差額記無原廠（保險，正常不會發生）；無原廠那一桶有 fallbackOrigin 就併過去（同改版前 skuOrigin||product.origin）。
+function momoE001OriginsQty(ed, sku, periodKeys, fallbackOrigin, eQty){
+  const oq={}; let sum=0;
+  const bso=ed&&ed.bySkuOrigin&&ed.bySkuOrigin[sku];
+  (periodKeys||[]).forEach(k=>{ const m=bso&&bso[k]; if(!m) return; Object.keys(m).forEach(o=>{ const q=Number(m[o])||0; if(!q) return; oq[o]=(oq[o]||0)+q; sum+=q; }); });
+  const rest=(Number(eQty)||0)-sum; if(rest) oq[MOMO_NO_ORIGIN]=(oq[MOMO_NO_ORIGIN]||0)+rest;
+  if(oq[MOMO_NO_ORIGIN] && fallbackOrigin){ oq[fallbackOrigin]=(oq[fallbackOrigin]||0)+oq[MOMO_NO_ORIGIN]; delete oq[MOMO_NO_ORIGIN]; }
+  if(!oq[MOMO_NO_ORIGIN]) delete oq[MOMO_NO_ORIGIN];
+  return oq;
+}
+// 逐原廠成本（規則同已結算列 momoMoPlusMarginCalc：有成本的照算、缺的列進 missingOrigins、涵蓋率＝有成本件數÷全部件數；查成本走 momoMoPlusOriginCost＝支援組合原廠）。
+//   cogs 不取整（同改版前的估算）。detail＝[{o:原廠（無原廠＝''）, q:件數, c:單位成本|null}]，件數多的在前。
+function momoE001OriginsCost(oq, costMap){
+  let costedAbs=0, allAbs=0, cogs=0; const missingOrigins=[], detail=[];
+  Object.keys(oq||{}).forEach(o=>{
+    const q=Number(oq[o])||0, aq=Math.abs(q); if(!q) return; allAbs+=aq;
+    const oc=momoMoPlusOriginCost(costMap, o), c=oc.cost;
+    if(c==null){ oc.missing.forEach(mo=>{ const nm=(mo&&mo!==MOMO_NO_ORIGIN)?mo:'(無原廠編號)'; if(missingOrigins.indexOf(nm)<0) missingOrigins.push(nm); }); }
+    else { costedAbs+=aq; cogs+=q*c; }
+    detail.push({o:(o===MOMO_NO_ORIGIN?'':o), q, c});
+  });
+  detail.sort((a,b)=> b.q-a.q || (a.o<b.o?-1:(a.o>b.o?1:0)));
+  const coverage=allAbs>0?costedAbs/allAbs:1;
+  return { cogs, coverage, covered:(coverage>=0.9999 && missingOrigins.length===0), missingOrigins, detail, noOriginQty:Math.abs(Number((oq||{})[MOMO_NO_ORIGIN])||0) };
+}
+// tooltip 文字：「原廠 × 件數 × 單位成本」；legacy＝這個月的訂單明細是改版前上傳的（沒有逐原廠數量）。
+function momoE001OriginsTip(detail, legacy){
+  if(!detail||!detail.length) return '';
+  const money=c=>'$'+(Math.round(Number(c)*100)/100);
+  return '成本明細（原廠 × 件數 × 單位成本）：'+detail.map(d=>(d.o||'（無原廠編號）')+' × '+d.q+' 件 × '+(d.c!=null?money(d.c):'缺成本')).join('；')
+    +(legacy?'。原廠取該月第一筆訂單，重傳訂單明細會更準':'');
+}
+// ─── harness 抽取標記：E001-ORIGIN-PURE-END
 // compat：合併後單一 doc（顯示/相容舊呼叫）；無來源月資料回 null。
 function momoLoadE001(shop){ const m=momoMergeE001Docs(momoListE001Docs(shop)); return m.srcs.length?m:null; }
 // E001 覆蓋 context（每 epoch 算一次；render 迴圈 619× 共用）：{docs, doc:合併 pseudo-doc, settled:Set, estFee}。
@@ -20089,6 +20137,28 @@ function momoSettledPeriods(shop){
   try{ (momoLoadProducts(shop)||[]).forEach(p=>{ if(p&&p.periods) Object.keys(p.periods).forEach(pd=>s.add(pd)); }); }catch(e){}
   return s;
 }
+// 回歸指紋（唯讀、不寫任何東西、不以 __cloud 開頭）：MO+ 三家 × 2026-01 到這個月 ×（上半／下半／整月）每個有數字的品號
+//   [品號, qty, revenue, cost, profit, margin, covered, coverage, 缺成本原廠, 是否 E001 估算]，加 momoPeriodTotals 與 KPI 帶入用的 _kpiMoPlusCost。
+//   用法：改程式前後各跑一次 copy(JSON.stringify(__momoE001RegressSnap())) 存檔，用 scripts/e001-origin.regress.cjs 比對。要先進過 MOMO 頁（資料載入後）才有東西。
+window.__momoE001RegressSnap=function(){
+  const shops=['MO+麻吉','MO+森之旅','MO+玩樂'], out={at:new Date().toISOString(), meta:{}, rows:{}, totals:{}, kpi:{}};
+  const now=new Date(), months=[]; for(let y=2026,m=1; y<now.getFullYear()||(y===now.getFullYear()&&m<=now.getMonth()+1); ){ months.push(y+'-'+String(m).padStart(2,'0')); if(++m>12){ m=1; y++; } }
+  const nz=v=>(v===undefined?null:v);
+  out.meta.months=months; out.meta.costMapN=Object.keys(momoLoadCostByOrigin()||{}).length;
+  shops.forEach(shop=>{
+    const prods=momoLoadProducts(shop)||[], ctx=momoMoPlusE001Ctx(shop);
+    out.meta[shop]={ products:prods.length, e001Srcs:Object.keys(ctx.docs||{}).sort(), originsSrcs:Object.keys(momoListMoPlusOriginsDocs(shop)||{}).sort(), settled:[...ctx.settled].sort(), estFee:(ctx.estFee?ctx.estFee.rate:null) };
+    months.forEach(mo=>['H1','H2','FULL'].forEach(h=>{
+      const pk=mo+'-'+h, keys=momoExpandPeriod(pk), id=shop+'|'+pk, rows=[];
+      prods.forEach(p=>{ const a=momoAggregatePeriods(p, keys, shop, {lean:true}); if(!a||!(a.qty||a.revenue||a.cost||a.profit)) return;
+        rows.push([p.sku, nz(a.qty), nz(a.revenue), nz(a.cost), nz(a.profit), nz(a.margin), nz(a.covered), nz(a.coverage), (a.missingOrigins||[]).join('|'), a.e001Estimated?1:0]); });
+      rows.sort((x,y)=>x[0]<y[0]?-1:(x[0]>y[0]?1:0)); out.rows[id]=rows;
+      const t=momoPeriodTotals(shop, pk); out.totals[id]=[t.hasData,t.rev,t.profit,t.qty,t.margin,t.missCost,t.soldActive,t.activeTotal,nz(t.revCov),nz(t.profitCov),nz(t.revAB),nz(t.revABCov),nz(t.cost)];
+    }));
+    months.forEach(mo=>{ const k=_kpiMoPlusCost(shop, mo); out.kpi[shop+'|'+mo]=k?[k.cost,k.qty,k.missQty,k.filledQty,(k.miss||[]).length,(k.unreg?k.unreg.qty:null)]:null; });
+  });
+  return out;
+};
 // 月對帳 sys（系統計算側）：從 parsed（feeBreakdown/feeTotals）+ 已提領合計 組出。純函式、Node 可驗。
 function momoBuildMoPlusReconSys(parsed, withdrawnTotal){
   const fb=(parsed&&parsed.feeBreakdown)||{A:{},B:{},C:{},D:{}}, ft=(parsed&&parsed.feeTotals)||{};
@@ -22103,7 +22173,11 @@ function momoRenderProfitBody(shop, tableOnly){
         const m=r.margin;
         // MO+：毛利組成 tooltip（營收 − 成本 − 手續費D − 代扣運費C + 運費代收B）。C 逐筆掛列（精算）、B 按同訂單商品營收攤（攤估）。
         let mTip='';
-        if(r.moPlus){
+        if(r.moPlus && r.e001Estimated){
+          // 未結算估算列：算式＋逐原廠成本明細（原廠 × 件數 × 單位成本）
+          const _ot=momoE001OriginsTip(r.e001Origins, r.e001OriginLegacy);
+          mTip=` title="${('未結算估算：淨利 '+momoMoney(r.profit||0)+' ＝ 營收 '+momoMoney(r.revenue||0)+'（售價×數量，含稅）×100/105（扣營業稅 '+momoMoney(r.tax||0)+'）− 成本 '+momoMoney(r.cost||0)+'（未稅）− 估算平台費 '+momoMoney(r.feeD||0)+(r.e001FeeRate!=null?'（費率 '+(r.e001FeeRate*100).toFixed(1)+'%）':'')+'；淨利率 ÷ 營收'+(_ot?'\n'+_ot:'')).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"`;
+        } else if(r.moPlus){
           mTip=` title="淨利 ${momoMoney(r.profit||0)} ＝ 營收 ${momoMoney(r.revenue||0)}（A貨款 ${momoMoney(r.revenueA||0)} ＋ B運費代收 ${momoMoney(r.feeB||0)}，B 同訂單營收攤估）×100/105（扣營業稅 ${momoMoney(r.tax||0)}）− 成本 ${momoMoney(r.cost||0)}（未稅）− 手續費D ${momoMoney(r.feeD||0)}（逐筆）− 代扣運費C ${momoMoney(r.feeC||0)}（逐筆）；淨利率 ÷ (A＋B)"`;
         }
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}"${mTip}>${momoPct(m)}${momoRowCmp('margin',r,r._prev)}</td>`;
@@ -22264,7 +22338,7 @@ function momoRenderProfitBody(shop, tableOnly){
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
-        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑，未含 B 運費代收、估算亦未扣營業稅）；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑，未含 B 運費代收）；淨利＝營收×100/105（扣營業稅，同已結算）− 成本 − 估算平台費；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
       }
     }
@@ -25803,7 +25877,7 @@ function momoE001Apply(shop){
   //   估算費用扣除的「唯一費率來源」＝這個內嵌欄位，兩條讀取路徑共用。
   const efr=momoMoPlusEstFeeRate(shop);   // 上傳者本機有對帳資料 → 算得出（16.7% 量級）
   if(!efr){ if(typeof showToast==='function') showToast('⚠ 抓不到 MO+ 對帳費率（缺月對帳資料）→ 未結算毛利無法扣平台費，請先上傳/同步對帳明細再存 E001','error'); return; }
-  const doc={ shop, src, bySku:p.bySku, bySkuRev:p.bySkuRev, skuOrigin:p.skuOrigin, byPeriodSold:p.byPeriodSold, byPeriodRev:p.byPeriodRev, hasPrice:p.hasPrice,
+  const doc={ shop, src, bySku:p.bySku, bySkuRev:p.bySkuRev, skuOrigin:p.skuOrigin, bySkuOrigin:p.bySkuOrigin, byPeriodSold:p.byPeriodSold, byPeriodRev:p.byPeriodRev, hasPrice:p.hasPrice,
     intransit:p.intransit, excluded:p.excluded, unknown:p.unknown, cutoff:p.cutoff, srcRange:p.srcRange,
     soldRows:p.soldRows, soldQty:p.soldQty, soldRev:p.soldRev, uploadedAt:momoNowParts().date+' '+momoNowParts().time,
     e001FeeRate:efr.rate, e001FeeMonths:efr.months, e001FeeMode:efr.mode };   // 內嵌估算費率（隨 doc 上雲；讀取端唯一費率來源）
