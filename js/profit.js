@@ -99,7 +99,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <button class="stab" style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>好麻吉</button>
-            <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#1d4ed8"></span>露營館</button>
+            <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#1d4ed8"></span>玩樂</button>
             <button class="stab stab-cup-buyout" onclick="setCoupangShop('買斷',this)"><span class="sdot sdot-cup-buyout"></span>買斷</button>
           </div>
         </div>
@@ -11506,6 +11506,7 @@ const KPI_SHOP_LABELS={
   'mo+0號店(好麻吉)':'MO+好麻吉',
   'mo+1號店(森之旅)':'MO+森之旅',
   'mo+2號店(玩樂)':'MO+玩樂',
+  '商城-露營館':'商城-玩樂',   // 露營館＝playbox 玩樂盒子（2026-11-23），只改顯示；路徑 coupang.商城-露營館 不動
 };
 function _kpiShopLabel(shop){return KPI_SHOP_LABELS[shop]||shop;}
 function getOrCreateKpiRow(month){
@@ -30690,8 +30691,10 @@ function setReconTab(id,btn){
 let _cupShop='';
 const _cupFiles={order:null, pi:null, msf:null};   // PR-3：訂單(必要)/price_inventory(選填·只填這份報表的庫存欄；商品主檔在「商品同步」分頁)/MSF(退貨·選填)
 const _cupReportDoc={};   // shop → 最近一次產出的報表 doc（coupangBuildReportDoc）
-// 顯示名（沿用 MOMO_SHOP_DISPLAY 那一套：內部 key 不變、顯示層單一對照）。麻吉→好麻吉；露營館/總表不變。
-const CUP_SHOP_DISPLAY={ '麻吉':'好麻吉' };
+// 顯示名（沿用 MOMO_SHOP_DISPLAY 那一套：內部 key 不變、顯示層單一對照）。麻吉→好麻吉；露營館→玩樂；總表不變。
+//   「露營館」＝playbox 玩樂盒子（2026-11-23 確認；只改顯示名，店 key '露營館'、doc id luying、本機 key、optlog 文件都不動）。
+//   匯出（淨利表酷澎 Excel 檔名、KPI 月結表 Excel 店名）也顯示玩樂（2026-11-23 Gini 決定）。
+const CUP_SHOP_DISPLAY={ '麻吉':'好麻吉', '露營館':'玩樂' };
 function cupShopDisplay(shop){ return CUP_SHOP_DISPLAY[shop] || shop; }
 
 // PR-3：上傳改為「訂單明細」子分頁 → 這兩個舊入口改為切到該子分頁 / no-op（相容殘留呼叫）
@@ -31639,7 +31642,7 @@ function cupRenderOverview(){
   const waiting=_cupOvWaiting();
   if(waiting){ el.innerHTML='<div class="empty"><div class="empty-icon">⏳</div><div class="empty-hint">載入中…（等'+esc(waiting)+'）</div></div>'; return; }
   const months=cupOvMonths();
-  if(!months.length){ el.innerHTML='<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無資料——先到好麻吉／露營館的「訂單明細」上傳訂單報表。</div></div>'; return; }
+  if(!months.length){ el.innerHTML='<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無資料——先到好麻吉／玩樂的「訂單明細」上傳訂單報表。</div></div>'; return; }
   if(!_cupOvMonth||months.indexOf(_cupOvMonth)<0) _cupOvMonth=months[months.length-1];
   const m=_cupOvMonth, prevM=cupPrevMonth(m), SH=CUP_OVERLAP_SHOPS;
   const inc=momoPeriodIncomplete(m), open=!!inc;   // 當月＝未完
@@ -31653,8 +31656,8 @@ function cupRenderOverview(){
   const dMargin=(hasPrev&&T.margin!=null&&prevT.margin!=null)?{ txt:((T.margin-prevT.margin>=0?'+':'')+(T.margin-prevT.margin).toFixed(1)+'pp'), cls:'cup-st-flat' }:mute;
   const netTxt=(T.net<0?'−':'')+momoMoney(Math.abs(T.net));   // 負數：紅字＋U+2212
   const cards=[
-    { label:'總營收', info:'好麻吉＋露營館的營收合計（淨額，已扣賣家優惠券）。', val:momoMoney(T.rev), d:kd(T.rev,prevT.rev) },
-    { label:'總淨利', info:'好麻吉＋露營館的淨利合計（只算有成本的商品；已扣商品成本、平台費用與營業稅）。', val:netTxt, valCls:(T.net<0?'mm-neg':''), d:kd(T.net,prevT.net) },
+    { label:'總營收', info:'好麻吉＋玩樂的營收合計（淨額，已扣賣家優惠券）。', val:momoMoney(T.rev), d:kd(T.rev,prevT.rev) },
+    { label:'總淨利', info:'好麻吉＋玩樂的淨利合計（只算有成本的商品；已扣商品成本、平台費用與營業稅）。', val:netTxt, valCls:(T.net<0?'mm-neg':''), d:kd(T.net,prevT.net) },
     { label:'加權淨利率', info:'加權淨利率＝總淨利 ÷ 有成本商品的營收（兩個通路合計；跟個別通路頁同一個算法）。', val:(T.margin!=null?momoPct(T.margin):'—'), valCls:(T.margin!=null?_cupOvMarginCls(T.margin):'cup-st-flat'), d:dMargin },
     { label:'總銷量', val:Math.round(T.qty).toLocaleString()+' 件', d:kd(T.qty,prevT.qty) }
   ];
@@ -31681,8 +31684,8 @@ function cupRenderOverview(){
   const topShops=SH.filter(sh=>perShop[sh].has), oddT=topShops.length%2===1, mLbl=m.slice(0,4)+'/'+(+m.slice(5,7));
   const topCards=topShops.map((sh,i)=>'<div class="mm-ov-card'+(oddT&&i===topShops.length-1?' mm-anlz-span':'')+'"><div class="mm-ov-h">'+esc(cupShopDisplay(sh))+' 銷量 Top 10（'+esc(mLbl)+'）</div><div class="mm-ov-canvas"><canvas id="cup-ov-top10-'+sh+'"></canvas></div></div>').join('');
   el.innerHTML='<div class="mm-row cup-ov-head"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupOvSetMonth(this.value)">'+monthOpts+'</select></span>'
-      +'<span class="cup-ov-right">通路總覽 · 好麻吉＋露營館（合計）</span></div>'
-    +'<div class="cup-ov-note">本頁是淨利表口徑：好麻吉＋露營館合計，不含買斷，也不含 KPI 另外扣的耗材與退貨運費。月結數字請看 KPI。</div>'
+      +'<span class="cup-ov-right">通路總覽 · 好麻吉＋玩樂（合計）</span></div>'
+    +'<div class="cup-ov-note">本頁是淨利表口徑：好麻吉＋玩樂合計，不含買斷，也不含 KPI 另外扣的耗材與退貨運費。月結數字請看 KPI。</div>'
     +noteHtml+'<div class="mm-kpis cup-ov-kpis">'+cardHTML+'</div>'+anlzSection
     +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-trend"></canvas></div></div>'
     +'<div class="mm-ov-card"><div class="mm-ov-h">各通路淨利率（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-margin"></canvas></div></div></div>'

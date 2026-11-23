@@ -404,6 +404,13 @@ ESM 有個致命陷阱必須牢記：
   - **Console**：`__cupProductsMergeShadow(shop)`（只算）、`__cupProductsMergeEnforce(shop)`（單通路真寫、不看閘門，C3 驗收才用）、`__cupProductsState()`（含 cloud 欄位）、`__cupLastMergePlan`。本機測試 `__cupProductsMock({shop, newer, newerSkus, latestExport, fromCache, shardsSeen, from})`／`__cupProductsMock(null)`：只在 localhost／127.0.0.1 定義、只改記憶體；開著時 enforce 一律拒絕。node 測試 `scripts/coupang-products.test.cjs`。
   - **回滾**：先把閘門改回 false（只算不寫）並部署。要清雲端：刪掉 `coupang_products` 的 8 份 doc（或用 v3 備份還原），再清各電腦的 `ec_coupang_products_lastpushed|*`。程式回滾＝還原 C2／C3 的 commit（firebase.js 物件與 profit.js 要一起）。⚠ 雲端 → 本機只在本機沒有待推時才蓋，回滾不會丟掉還沒推的本機上傳。
   - 待辦：管理員容量提醒（app.js `__profitCapDocs`）還沒納入 `coupang_products/*`，目前只有 shadow log 與存檔時的每片大小。
+- **酷澎第二館＝playbox 玩樂盒子**（2026-11-23 確認；「MOUNTAINLIFE 露營館」已停、沒有營收）：
+  - 淨利表／KPI／健檢的「露營館」＝playbox 玩樂盒子（**只改顯示名，資料 key 不動**）：顯示「玩樂」「商城-玩樂」（`CUP_SHOP_DISPLAY`、`KPI_SHOP_LABELS`、分頁按鈕、酷澎總表文字、health.js label）；
+    店 key `'露營館'`、doc id `luying`、KPI 路徑 `coupang.商城-露營館`、本機 key、`app/optlog_露營館`、css 名稱都不動。匯出也顯示玩樂：KPI 月結表 Excel 的店名（`_kpiShopLabel`）、淨利表酷澎匯出檔名（`cupShopDisplay`，「酷澎_玩樂_…」）。
+  - 首頁 `ec.platforms`：第二館資料名稱「酷澎玩樂」（2026-10-25 起有營收，要另外 append 到雲端陣列**最後面**）。「酷澎」這筆 name 不改，畫面一律顯示「酷澎好麻吉」（app.js `platformDisplayName`，只用在組 HTML 文字／title／Chart.js labels／確認視窗標題；比對、分群、存檔、同步、`data-*` 一律用原名）。
+    區段標題「酷澎」、總覽卡「酷澎營收」、小計「酷澎總營收」、試算表同步預覽不換字。
+  - 試算表同步：`酷澎玩樂|營收` 是選填欄；`SS_SPLIT`（from 2026-10-25）把「酷澎（不同）＋酷澎玩樂（新增）」同一天當成一組「酷澎拆分」：一個勾選框寫兩格、相加＝雲端原本的酷澎才預設勾選、precheck 擋只動一格。試算表沒有玩樂數字時跟改版前逐字相同（`scripts/sheetsync-wanle.test.cjs`）。
+    sheet-sync.gs 第 5 版認得「酷澎玩樂／營收」與「酷澎（合併）／好麻吉、玩樂」，「露營館」不再認得；改了要手動貼到 Apps Script 並部署新版本。
 - 酷澎淨利表畫面（2026-11-19，Vanessa；都只讀、不寫任何東西，沒有新增雲端物件，本機防寫物件數不變）：
   - **商品彈窗「定價與成本」試算**（profit.js `cupPC*`，狀態 `_cupPC`，純函式在 `CUP-PC-PURE-BEGIN/END`）：三格輸入（成本、售價含稅、賣家券，每件），預設值＝本月實際，所以沒改任何格時試算淨利率＝總表該列 `r.netRate`。
     每件平台費＝扣券後營收 ×（`COUPANG_FEE_RATES` 的 deal＋flow＋freeShip）＋每件固定額；固定額＝(r.fee − r.rev×費率)÷qty，🔴 **不封底、可以是負的**（封底會讓一成多的商品對不上總表）。

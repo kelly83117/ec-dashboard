@@ -184,7 +184,7 @@ function resolveUserIdentity(raw, users, opts) {
  *   與首頁「資料截止日」口徑一致（避免同一個月各通路填到不同天）。
  * @rev-hist-begin（node 測試靠這兩個標記切出本段，勿刪） */
 const _RH_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const _RH_ORDER = Object.freeze(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', '酷澎', '酷澎露營館', 'PChome', '博客來', 'Friday']);
+const _RH_ORDER = Object.freeze(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', '酷澎', '酷澎玩樂', 'PChome', '博客來', 'Friday']);
 const _rhName = n => (n === 'MO+' ? 'MOMO' : n);
 // 每通路只掃一次 daily → { byYear: { 'YYYY': { 通路: [12] } }, names: 通路出現順序（已併 MO+） }
 //   該月沒有任何日期 key → null；有 key 但值是空字串 / 非數字 → 算 0。until（選填）之後的日期略過。
@@ -405,9 +405,10 @@ const PLATFORMS = [
   { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, yesterday: 517131, week: 4050000, month: 15240000 },
   { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, yesterday: 230856, week: 1620000, month: 6120000 },
   { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, yesterday: 367829, week: 2810000, month: 10580000 },
-  // 2026-12 拆出酷澎露營館（12 月起「酷澎」只算好麻吉；2026-11-30 以前「酷澎」是兩店合計，不回填）。不帶假數字。
+  // 酷澎第二館「酷澎玩樂」（playbox 玩樂盒子，2026-10-25 起有營收）。「酷澎」這筆 name 不改（資料 key），畫面顯示「酷澎好麻吉」（platformDisplayName）。
+  //   2026-10-25～11-30 的「酷澎」原本是好麻吉＋玩樂合計，由試算表回填拆開（sheetsync 的「酷澎拆分」）。不帶假數字。
   //   ⚠ 正式環境要另外把這筆 append 到雲端 ec.platforms「最後面」（首頁存檔照陣列位置寫，插在中間會讓後面的通路位置往後挪）。
-  { name: '酷澎露營館', icon: '⛺', color: '#1d4ed8' },
+  { name: '酷澎玩樂', icon: '🧸', color: '#1d4ed8' },
   // 2026-09 新增三通路：只有營收、沒有廣告費 / ROAS（不進 PLATFORMS_WITH_AD_SPEND）。
   //   ⚠ 這裡只是雲端 ec.platforms 為 null 時的種子；正式環境要另外把三筆物件 append 進 Firestore 才會出現。
   { name: 'PChome',     icon: '🅿️', color: '#dc2626' },
@@ -421,14 +422,14 @@ const PLATFORMS_WITH_AD_SPEND = new Set(['生活好麻吉', '玩樂盒子', '森
 
 // 不參與「資料截止日」判斷的平台：小量通路常整天 0 營收，不能讓它們把全站預設檢視日往回拖
 //   （dashboard.js 的 activePlatforms 會先剔除這些）。與 PLATFORMS_WITH_AD_SPEND 同款白名單寫法。
-//   酷澎露營館營收小、常有 0 的日子，一樣不算（2026-12 拆分）。
-const PLATFORMS_EXCLUDED_FROM_CUTOFF = new Set(['PChome', '博客來', 'Friday', '酷澎露營館']);
+//   酷澎玩樂營收小、常有 0 的日子，一樣不算。
+const PLATFORMS_EXCLUDED_FROM_CUTOFF = new Set(['PChome', '博客來', 'Friday', '酷澎玩樂']);
 
 // 平台所屬通路（卡片上的色標用）
 const PLATFORM_MARKETPLACE = {
   '生活好麻吉': 'shopee', '玩樂盒子': 'shopee', '森之旅': 'shopee', '維克生活': 'shopee',
   'MOMO': 'momo', 'MO+': 'momo',
-  '酷澎': 'coupang', '酷澎露營館': 'coupang',
+  '酷澎': 'coupang', '酷澎玩樂': 'coupang',
   'PChome': 'pchome', '博客來': 'books', 'Friday': 'friday',
 };
 // 通路 logo 圖檔（檔案放在 logos/ 資料夾；檔名大小寫要與 assets/ 一致，GitHub Pages 區分大小寫）
@@ -448,6 +449,13 @@ const MARKETPLACE_SECTIONS = [
   { key: 'coupang', name: '酷澎',     tint: '#3b82f6', markets: ['coupang'] },
   { key: 'other',   name: '其他通路', tint: '#64748b', markets: ['pchome', 'books', 'friday'] },
 ];
+// 通路的【畫面顯示名稱】（#505）。🔴 只改顯示、不改鍵：ec.platforms 的 name 同時是資料 key（查表、分群、存檔、試算表欄名、
+//   歷年表 data-rh-*、戰情室 Worker），一律用原名；只有寫進 HTML 文字、title、Chart.js labels、確認視窗標題時才用這支。
+//   「酷澎」這筆從 2026-10-25 起拆出「酷澎玩樂」，所以顯示「酷澎好麻吉」（所有月份一樣，不分月份）。
+const PLATFORM_DISPLAY_NAMES = Object.freeze({ '酷澎': '酷澎好麻吉' });
+function platformDisplayName(name) {
+  return Object.prototype.hasOwnProperty.call(PLATFORM_DISPLAY_NAMES, name) ? PLATFORM_DISPLAY_NAMES[name] : name;
+}
 function marketplaceSectionOf(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
   return MARKETPLACE_SECTIONS.find(s => s.markets.includes(m)) || MARKETPLACE_SECTIONS[0];
@@ -465,10 +473,10 @@ function marketplaceBadgeHtml(platformName) {
 // 平台分組（用於儀表板上方 5 張總覽卡；成員都不在資料裡的群組不畫）
 //   ⚠ 未來新增的小通路一律併進「其他通路」的 members，不要開第六張卡：五張一排已是 1280 寬的極限（見 css/main.css .summary-grid）。
 const PLATFORM_GROUPS = [
-  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎','酷澎露營館','PChome','博客來','Friday'] },
+  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎','酷澎玩樂','PChome','博客來','Friday'] },
   { name: '蝦皮營收',     logo: 'assets/logos/shopee.png',  color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
   { name: 'MOMO營收',     logo: 'assets/logos/momo.png',    color: '#e6007e', members: ['MOMO','MO+'] },
-  { name: '酷澎營收',     logo: 'assets/logos/coupang.png', color: '#3b82f6', members: ['酷澎', '酷澎露營館'] },
+  { name: '酷澎營收',     logo: 'assets/logos/coupang.png', color: '#3b82f6', members: ['酷澎', '酷澎玩樂'] },
   { name: '其他通路',     icon: '🏬',                        color: '#64748b', members: ['PChome','博客來','Friday'] },
 ];
 
@@ -3971,7 +3979,7 @@ Object.assign(window, {
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
   getCategoryMeta, getCategoryItems,
-  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE,
+  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, PLATFORM_DISPLAY_NAMES, platformDisplayName,
   MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
   DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES,
   TASK_CATEGORY_ALIASES,

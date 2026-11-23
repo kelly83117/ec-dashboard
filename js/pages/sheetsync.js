@@ -23,23 +23,38 @@ const SS_DATA_KEYS = [
   '生活好麻吉|營收', '生活好麻吉|廣告費',
   '維克生活|營收', '維克生活|廣告費',
   '森之旅|營收', '森之旅|廣告費',
-  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎露營館|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
+  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎玩樂|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
 ];
-// 選填欄（2026-12 起才有）：試算表回應可以有、也可以沒有（舊版 Apps Script、2026-11 以前的分頁都沒有）。
+// 選填欄（酷澎玩樂＝playbox 玩樂盒子，2026-10-25 起才有營收）：試算表回應可以有、也可以沒有（舊版 Apps Script、還沒拆欄的分頁都沒有）。
 //   沒有＝空白（不寫入）。整段空白時也不要求雲端 ec.platforms 已有這個通路（見 buildDiff）。
-const SS_OPTIONAL_KEYS = ['酷澎露營館|營收'];
+const SS_OPTIONAL_KEYS = ['酷澎玩樂|營收'];
+// 舊版 Apps Script（sheet-sync.gs 第 4 版）每一列都會回「酷澎露營館|營收」，值一律空白（試算表從沒有這欄）。
+//   第 5 版拿掉了；前端兩版都接受：空白就當沒有這個 key（不進 rows），不是空白就擋（露營館已停，不該有值）。
+const SS_LEGACY_BLANK_KEYS = ['酷澎露營館|營收'];
 const SS_CHECK_KEYS = ['_shopeeTotal', '_momoTotal', '_coupangTotal', '_dayTotal'];
 const SS_ROW_KEYS = ['date'].concat(SS_DATA_KEYS, SS_CHECK_KEYS);
 const SS_REQUIRED_ROW_KEYS = SS_ROW_KEYS.filter(k => SS_OPTIONAL_KEYS.indexOf(k) < 0);
 const SS_REV_CHANNELS = SS_DATA_KEYS.filter(k => k.endsWith('|營收')).map(k => k.split('|')[0]);
 const SS_OPTIONAL_CHANNELS = [...new Set(SS_OPTIONAL_KEYS.map(k => k.split('|')[0]))];
-// 逐日驗算 4 項：[名稱, 相加的通路, 試算表加總欄]。試算表「酷澎」合計欄 2026-12 起＝好麻吉＋露營館（舊月份露營館空白＝0，照樣相符）
+// 逐日驗算 4 項：[名稱, 相加的通路, 試算表加總欄]。試算表「酷澎」合計欄＝好麻吉＋玩樂（還沒拆欄的分頁玩樂空白＝0，照樣相符）
 const SS_DAY_CHECKS = [
   ['蝦皮四家', ['玩樂盒子', '生活好麻吉', '維克生活', '森之旅'], '_shopeeTotal'],
   ['MOMO + MO+', ['MOMO', 'MO+'], '_momoTotal'],
-  ['酷澎', ['酷澎', '酷澎露營館'], '_coupangTotal'],
+  ['酷澎', ['酷澎', '酷澎玩樂'], '_coupangTotal'],
   [SS_REV_CHANNELS.length + ' 家合計', SS_REV_CHANNELS, '_dayTotal'],
 ];
+// 酷澎拆分（2026-10-25～11-30 的「酷澎」原本是好麻吉＋玩樂合計；試算表拆欄後回填）：
+//   日期 ≥ from、雲端「酷澎」這天有值、雲端「酷澎玩樂」這天沒有、試算表「酷澎玩樂」有數字 ⇒ 這一天是一組拆分。
+//   一組＝「酷澎（不同）」＋「酷澎玩樂（新增）」兩格，畫面一個勾選框同時控制；新的兩格相加＝雲端原本的酷澎（差 0.01 以內）才預設勾選。
+//   試算表沒有任何玩樂數字時（現在所有分頁）不會產生任何一組，預覽、勾選、寫入跟改版前逐字相同。
+const SS_SPLIT = Object.freeze({ from: '2026-10-25', main: '酷澎', sub: '酷澎玩樂' });
+// 舊版 Apps Script 的空白 key 拿掉（回新物件，不改傳入的 row；沒有就回原物件）
+function ssStripLegacy(row) {
+  if (!SS_LEGACY_BLANK_KEYS.some(k => k in row)) return row;
+  const o = Object.assign({}, row);
+  SS_LEGACY_BLANK_KEYS.forEach(k => { delete o[k]; });
+  return o;
+}
 // 選填欄沒出現＝空白（回新物件，不改傳入的 row）
 function ssNormalizeRow(row) {
   if (!SS_OPTIONAL_KEYS.some(k => !(k in row))) return row;
@@ -114,7 +129,9 @@ function validateResponse(resp, rng) {
     const row = resp.rows[i];
     if (!row || typeof row !== 'object' || Array.isArray(row)) return { ok: false, error: '第 ' + (i + 1) + ' 列不是物件' };
     const keys = Object.keys(row);
-    const extra = keys.filter(k => SS_ROW_KEYS.indexOf(k) < 0);
+    const legacyVal = keys.filter(k => SS_LEGACY_BLANK_KEYS.indexOf(k) >= 0 && row[k] !== '');
+    if (legacyVal.length) return { ok: false, error: '第 ' + (i + 1) + ' 列有舊的欄位 ' + legacyVal.join('、') + '（值 ' + legacyVal.map(k => String(row[k])).join('、') + '），試算表請改用「酷澎玩樂」' };
+    const extra = keys.filter(k => SS_ROW_KEYS.indexOf(k) < 0 && SS_LEGACY_BLANK_KEYS.indexOf(k) < 0);
     const missing = SS_REQUIRED_ROW_KEYS.filter(k => keys.indexOf(k) < 0);
     if (extra.length || missing.length) {
       return { ok: false, error: '第 ' + (i + 1) + ' 列欄位不符（多：' + (extra.join('、') || '無') + '；少：' + (missing.join('、') || '無') + '）' };
@@ -125,7 +142,7 @@ function validateResponse(resp, rng) {
     if (seen[d]) return { ok: false, error: '日期重複：' + d };
     seen[d] = true;
   }
-  return { ok: true, rows: resp.rows.map(ssNormalizeRow) };
+  return { ok: true, rows: resp.rows.map(r => ssNormalizeRow(ssStripLegacy(r))) };
 }
 
 // 逐日驗算 4 項。空白當 0（試算表 SUM 也是）；無法讀取的格子讓該項直接不符
@@ -160,7 +177,7 @@ function buildDiff(rows, platforms, opts) {
   platforms.forEach((p, i) => { const nm = p && p.name; if (nm in byName) dup.push(nm); else byName[nm] = i; });
   if (dup.length) return { error: '雲端 ec.platforms 有重名通路：' + dup.join('、') };
   rows = rows.map(ssNormalizeRow);
-  // 選填通路（露營館）：試算表整段空白、雲端也還沒有這個通路 ⇒ 整個略過（不計格數，結果跟沒有這欄時一樣）；
+  // 選填通路（酷澎玩樂）：試算表整段空白、雲端也還沒有這個通路 ⇒ 整個略過（不計格數，結果跟沒有這欄時一樣）；
   //   試算表有任何一格不是空白 ⇒ 雲端一定要有這個通路，否則擋下
   const skipCh = {};
   SS_OPTIONAL_CHANNELS.forEach(ch => {
@@ -202,6 +219,7 @@ function buildDiff(rows, platforms, opts) {
       cells.push(cell);
     });
   });
+  const splits = ssBuildSplits(cells, platforms, byName);
   // 署名變更提示：這一列（通路, 日期）有候選格、原署名是別人 → 寫入後會改成操作者
   const sigChanges = [], seenSig = {};
   cells.forEach(c => {
@@ -211,7 +229,41 @@ function buildDiff(rows, platforms, opts) {
     seenSig[k] = true;
     sigChanges.push({ ch: c.ch, date: c.date, from: c.oldBy.name || '（無名）', to: op });
   });
-  return { cells, counts, bad, dayFails, sigChanges };
+  const res = { cells, counts, bad, dayFails, sigChanges };
+  if (splits.length) res.splits = splits;   // 沒有拆分時不帶這個欄位（回傳值跟改版前逐字相同）
+  return res;
+}
+
+// 酷澎拆分組（見 SS_SPLIT）。會在組內格子上加 split（日期），並依相加是否相符改寫 checked。
+//   回傳 [{ date, old, main, sub, sum, gap, ok, dayBad, ids }]：old＝雲端原本的酷澎、main＝試算表的酷澎（沒變就是 old）、sub＝試算表的酷澎玩樂、
+//   gap＝sum − old（四捨五入到分）、ids＝這組要一起寫的格子（酷澎沒變時只有酷澎玩樂那一格）。
+function ssBuildSplits(cells, platforms, byName) {
+  const out = [];
+  if (!(SS_SPLIT.main in byName) || !(SS_SPLIT.sub in byName)) return out;
+  const mainP = platforms[byName[SS_SPLIT.main]], subP = platforms[byName[SS_SPLIT.sub]];
+  cells.filter(c => c.ch === SS_SPLIT.sub && c.field === 'daily' && c.cat === 'add' && c.date >= SS_SPLIT.from).forEach(s => {
+    const old = cellVal(mainP, 'daily', s.date);
+    if (old === null || cellVal(subP, 'daily', s.date) !== null) return;
+    const m = cells.find(c => c.ch === SS_SPLIT.main && c.field === 'daily' && c.date === s.date) || null;
+    const main = m ? m.value : Number(old);
+    const sum = main + s.value;
+    const ok = Math.abs(sum - Number(old)) < 0.01;
+    const members = (m && m.cat === 'diff') ? [m, s] : [s];
+    members.forEach(c => { c.split = s.date; c.checked = ok && !c.dayBad; });
+    out.push({ date: s.date, old: Number(old), main, sub: s.value, sum, gap: Math.round((sum - Number(old)) * 100) / 100, ok, dayBad: !!s.dayBad, ids: members.map(c => c.id) });
+  });
+  return out;
+}
+
+// 寫完的拆分摘要（沒有勾到任何一組＝''）：已拆分 N 天，酷澎 −X、酷澎玩樂 +Y，合計不變／變動 Z
+function ssSplitSummary(splits, selectedIds) {
+  const done = (splits || []).filter(sp => sp.ids.every(id => selectedIds.has(id)));
+  if (!done.length) return '';
+  const r = v => Math.round(v * 100) / 100;
+  const dMain = r(done.reduce((t, sp) => t + (sp.old - sp.main), 0)), dSub = r(done.reduce((t, sp) => t + sp.sub, 0));
+  const gap = r(done.reduce((t, sp) => t + sp.gap, 0));
+  return '已拆分 ' + done.length + ' 天：酷澎 −' + dMain.toLocaleString() + '、酷澎玩樂 +' + dSub.toLocaleString() + '，'
+    + (Math.abs(gap) < 0.01 ? '合計不變。' : '合計變動 ' + gap.toLocaleString() + '。');
 }
 
 // 需求 3 塊 5-A：署名是不是同一個人。雙方都有 username → 比 username（trim、不分大小寫）；否則退回比 name（同舊行為）。
@@ -313,6 +365,11 @@ function precheck(fresh, merged, selected, opts) {
     });
   }
   Object.keys(sel).forEach(id => { if (!changed[id]) P.push('勾選了但沒有改到：' + id); });
+  // 酷澎拆分：同一天的兩格要一起寫；只動其中一格＝整次中止（沒有拆分組時這段不產生任何訊息）
+  (opts.splits || []).forEach(sp => {
+    const got = sp.ids.filter(id => sel[id]);
+    if (got.length && got.length !== sp.ids.length) P.push('酷澎拆分 ' + sp.date + ' 只動了一格（' + got.join('、') + '），兩格要一起寫');
+  });
   const doc = Object.assign({}, opts.docData || {});
   doc[opts.key || 'ec.platforms'] = merged;
   const bytes = utf8Len(JSON.stringify(doc));
@@ -380,7 +437,7 @@ function jsonp(url, params, env) {
 
 const SheetSync = {
   SHEET_SYNC_URL, SHEET_SYNC_USERS, SS_DATA_KEYS, SS_OPTIONAL_KEYS, SS_CHECK_KEYS, SS_DAY_CHECKS,
-  range, ssNormalizeRow, classifyCell, validateResponse, buildDiff, ssSameSigner, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
+  SS_SPLIT, range, ssNormalizeRow, classifyCell, validateResponse, buildDiff, ssBuildSplits, ssSplitSummary, ssSameSigner, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
   jsonp, taipeiToday, addDaysStr, utf8Len,
 };
 
@@ -428,7 +485,8 @@ function ssRenderHtml(st) {
   const fromOf = s => { const b = oldByOf[s.ch + '|' + s.date]; return b ? (ssByName(b, resolve) || '（無名）') : s.from; };
   const c = d.counts;
   const dayBadDates = Object.keys(d.dayFails);
-  const compact = !c.diff && !d.bad.length && !dayBadDates.length;
+  const splits = d.splits || [];
+  const compact = !c.diff && !d.bad.length && !dayBadDates.length && !splits.length;
   const N = ssSelectedCount(st);
   const btn = st.done ? '' : `<div class="ss-actions"><button type="button" class="btn-primary ss-confirm" onclick="App.confirmSheetSync()"${N === 0 || st.busy ? ' disabled' : ''}>${st.busy ? '寫入中…' : '寫入 ' + N + ' 格'}</button></div>`;
   const blankNote = c.blankKeep ? `、試算表空白但儀表板有值 ${c.blankKeep} 格（不動）` : '';
@@ -453,7 +511,14 @@ function ssRenderHtml(st) {
       + d.bad.map(b => `<li>${escapeHtml(b.date)} ${escapeHtml(b.ch)} ${escapeHtml(b.metric)}：「${escapeHtml(String(b.raw))}」${escapeHtml(b.reason)}</li>`).join('')
       + '</ul></div>';
   }
-  const adds = d.cells.filter(x => x.cat === 'add'), diffs = d.cells.filter(x => x.cat === 'diff');
+  if (splits.length) {
+    const okN = splits.filter(sp => sp.ok).length;
+    const pcb = sp => `<input type="checkbox" class="ss-cb" data-id="${escapeHtml(sp.ids[0])}" data-ids="${escapeHtml(sp.ids.join(','))}"${sp.ids.every(id => st.sel.has(id)) ? ' checked' : ''}${st.done || st.busy ? ' disabled' : ''}>`;
+    h += `<div class="ss-section ss-split"><div class="ss-section-title">酷澎拆分 ${splits.length} 天（相符 ${okN} 天；試算表「酷澎」＋「酷澎玩樂」＝儀表板原本的「酷澎」才預設勾選，一個勾選框同時寫兩格）</div><table class="ss-table"><thead><tr><th></th><th>日期</th><th class="ss-num">儀表板原本的酷澎</th><th class="ss-num">試算表 酷澎</th><th class="ss-num">試算表 酷澎玩樂</th><th class="ss-num">相加</th><th>結果</th></tr></thead><tbody>`
+      + splits.map(sp => `<tr${sp.dayBad ? ' class="ss-daybad"' : ''}><td class="ss-td-cb">${pcb(sp)}</td><td>${escapeHtml(sp.date.slice(5).replace('-', '/'))}</td><td class="ss-num">${fmtN(sp.old)}</td><td class="ss-num">${fmtN(sp.main)}</td><td class="ss-num">${fmtN(sp.sub)}</td><td class="ss-num">${fmtN(sp.sum)}</td><td>${sp.ok ? '<span class="ss-split-ok">✓ 相符</span>' : '<span class="ss-bad-text">✗ 差 ' + escapeHtml((sp.gap > 0 ? '+' : '') + sp.gap.toLocaleString()) + '</span>'}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  const adds = d.cells.filter(x => x.cat === 'add' && !x.split), diffs = d.cells.filter(x => x.cat === 'diff' && !x.split);
   if (adds.length) {
     h += `<div class="ss-section"><div class="ss-section-title">新增 ${adds.length} 格（儀表板空白）</div><table class="ss-table"><tbody>`
       + adds.map(x => `<tr${rowCls(x)}><td class="ss-td-cb">${cb(x)}</td><td>${cellLabel(x)}</td><td class="ss-num">${fmtN(x.value)}${x.rounded ? ' <span class="ss-tag">已四捨五入</span>' : ''}</td><td class="ss-note">${sigCell(x)}</td></tr>`).join('')
@@ -485,7 +550,7 @@ function ssMount(st) {
   const mEl = root.querySelector('#ss-month');
   if (mEl) mEl.addEventListener('change', () => { st.month = mEl.value; if (st.mode === 'month') App.sheetSyncReload(); });
   root.querySelectorAll('.ss-cb').forEach(el => el.addEventListener('change', () => {
-    if (el.checked) st.sel.add(el.dataset.id); else st.sel.delete(el.dataset.id);
+    (el.dataset.ids ? el.dataset.ids.split(',') : [el.dataset.id]).forEach(id => { if (el.checked) st.sel.add(id); else st.sel.delete(id); });
     const btn = root.querySelector('.ss-confirm');
     if (btn) { const N = st.sel.size; btn.textContent = '寫入 ' + N + ' 格'; btn.disabled = N === 0 || st.busy; }
   }));
@@ -583,7 +648,7 @@ Object.assign(App, {
       }
       // (3) 深拷貝套用 (4) 寫前檢查
       const merged = SheetSync.apply(fresh, selected, by);
-      const problems = SheetSync.precheck(fresh, merged, selected, { yesterday, docData: data, by, key: Store.KEYS.platforms });
+      const problems = SheetSync.precheck(fresh, merged, selected, { yesterday, docData: data, by, key: Store.KEYS.platforms, splits: st.diff.splits });
       if (problems.length) return stop('err', '寫前檢查未通過，已中止（沒有寫入）：\n' + problems.join('\n'));
       // (5) 預演模式
       if (window.__sheetSyncDryRun === true) return stop('info', '預演：寫前檢查通過，將寫入 ' + selected.length + ' 格（未寫入）');
@@ -598,7 +663,7 @@ Object.assign(App, {
       st.done = true;
       stop(vp.length ? 'err' : 'ok', vp.length
         ? '已寫入 ' + selected.length + ' 格，但讀回驗證不一致（未回滾）：\n' + vp.join('\n')
-        : '已寫入 ' + selected.length + ' 格，讀回驗證一致。');
+        : '已寫入 ' + selected.length + ' 格，讀回驗證一致。' + (ssSplitSummary(st.diff.splits, st.sel) ? '\n' + ssSplitSummary(st.diff.splits, st.sel) : ''));
       setTimeout(() => { try { this.render(); } catch (e) {} }, 0);
     } catch (e) {
       stop('err', '寫入失敗：' + ((e && e.message) || e));

@@ -170,7 +170,7 @@ const HEALTH_RULES = _hlDeepFreeze({
     momoJia: { label: 'MOMO 甲配',    order: 2, pureRate: [0, 0.39], sellThrough: [0.42, 0.50], members: 'MOMO 甲配' },
     momoYi:  { label: 'MOMO 乙配（寄倉）', order: 3, pureRate: [0, 0.26], sellThrough: [0.65, 0.73], members: 'MOMO 乙配（寄倉）' },
     moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
-    coupang: { label: '酷澎 商城',    order: 5, pureRate: [0, 0.34], sellThrough: [0.24, 0.33], stFlag: 'few', stN: 5, members: '酷澎 商城-好麻吉、酷澎 商城-露營館' },   // v9：動銷率起始值＝好麻吉 2026-06～10（用 2026-11-17 主檔回算）的 P10／P75 附近，樣本 5 個月；只給舊面向函式，不影響總分
+    coupang: { label: '酷澎 商城',    order: 5, pureRate: [0, 0.34], sellThrough: [0.24, 0.33], stFlag: 'few', stN: 5, members: '酷澎 商城-好麻吉、酷澎 商城-玩樂' },   // v9：動銷率起始值＝好麻吉 2026-06～10（用 2026-11-17 主檔回算）的 P10／P75 附近，樣本 5 個月；只給舊面向函式，不影響總分
     small:   { label: '小通路',       order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
     other:   { label: '業外',         order: 7, pureRate: [0, 0.10], sellThrough: null, members: '業外' },
   },
@@ -199,7 +199,7 @@ const HEALTH_CHANNELS = _hlDeepFreeze([
   { id: 'moplus-sen',     label: 'MO+ 森之旅',      type: 'moplus',  group: 'momo',    shop: 'mo+1號店(森之旅)', prod: { platform: 'momo', shop: 'MO+森之旅' } },
   { id: 'moplus-wanle',   label: 'MO+ 玩樂',        type: 'moplus',  group: 'momo',    shop: 'mo+2號店(玩樂)',   prod: { platform: 'momo', shop: 'MO+玩樂' } },
   { id: 'coupang-maji',   label: '酷澎 商城-好麻吉', type: 'coupang', group: 'coupang', shop: '商城-好麻吉', cup: '麻吉' },     // cup＝淨利表酷澎的賣場名（動銷率走 profit.js __healthCoupangSt，v9）
-  { id: 'coupang-luying', label: '酷澎 商城-露營館', type: 'coupang', group: 'coupang', shop: '商城-露營館', cup: '露營館' },
+  { id: 'coupang-luying', label: '酷澎 商城-玩樂', type: 'coupang', group: 'coupang', shop: '商城-露營館', cup: '露營館' },   // 露營館＝playbox 玩樂盒子：只改 label，id／shop／cup 是資料 key 不動
   { id: 'coupang-buyout', label: '酷澎買斷',        type: 'small',   group: 'coupang', shop: '酷澎買斷' },
   { id: 'pchome',         label: 'PChome',          type: 'small',   group: 'pchome',  shop: 'PChome', shops: ['PChome', 'PChome-寄倉'], prod: { platform: 'pchome', shop: 'PChome' } },   // 2026-11-06 KPI 加寄倉列 → 兩店加總（_hlCell）
   { id: 'friday',         label: 'FriDay',          type: 'small',   group: 'friday',  shop: 'FriDay-主站', shops: ['FriDay-主站', 'FriDay-i站'] },   // 2026-11-04 KPI 拆主站／i站 → 兩店加總（_hlCell）

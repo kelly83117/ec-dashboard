@@ -1,6 +1,6 @@
 /* js/pages/dashboard.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
+const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml, platformDisplayName } = window;
 const { RevHist } = window;
 
 // 需求 3 塊 5-A：首頁營收署名 dailyBy[日期] = { name, username?, at }（username＝登入帳號，trim 後非空才有）。
@@ -673,7 +673,7 @@ Object.assign(App, {
           <td style="padding:3px 6px;white-space:nowrap;overflow:hidden">
             <div style="display:flex;align-items:center;gap:6px;min-width:0">
               <img src="${logoSrc}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
-              <span style="font-weight:600;font-size:13px;white-space:nowrap" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+              <span style="font-weight:600;font-size:13px;white-space:nowrap" title="${escapeHtml(platformDisplayName(p.name))}">${escapeHtml(platformDisplayName(p.name))}</span>
             </div>
             <div class="entry-sig">${sigText}</div>
           </td>
@@ -887,7 +887,7 @@ Object.assign(App, {
         <li class="rank-row">
           <span class="rank-name">
             <img class="rank-logo" src="${logoSrc}" alt="">
-            <span class="rank-name-text" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+            <span class="rank-name-text" title="${escapeHtml(platformDisplayName(p.name))}">${escapeHtml(platformDisplayName(p.name))}</span>
           </span>
           <span class="rank-bar-track">
             <span class="rank-bar ${roasCls}${narrow ? ' is-narrow' : ''}" style="--bar-pct:${pct.toFixed(1)}%">
@@ -990,7 +990,7 @@ Object.assign(App, {
         <li class="alert-row">
           <span class="alert-icon">⚠️</span>
           <img class="alert-logo" src="${logoSrc}" alt="">
-          <span class="alert-name">${escapeHtml(m.p.name)}</span>
+          <span class="alert-name">${escapeHtml(platformDisplayName(m.p.name))}</span>
           <span class="alert-reasons">${chips}</span>
         </li>
       `;
@@ -1032,7 +1032,7 @@ Object.assign(App, {
     }
 
     this._pieState = {
-      labels: slices.map(m => m.p.name),
+      labels: slices.map(m => platformDisplayName(m.p.name)),
       values: slices.map(m => m.rev),
       colors: slices.map(m => m.p.color || '#94a3b8'),
       total,
@@ -1043,7 +1043,7 @@ Object.assign(App, {
       return `
         <span class="pie-legend-item">
           <span class="pie-legend-dot" style="--dot:${m.p.color || '#94a3b8'}"></span>
-          ${escapeHtml(m.p.name)}
+          ${escapeHtml(platformDisplayName(m.p.name))}
           <span class="pie-legend-pct">${pct.toFixed(1)}%</span>
         </span>
       `;
@@ -1239,7 +1239,7 @@ Object.assign(App, {
 
     // 表頭通路名可點 → 切到趨勢比較並選該通路；「總計」→ 全通路
     const chLink = (val, label) => `<button type="button" class="rev-hist-chlink" data-rh-goch="${escapeHtml(val)}" title="看${escapeHtml(val === _RH_ALL ? '全通路' : label)}的趨勢">${escapeHtml(label)}</button>`;
-    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${chLink(ch, ch)}</th>`).join('')}<th class="is-total">${chLink(_RH_ALL, '總計')}</th></tr>`;
+    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${chLink(ch, platformDisplayName(ch))}</th>`).join('')}<th class="is-total">${chLink(_RH_ALL, '總計')}</th></tr>`;
     const rowHtml = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
       r.cells.map((c, i) => `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
     const footHtml = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
@@ -1262,7 +1262,7 @@ Object.assign(App, {
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
       <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
-      <p class="rev-hist-note">酷澎 2026-11-30 以前為好麻吉＋露營館合計。</p>
+      <p class="rev-hist-note">酷澎好麻吉 2026-10-25～11-30 含玩樂（試算表回填後會拆開）。</p>
       ${failNote}`;
   },
   /* 趨勢比較分頁：通路（單選）＋年份（複選）→ 淡旺季卡片 → 折線圖 → 並排表
@@ -1281,7 +1281,7 @@ Object.assign(App, {
       const on = ch === val;
       return `<button type="button" class="rev-hist-chip${on ? ' is-active' : ''}" data-rh-ch="${escapeHtml(val)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(label)}</button>`;
     };
-    const chChips = chChip(_RH_ALL, '全通路') + built.channels.map(c => chChip(c, c)).join('');
+    const chChips = chChip(_RH_ALL, '全通路') + built.channels.map(c => chChip(c, platformDisplayName(c))).join('');
     const yrChips = built.years.map(y => {
       const on = yrs.includes(y);
       const locked = on && yrs.length === 1;
@@ -1340,7 +1340,7 @@ Object.assign(App, {
       r.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
     const tFoot = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
       f.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
-    const chName = ch === _RH_ALL ? '全通路' : ch;
+    const chName = ch === _RH_ALL ? '全通路' : platformDisplayName(ch);
 
     return `
       <div class="rev-hist-pickers">
@@ -1362,7 +1362,7 @@ Object.assign(App, {
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
       <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
-      <p class="rev-hist-note">酷澎 2026-11-30 以前為好麻吉＋露營館合計。</p>
+      <p class="rev-hist-note">酷澎好麻吉 2026-10-25～11-30 含玩樂（試算表回填後會拆開）。</p>
       ${failNote}`;
   },
   /* 建立趨勢折線圖 — revHistRedraw()（局部重畫）與 bindRevHist()（整頁 render 後）都會呼叫。
@@ -1567,7 +1567,7 @@ Object.assign(App, {
       `${yMonth}-${String(mMonth + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
     );
 
-    // 依區段分群（蝦皮 4 / MOMO 2 / 酷澎 2（雲端加了露營館之後）/ 其他通路 3）；只保留資料裡有平台的區段，小計欄跟著區段走
+    // 依區段分群（蝦皮 4 / MOMO 2 / 酷澎 2（雲端加了酷澎玩樂之後）/ 其他通路 3）；只保留資料裡有平台的區段，小計欄跟著區段走
     const grouped = {};
     MARKETPLACE_SECTIONS.forEach(s => { grouped[s.key] = []; });
     platforms.forEach(p => { grouped[marketplaceSectionOf(p.name).key].push(p); });
@@ -1621,7 +1621,7 @@ Object.assign(App, {
 
     // 平台名稱列
     const platformHeadHtml = colSpec.map(({ p, cols }) => {
-      return `<th colspan="${cols}" style="padding:3px 5px;text-align:center;font-size:12px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
+      return `<th colspan="${cols}" style="padding:3px 5px;text-align:center;font-size:12px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(platformDisplayName(p.name))}</th>`;
     }).join('');
 
     // 子欄位列（短標籤節省空間） — 各通路第一欄加 border-left 區隔
@@ -2188,7 +2188,7 @@ Object.assign(App, {
 
       dialogOpen = true;
       this.openModal({
-        title: `確認修改 — ${platformName}`,
+        title: `確認修改 — ${platformDisplayName(platformName)}`,
         bodyHtml: `
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
             日期：<strong style="color:var(--text)">${escapeHtml(inputDateStr)}</strong>

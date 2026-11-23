@@ -28,32 +28,35 @@ const MAX_SPAN_DAYS = 31;
 const TOTAL_ROW_LABEL = '總計';
 const DATE_HEADER = '日期';
 
-// 第 4 版（2026-11-19）：酷澎支援「第 1 列酷澎（合併）＋第 2 列 好麻吉／露營館」的表頭。
+// 第 5 版（2026-11-23）：酷澎第二館改成「酷澎玩樂」（playbox 玩樂盒子，2026-10-25 起有營收），露營館的寫法拿掉。
+//   酷澎表頭三種寫法都認得：舊的「酷澎／營收」、平的兩欄「酷澎／營收」＋「酷澎玩樂／營收」、雙層「酷澎（合併）／好麻吉、玩樂」。
+// 第 4 版（2026-11-19）：酷澎支援「第 1 列酷澎（合併）＋第 2 列 好麻吉／露營館」的表頭（第 5 版已改成玩樂）。
 // 15 個資料欄（14 個必填＋1 個選填）。key（通路|指標）就是回傳 JSON 的欄位名。
 const DATA_KEYS = [
   '玩樂盒子|營收', '玩樂盒子|廣告費',
   '生活好麻吉|營收', '生活好麻吉|廣告費',
   '維克生活|營收', '維克生活|廣告費',
   '森之旅|營收', '森之旅|廣告費',
-  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎露營館|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
+  'MOMO|營收', 'MO+|營收', '酷澎|營收', '酷澎玩樂|營收', 'PChome|營收', '博客來|營收', 'Friday|營收',
 ];
-// 選填欄：2026 十二月分頁起才有。分頁沒有這欄不算缺少，回傳值一律 ''（空白）；有這欄就照常讀。
-//   舊分頁永遠不會有，所以不能做成必填。表頭兩種寫法都認得（見 SUB_HEADER_KEY）：
-//   ・第 1 列「酷澎露營館」、第 2 列「營收」
-//   ・第 1 列「酷澎」（跟好麻吉那欄合併）、第 2 列「露營館」
-const OPTIONAL_KEYS = ['酷澎露營館|營收'];
+// 選填欄：酷澎玩樂 2026-10-25 起才有營收，10、11 月分頁回填時加欄、12 月起一開始就有。分頁沒有這欄不算缺少，回傳值一律 ''（空白）；有這欄就照常讀。
+//   2026-10 以前的分頁永遠不會有，所以不能做成必填。表頭兩種寫法都認得（見 SUB_HEADER_KEY）：
+//   ・第 1 列「酷澎玩樂」、第 2 列「營收」
+//   ・第 1 列「酷澎」（跟好麻吉那欄合併）、第 2 列「玩樂」
+const OPTIONAL_KEYS = ['酷澎玩樂|營收'];
 // 有 ROAS 欄的通路（ROAS 欄只略過、不讀）
 const AD_CHANNELS = ['玩樂盒子', '生活好麻吉', '維克生活', '森之旅'];
 const METRICS = ['營收', '廣告費'];
 // 第 2 列直接寫子通路名的情況：子通路 → 第 1 列必須是的群組名
 const SUB_CHANNEL_PARENT = { 'MOMO': 'MOMO', 'MO+': 'MOMO' };
 // 第 1 列是群組名（合併儲存格）、第 2 列寫店名的情況：群組 → { 第 2 列 → 回傳 key }。回傳 key 不變，前端不用改。
-//   2026 十二月起的排法：「酷澎」合併兩欄，第 2 列「好麻吉」「露營館」。
+//   雙層排法（12 月起、10／11 月回填也可以用）：「酷澎」合併兩欄，第 2 列「好麻吉」「玩樂」。
 //   舊排法（第 1 列「酷澎」、第 2 列「營收」）仍然認得；同一個分頁兩種寫法指到同一個 key ⇒「資料欄重複」。
-const SUB_HEADER_KEY = { '酷澎': { '好麻吉': '酷澎|營收', '露營館': '酷澎露營館|營收' } };
-// 這個月（含）以後的分頁如果沒有任何露營館欄，在 layout.notices 提醒（不擋同步）
-const LUYING_NOTICE_FROM = '2026-12';
-const LUYING_NOTICE_TEXT = '這個分頁沒有酷澎露營館欄';
+//   第 2 列寫「露營館」的不再認得（會列為無法辨識的資料欄，擋下）。
+const SUB_HEADER_KEY = { '酷澎': { '好麻吉': '酷澎|營收', '玩樂': '酷澎玩樂|營收' } };
+// 這個月（含）以後的分頁如果沒有任何玩樂欄，在 layout.notices 提醒（不擋同步；只出現在 ?headers=1 的檢查輸出）
+const WANLE_NOTICE_FROM = '2026-10';
+const WANLE_NOTICE_TEXT = '這個分頁沒有酷澎玩樂欄';
 // 分隔欄右側的加總欄：表頭 → 回傳名（加底線前綴）
 const CHECK_KEYS = {
   '蝦皮總營收': 'shopeeTotal',
@@ -184,7 +187,7 @@ function classify_(r1, r2) {
     let key = null;
     if (a && METRICS.indexOf(b) >= 0) key = a + '|' + b;                         // 玩樂盒子+營收、酷澎+營收…
     else if (SUB_CHANNEL_PARENT[b] && a === SUB_CHANNEL_PARENT[b]) key = b + '|營收'; // MOMO+MOMO、MOMO+MO+
-    else if (SUB_HEADER_KEY[a] && SUB_HEADER_KEY[a][b]) key = SUB_HEADER_KEY[a][b];   // 酷澎+好麻吉、酷澎+露營館
+    else if (SUB_HEADER_KEY[a] && SUB_HEADER_KEY[a][b]) key = SUB_HEADER_KEY[a][b];   // 酷澎+好麻吉、酷澎+玩樂
     if (!key || DATA_KEYS.indexOf(key) < 0) {
       P.push('無法辨識的資料欄 ' + L + '（第 1 列「' + a + '」／第 2 列「' + b + '」）');
       continue;
@@ -192,13 +195,13 @@ function classify_(r1, r2) {
     if (key in res.cols) { P.push('資料欄重複：' + label_(key) + '（' + res.data[key] + '、' + L + '）'); continue; }
     res.cols[key] = c;
     res.data[key] = L;
-    if (b === '露營館') subOnly = L;
+    if (a === '酷澎' && b === '玩樂') subOnly = L;
   }
   const missing = DATA_KEYS.filter(k => !(k in res.cols) && OPTIONAL_KEYS.indexOf(k) < 0);
   if (missing.length) P.push('缺少 ' + missing.length + ' 個資料欄：' + missing.map(label_).join('、'));
-  // 只有「酷澎／露營館」、沒有好麻吉那一欄：上面已列為缺少「酷澎 營收」，這裡補一句原因
+  // 只有「酷澎／玩樂」、沒有好麻吉那一欄：上面已列為缺少「酷澎 營收」，這裡補一句原因
   if (subOnly && missing.indexOf('酷澎|營收') >= 0) {
-    P.push(subOnly + ' 欄是「酷澎／露營館」，但找不到「酷澎／好麻吉」（或「酷澎／營收」）那一欄');
+    P.push(subOnly + ' 欄是「酷澎／玩樂」，但找不到「酷澎／好麻吉」（或「酷澎／營收」）那一欄');
   }
 
   // 右側：加總欄
@@ -268,8 +271,8 @@ function publicLayout_(l, ym) {
 }
 function layoutNotices_(l, ym) {
   const out = [];
-  if (l.separator && /^\d{4}-\d{2}$/.test(String(ym || '')) && ym >= LUYING_NOTICE_FROM && !('酷澎露營館|營收' in l.cols)) {
-    out.push(LUYING_NOTICE_TEXT);
+  if (l.separator && /^\d{4}-\d{2}$/.test(String(ym || '')) && ym >= WANLE_NOTICE_FROM && !('酷澎玩樂|營收' in l.cols)) {
+    out.push(WANLE_NOTICE_TEXT);
   }
   return out;
 }

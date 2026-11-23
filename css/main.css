@@ -814,6 +814,7 @@
   .ss-section { margin-bottom: 12px; }
   .ss-section-title { font-weight: 700; margin-bottom: 6px; }
   .ss-section-bad .ss-section-title, .ss-bad-text { color: var(--danger); }
+  .ss-split-ok { color: var(--success); font-weight: 600; }   /* 試算表同步「酷澎拆分」相加相符 */
   .ss-list { margin: 0; padding-left: 18px; }
   .ss-table { width: 100%; border-collapse: collapse; }
   .ss-table th, .ss-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }

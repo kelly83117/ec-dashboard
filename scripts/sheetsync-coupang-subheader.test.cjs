@@ -1,10 +1,10 @@
 // node scripts/sheetsync-coupang-subheader.test.cjs
-// sheet-sync.gs（repo 副本）第 4 版：酷澎表頭三種寫法都認得，回傳 key 不變（'酷澎|營收'、'酷澎露營館|營收'）。
+// sheet-sync.gs（repo 副本）第 5 版（第 4 版的露營館改名酷澎玩樂）：酷澎表頭三種寫法都認得，回傳 key（'酷澎|營收'、'酷澎玩樂|營收'）。
 //   ① 舊格式：第 1 列「酷澎」、第 2 列「營收」（2026-11 以前）
-//   ② 第 1 列「酷澎露營館」、第 2 列「營收」（酷澎欄右邊加一欄）
-//   ③ 第 1 列「酷澎」合併兩欄、第 2 列「好麻吉」「露營館」（2026-12 Kelly 的排法）
+//   ② 第 1 列「酷澎玩樂」、第 2 列「營收」（酷澎欄右邊加一欄）
+//   ③ 第 1 列「酷澎」合併兩欄、第 2 列「好麻吉」「玩樂」（2026-12 Kelly 的排法）
 //   ④ 兩種寫法指到同一個 key ⇒ 資料欄重複
-//   ⑤ 只有露營館、沒有好麻吉 ⇒ 缺少「酷澎 營收」
+//   ⑤ 只有玩樂、沒有好麻吉 ⇒ 缺少「酷澎 營收」
 //   ⑥ 前端驗算（checkDayTotals）在三種格式下的結果
 //   ⑦ 舊格式的 classify_／publicLayout_／pick_ 輸出跟改版前（BASE_COMMIT）逐字相同
 // 全離線、資料全是假的（不含正式站數字）。
@@ -67,69 +67,69 @@ const f1 = classify(RAW1, RAW2, MERGES);
 eq(plain(f1.l.problems), [], '① 舊格式沒有問題');
 eq(f1.h.r1[14], 'MOMO', '① 合併儲存格往右補值（O1＝MOMO）');
 eq(f1.l.data['酷澎|營收'], 'P', '① 酷澎在 P 欄');
-ok(!('酷澎露營館|營收' in f1.l.cols), '① 沒有露營館欄');
+ok(!('酷澎玩樂|營收' in f1.l.cols), '① 沒有玩樂欄');
 eq(f1.l.separator, 'T', '① 分隔欄 T');
 eq(plain(f1.l.totalCols), { '蝦皮總營收': 'U', 'MOMO': 'V', '酷澎': 'W', '當日總營收': 'X' }, '① 合計區');
 const p1 = plain(G.pick_(mkRow(24, '11/1'), f1.l));
-eq([p1['酷澎|營收'], p1['酷澎露營館|營收'], p1._coupangTotal], [150, '', 220], '① 酷澎讀 P、露營館空白、合計讀 W');
+eq([p1['酷澎|營收'], p1['酷澎玩樂|營收'], p1._coupangTotal], [150, '', 220], '① 酷澎讀 P、玩樂空白、合計讀 W');
 
-/* ── ② 第 1 列「酷澎露營館」、第 2 列「營收」 ── */
-const f2 = classify(ins(RAW1, P + 1, '酷澎露營館'), ins(RAW2, P + 1, '營收'), shiftMerges(MERGES, P + 2));
+/* ── ② 第 1 列「酷澎玩樂」、第 2 列「營收」 ── */
+const f2 = classify(ins(RAW1, P + 1, '酷澎玩樂'), ins(RAW2, P + 1, '營收'), shiftMerges(MERGES, P + 2));
 eq(plain(f2.l.problems), [], '② 沒有問題');
-eq([f2.l.data['酷澎|營收'], f2.l.data['酷澎露營館|營收'], f2.l.data['PChome|營收'], f2.l.separator], ['P', 'Q', 'R', 'U'], '② 酷澎 P、露營館 Q、PChome R、分隔 U');
+eq([f2.l.data['酷澎|營收'], f2.l.data['酷澎玩樂|營收'], f2.l.data['PChome|營收'], f2.l.separator], ['P', 'Q', 'R', 'U'], '② 酷澎 P、玩樂 Q、PChome R、分隔 U');
 
-/* ── ③ Kelly 的新格式：「酷澎」合併 P1:Q1，第 2 列 好麻吉／露營館 ── */
+/* ── ③ Kelly 的新格式：「酷澎」合併 P1:Q1，第 2 列 好麻吉／玩樂 ── */
 const RAW1k = ins(RAW1, P + 1, '');                               // Q1 是空的（合併範圍內）
-const RAW2k = ins(RAW2, P + 1, '露營館'); RAW2k[P] = '好麻吉';
+const RAW2k = ins(RAW2, P + 1, '玩樂'); RAW2k[P] = '好麻吉';
 const MERGESk = shiftMerges(MERGES, P + 2).concat([{ row: 1, col: P + 1, numCols: 2 }]);
 eq(RAW1k[P + 1], '', '③ 原始第 1 列的第二欄是空的');
 const f3 = classify(RAW1k, RAW2k, MERGESk);
 eq(f3.h.r1[P + 1], '酷澎', '③ 合併帶值後 Q1＝酷澎');
 eq(plain(f3.l.problems), [], '③ 沒有問題');
-eq([f3.l.data['酷澎|營收'], f3.l.data['酷澎露營館|營收'], f3.l.data['PChome|營收'], f3.l.separator], ['P', 'Q', 'R', 'U'], '③ 好麻吉 P → 酷澎|營收、露營館 Q → 酷澎露營館|營收');
+eq([f3.l.data['酷澎|營收'], f3.l.data['酷澎玩樂|營收'], f3.l.data['PChome|營收'], f3.l.separator], ['P', 'Q', 'R', 'U'], '③ 好麻吉 P → 酷澎|營收、玩樂 Q → 酷澎玩樂|營收');
 eq(plain(f3.l.totalCols), { '蝦皮總營收': 'V', 'MOMO': 'W', '酷澎': 'X', '當日總營收': 'Y' }, '③ 合計區的「酷澎」仍是合計欄（X），沒有跟資料區撞名');
 eq(Object.keys(f3.l.data).length, 15, '③ 15 個資料欄');
 const p3 = plain(G.pick_(mkRow(25, '12/1'), f3.l));
-eq([p3['酷澎|營收'], p3['酷澎露營館|營收'], p3._coupangTotal], [150, 160, 230], '③ 讀值：好麻吉 P、露營館 Q、合計 X');
+eq([p3['酷澎|營收'], p3['酷澎玩樂|營收'], p3._coupangTotal], [150, 160, 230], '③ 讀值：好麻吉 P、玩樂 Q、合計 X');
 eq(Object.keys(p3).sort(), Object.keys(p1).sort(), '③ 回傳的 key 集合跟舊格式相同（前端不用改）');
 // ②③ 除了表頭寫法，layout 完全相同
 eq(plain(G.publicLayout_(f3.l, '2026-12')), plain(G.publicLayout_(f2.l, '2026-12')), '③ layout 跟 ② 相同');
 // 沒合併（Q1 真的空白）⇒ 擋下、不猜
 const f3n = classify(RAW1k, RAW2k, shiftMerges(MERGES, P + 2));
-ok(f3n.l.problems.some(p => /無法辨識的資料欄 Q（第 1 列「」／第 2 列「露營館」）/.test(p)), '③ 沒合併 ⇒ 無法辨識 Q：' + f3n.l.problems.join('；'));
+ok(f3n.l.problems.some(p => /無法辨識的資料欄 Q（第 1 列「」／第 2 列「玩樂」）/.test(p)), '③ 沒合併 ⇒ 無法辨識 Q：' + f3n.l.problems.join('；'));
 eq(f3n.l.separator, 'U', '③ 沒合併時分隔欄也不會被誤判成 Q');
-// 只有好麻吉（露營館選填）
+// 只有好麻吉（玩樂選填）
 const RAW2h = RAW2.slice(); RAW2h[P] = '好麻吉';
 const f3h = classify(RAW1, RAW2h, MERGES);
 eq(plain(f3h.l.problems), [], '③ 只有「酷澎／好麻吉」⇒ 照舊格式處理');
 eq(plain(f3h.l.data), plain(f1.l.data), '③ 只有好麻吉的欄位對應＝舊格式');
-// 混用（不同 key，不衝突）：酷澎／營收 ＋ 酷澎／露營館；酷澎／好麻吉 ＋ 酷澎露營館／營收
-const RAW2m = ins(RAW2, P + 1, '露營館');
-eq(plain(classify(RAW1k, RAW2m, MERGESk).l.problems), [], '③ 「酷澎／營收」＋「酷澎／露營館」可接受');
+// 混用（不同 key，不衝突）：酷澎／營收 ＋ 酷澎／玩樂；酷澎／好麻吉 ＋ 酷澎玩樂／營收
+const RAW2m = ins(RAW2, P + 1, '玩樂');
+eq(plain(classify(RAW1k, RAW2m, MERGESk).l.problems), [], '③ 「酷澎／營收」＋「酷澎／玩樂」可接受');
 const RAW2m2 = ins(RAW2, P + 1, '營收'); RAW2m2[P] = '好麻吉';
-eq(plain(classify(ins(RAW1, P + 1, '酷澎露營館'), RAW2m2, shiftMerges(MERGES, P + 2)).l.problems), [], '③ 「酷澎／好麻吉」＋「酷澎露營館／營收」可接受');
-// 好麻吉／露營館寫在別的群組底下 ⇒ 不認
+eq(plain(classify(ins(RAW1, P + 1, '酷澎玩樂'), RAW2m2, shiftMerges(MERGES, P + 2)).l.problems), [], '③ 「酷澎／好麻吉」＋「酷澎玩樂／營收」可接受');
+// 好麻吉／玩樂寫在別的群組底下 ⇒ 不認
 const RAW1x = RAW1.slice(); RAW1x[P] = 'PChome';
 ok(classify(RAW1x, RAW2h, MERGES).l.problems.some(p => /無法辨識的資料欄 P/.test(p)), '③ 「PChome／好麻吉」⇒ 無法辨識');
 
 /* ── ④ 兩種寫法指到同一個 key ── */
 // 酷澎／營收 ＋ 酷澎／好麻吉
-const f4a = classify(ins(RAW1k, P + 2, ''), ins(RAW2m.map((v, i) => (i === P + 1 ? '好麻吉' : v)), P + 2, '露營館'),
+const f4a = classify(ins(RAW1k, P + 2, ''), ins(RAW2m.map((v, i) => (i === P + 1 ? '好麻吉' : v)), P + 2, '玩樂'),
   shiftMerges(MERGES, P + 2).map(m => (m.col >= P + 3 ? Object.assign({}, m, { col: m.col + 1 }) : m)).concat([{ row: 1, col: P + 1, numCols: 3 }]));
 ok(f4a.l.problems.some(p => /資料欄重複：酷澎 營收（P、Q）/.test(p)), '④ 酷澎／營收＋酷澎／好麻吉 ⇒ 重複：' + f4a.l.problems.join('；'));
-// 酷澎／露營館 ＋ 酷澎露營館／營收
-const f4b = classify(ins(RAW1k, P + 2, '酷澎露營館'), ins(RAW2k, P + 2, '營收'),
+// 酷澎／玩樂 ＋ 酷澎玩樂／營收
+const f4b = classify(ins(RAW1k, P + 2, '酷澎玩樂'), ins(RAW2k, P + 2, '營收'),
   shiftMerges(MERGESk, P + 3).map(m => (m.col === P + 1 ? m : m)));
-ok(f4b.l.problems.some(p => /資料欄重複：酷澎露營館 營收（Q、R）/.test(p)), '④ 酷澎／露營館＋酷澎露營館／營收 ⇒ 重複：' + f4b.l.problems.join('；'));
+ok(f4b.l.problems.some(p => /資料欄重複：酷澎玩樂 營收（Q、R）/.test(p)), '④ 酷澎／玩樂＋酷澎玩樂／營收 ⇒ 重複：' + f4b.l.problems.join('；'));
 // 好麻吉寫兩次
 const f4c = classify(RAW1k, RAW2k.map((v, i) => (i === P + 1 ? '好麻吉' : v)), MERGESk);
 ok(f4c.l.problems.some(p => /資料欄重複：酷澎 營收（P、Q）/.test(p)), '④ 好麻吉寫兩次 ⇒ 重複');
 
-/* ── ⑤ 只有露營館、沒有好麻吉 ── */
-const RAW2o = RAW2.slice(); RAW2o[P] = '露營館';
+/* ── ⑤ 只有玩樂、沒有好麻吉 ── */
+const RAW2o = RAW2.slice(); RAW2o[P] = '玩樂';
 const f5 = classify(RAW1, RAW2o, MERGES);
 ok(f5.l.problems.some(p => /缺少 1 個資料欄：酷澎 營收/.test(p)), '⑤ 報缺少「酷澎 營收」：' + f5.l.problems.join('；'));
-ok(f5.l.problems.some(p => /P 欄是「酷澎／露營館」，但找不到「酷澎／好麻吉」/.test(p)), '⑤ 補一句原因');
+ok(f5.l.problems.some(p => /P 欄是「酷澎／玩樂」，但找不到「酷澎／好麻吉」/.test(p)), '⑤ 補一句原因');
 eq(f5.l.problems.length, 2, '⑤ 只有這兩條');
 
 /* ── ⑥ 驗算（前端 checkDayTotals；Apps Script 端只回傳合計欄、不自己驗算）── */
@@ -142,22 +142,22 @@ function dataRow(first, l, len, vals) {
   Object.keys(vals || {}).forEach(k => { row[l.cols[k]] = vals[k]; });
   row[l.checks.shopeeTotal] = v('玩樂盒子|營收') + v('生活好麻吉|營收') + v('維克生活|營收') + v('森之旅|營收');
   row[l.checks.momoTotal] = v('MOMO|營收') + v('MO+|營收');
-  row[l.checks.coupangTotal] = v('酷澎|營收') + v('酷澎露營館|營收');
+  row[l.checks.coupangTotal] = v('酷澎|營收') + v('酷澎玩樂|營收');
   row[l.checks.dayTotal] = G.DATA_KEYS.filter(k => /\|營收$/.test(k)).reduce((s, k) => s + v(k), 0);
   return row;
 }
-[['① 舊格式', f1.l, 24, '2026-11-01'], ['② 酷澎露營館／營收', f2.l, 25, '2026-12-01'], ['③ 酷澎／好麻吉＋露營館', f3.l, 25, '2026-12-01']].forEach(([name, l, len, date]) => {
-  const vals = { '酷澎|營收': 700 }; if ('酷澎露營館|營收' in l.cols) vals['酷澎露營館|營收'] = 55;
+[['① 舊格式', f1.l, 24, '2026-11-01'], ['② 酷澎玩樂／營收', f2.l, 25, '2026-12-01'], ['③ 酷澎／好麻吉＋玩樂', f3.l, 25, '2026-12-01']].forEach(([name, l, len, date]) => {
+  const vals = { '酷澎|營收': 700 }; if ('酷澎玩樂|營收' in l.cols) vals['酷澎玩樂|營收'] = 55;
   const raw = dataRow('x', l, len, vals);
   const row = Object.assign({ date }, plain(G.pick_(raw, l)));
   const v = FE.validateResponse(resp([row]), RNG);
   ok(v.ok, '⑥ ' + name + '：前端接受回應' + (v.ok ? '' : '（' + v.error + '）'));
   eq(plain(FE.checkDayTotals(v.rows[0])), { ok: true, fails: [] }, '⑥ ' + name + '：四項驗算相符');
-  eq(row._coupangTotal, 700 + ('酷澎露營館|營收' in l.cols ? 55 : 0), '⑥ ' + name + '：合計區酷澎＝' + ('酷澎露營館|營收' in l.cols ? '好麻吉＋露營館' : '酷澎那一欄'));
-  if ('酷澎露營館|營收' in l.cols) {
-    // 合計公式沒含露營館 ⇒ 要報不符
+  eq(row._coupangTotal, 700 + ('酷澎玩樂|營收' in l.cols ? 55 : 0), '⑥ ' + name + '：合計區酷澎＝' + ('酷澎玩樂|營收' in l.cols ? '好麻吉＋玩樂' : '酷澎那一欄'));
+  if ('酷澎玩樂|營收' in l.cols) {
+    // 合計公式沒含玩樂 ⇒ 要報不符
     const stale = Object.assign({}, row, { _coupangTotal: 700 });
-    ok(plain(FE.checkDayTotals(stale)).fails.some(f => f.item === '酷澎'), '⑥ ' + name + '：合計沒含露營館 ⇒ 酷澎驗算不符');
+    ok(plain(FE.checkDayTotals(stale)).fails.some(f => f.item === '酷澎'), '⑥ ' + name + '：合計沒含玩樂 ⇒ 酷澎驗算不符');
   }
 });
 
@@ -166,10 +166,17 @@ if (B) {
   const hOld = G.headerRows_(RAW1, RAW2, MERGES);
   const lB = B.classify_(hOld.r1, hOld.r2), lG = G.classify_(hOld.r1, hOld.r2);
   eq(JSON.stringify(lG), JSON.stringify(lB), '⑦ 舊格式 classify_ 整份輸出逐字相同');
-  ['2026-09', '2026-11'].forEach(ym => eq(JSON.stringify(G.publicLayout_(lG, ym)), JSON.stringify(B.publicLayout_(lB)), '⑦ 舊格式 layout（' + ym + '）逐字相同'));
-  eq(JSON.stringify(G.pick_(mkRow(24, '11/1'), lG)), JSON.stringify(B.pick_(mkRow(24, '11/1'), lB)), '⑦ 舊格式 pick_ 逐字相同');
+  // 第 5 版（2026-11-23）：露營館改名酷澎玩樂 ⇒ 舊版輸出裡的「酷澎露營館」換成「酷澎玩樂」後比對；2026-10 起舊格式多一個 notices（不擋同步）。
+  const ren = x => JSON.stringify(x).split('酷澎露營館').join('酷澎玩樂');
+  eq(JSON.stringify(G.publicLayout_(lG, '2026-09')), ren(B.publicLayout_(lB)), '⑦ 舊格式 layout（2026-09）逐字相同');
+  const lay11 = plain(G.publicLayout_(lG, '2026-11'));
+  eq(lay11.notices, ['這個分頁沒有酷澎玩樂欄'], '⑦ 舊格式 layout（2026-11）多一個 notices');
+  delete lay11.notices;
+  eq(JSON.stringify(lay11), ren(B.publicLayout_(lB)), '⑦ 舊格式 layout（2026-11）拿掉 notices 後逐字相同');
+  eq(JSON.stringify(G.pick_(mkRow(24, '11/1'), lG)), ren(B.pick_(mkRow(24, '11/1'), lB)), '⑦ 舊格式 pick_ 只差 key 名（酷澎露營館→酷澎玩樂）');
   // ② 是第 3 版就支援的格式：也要逐字相同
-  eq(JSON.stringify(f2.l), JSON.stringify(B.classify_(f2.h.r1, f2.h.r2)), '⑦ ② 格式 classify_ 逐字相同');
+  const r1Old = f2.h.r1.map(v => (v === '酷澎玩樂' ? '酷澎露營館' : v));   // ② 在舊版叫「酷澎露營館」
+  eq(JSON.stringify(f2.l), ren(B.classify_(r1Old, f2.h.r2)), '⑦ ② 格式 classify_ 只差名字（酷澎露營館→酷澎玩樂）');
   // 各種壞表頭：改版前後 problems 相同（沒有酷澎子表頭時行為不變）
   const bad = [
     [RAW1.map((v, i) => (i === 13 ? 'MOMOX' : v)), RAW2],
@@ -189,11 +196,12 @@ if (B) {
   eq([f2.l.data[k], f3.l.data[k]], [f1.l.data[k], f1.l.data[k]], '⑦ ' + k + ' 欄位不變');
 });
 
-/* ── notice（#503）：2026-12 起沒有露營館欄 ⇒ layout.notices，不擋同步 ── */
-eq(plain(G.publicLayout_(f1.l, '2026-12')).notices, ['這個分頁沒有酷澎露營館欄'], 'notice：2026-12 沒有露營館欄');
-eq(plain(G.publicLayout_(f1.l, '2027-01')).notices, ['這個分頁沒有酷澎露營館欄'], 'notice：2027-01 也提醒');
-ok(!('notices' in G.publicLayout_(f1.l, '2026-11')), 'notice：2026-11 以前不帶 notices 欄位');
-ok(!('notices' in G.publicLayout_(f3.l, '2026-12')), 'notice：有露營館欄就沒有');
+/* ── notice（#503）：2026-12 起沒有玩樂欄 ⇒ layout.notices，不擋同步 ── */
+eq(plain(G.publicLayout_(f1.l, '2026-12')).notices, ['這個分頁沒有酷澎玩樂欄'], 'notice：2026-12 沒有玩樂欄');
+eq(plain(G.publicLayout_(f1.l, '2026-10')).notices, ['這個分頁沒有酷澎玩樂欄'], 'notice：2026-10 起就提醒（玩樂 10-25 開始有營收）');
+eq(plain(G.publicLayout_(f1.l, '2027-01')).notices, ['這個分頁沒有酷澎玩樂欄'], 'notice：2027-01 也提醒');
+ok(!('notices' in G.publicLayout_(f1.l, '2026-09')), 'notice：2026-09 以前不帶 notices 欄位');
+ok(!('notices' in G.publicLayout_(f3.l, '2026-12')), 'notice：有玩樂欄就沒有');
 ok(!('notices' in G.publicLayout_(f2.l, '2026-12')), 'notice：② 格式也沒有');
 eq(plain(G.publicLayout_(f1.l, '2026-12')).problems, [], 'notice 不進 problems（不擋同步）');
 ok(!('notices' in G.publicLayout_(f1.l)), 'notice：沒給月份不提醒');
