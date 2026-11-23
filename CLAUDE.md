@@ -379,6 +379,12 @@ ESM 有個致命陷阱必須牢記：
   - 上月營收＝前一個月整月 `momoAggregatePeriods().revenue`；最近有賣往回找到 `MOMO_FIRST_PERIOD`（2026-01）。
   - ⓘ 說明蝦皮版、MOMO 版共用 `_zeroTip(kind)`（`shopee`／`mobic`／`f1102`），改句子改這一支；Excel 共用 `_zeroWriteXlsx`，檔名 `零動銷_{通路}_{YYYY-MM}`、工作表 `YYYY-MM 零動銷`。
   - Console 只讀：`__momoZeroSnap('YYYY-MM')`（五家：清單筆數、分母－分子、零動銷標籤、三組、對不到原廠編號）。2026-10 驗收：甲配 312、乙配 17、MO+麻吉 460、MO+森之旅 235、MO+玩樂 141，三個數字都相等。
+- **MO+ 結算提醒（#523，2026-11-23）**：MO+ 三家總表的狀態晶片與 🕐 提醒**看對帳明細來源月有沒有傳，不看日期**（原本的「期別末 +12 天」`momoPeriodSettleDue` 留著、已沒人呼叫）。只改晶片與提醒文字，**不改任何數字**。
+  - 為什麼：MO+ 對帳明細照「結算」歸月，M 月上半大多在 M 月檔（實測 80～100%），M 月下半大多在 M+1 月檔（77～100%）；M+1 月檔要 M+2 月初才拿得到。原本過了期別末 +12 天就顯示「✓ 已對帳」，但下半月其實只有零星幾件（例：好麻吉 2026/10 下半 130 件）。
+  - 判斷是純函式 `momoMoPlusSettleCover(期別, 來源月清單, {firstPeriod})`（profit.js `MOPLUS-SETTLE-COVER-PURE-BEGIN/END`，不讀 Store、不看時間），文字是 `momoMoPlusSettleText`；來源月清單＝`Object.keys(momoListMoPlusOriginsDocs(shop))`（已訂閱的 `momo_moplus_origins`，**不多讀雲端**），包裝在 `momoMoPlusSettleCoverFor`。
+    每個半月：complete／h1Mostly（上半月，下個月檔還沒傳，灰字「大致完整」，晶片仍 ✓）／waitNext（下半月，下個月檔還沒傳）／waitSelf（當月檔還沒傳、之後也沒傳，通常是 E001 估算）／missingSelf、gap（缺檔但之後的月份已傳＝漏傳，請補傳）。2026-01 以前與該店第一個來源月以前不提醒；整月取最差。
+  - 畫面：`settledN===total` 但 waitNext／waitSelf／gap／missingSelf ⇒ 晶片「◐ 未補齊」（提示寫缺哪個月的對帳明細）；「◐ 部分對帳」「⚠ 未對帳」分支、🟡 KPI 黃字、資料不完整、雙寫不一致都沒動。MO+ 零動銷彈窗在同樣條件下多一行「先不要據此下架」。甲配、乙配完全不適用。
+  - 🔴 **不可以為了這個提醒去改** `momoSettledPeriods`、`momoMoPlusSettledStat`、`_e001Est`、`momoAggregatePeriods`、`momoPeriodTotals`。改提醒前後用 `__momoE001RegressSnap()`（數字，`scripts/e001-origin.regress.cjs` 比對）與 `__momoSettleChipSnap()`（晶片＋提醒 innerHTML，可傳 `['甲配','乙配']`）各拍一次，只有「還沒補齊」與 E001 期別可以不同。node 測試 `scripts/moplus-settle-cover.test.cjs`（`MOPLUS_BACKUP_JSON` 指到 v3 備份時用實際來源月清單）。
 - `coupang_products` collection — 酷澎商品主檔（Wing「價格／庫存／銷售狀態」price_inventory 匯出檔，2026-11-18 C2），**不放 app/main、不經 Store**。每通路 4 片：doc id `{maji|luying}_{0..3}`（`COUPANG_SHOP_DOCID`），露營館也是 4 片。
   - **分片**：`BigInt(Product ID) % 4`（profit.js 純函式 `cupProductsShardOf`，同一商品頁的選項一定同一片；Product ID 空白或不是純數字歸第 0 片、log 計數 `badPid`）。
   - **形狀**：`{ schema:1, shop, shard:0..3, shards:4, items:[{ sku:選項ID, pid:Product ID, sid:供應商商品ID, code:供應商商品代碼, price, base, status, stock, firstSeen, lastSeen }], latestExport:'YYYY-MM-DD HH:mm:ss', updatedAt:serverTimestamp }`。

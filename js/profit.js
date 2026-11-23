@@ -20159,6 +20159,26 @@ window.__momoE001RegressSnap=function(){
   });
   return out;
 };
+// 唯讀（#523）：MO+ 三家 × 每個期別（上半／下半／整月）的狀態晶片與總表上方提醒 innerHTML。不寫任何東西、不以 __cloud 開頭。
+//   用法：進淨利表 MOMO、MO+ 逐列成本載好後 copy(JSON.stringify(__momoSettleChipSnap()))，改前改後各存一份比對。
+//   會逐期重畫總表（只動畫面），跑完還原原本選的期別。banners＝提醒列（mm-banner-warn／mm-kpi-note／mm-settle-info），rest＝總覽其餘部分（KPI 卡等）。
+//   參數 shops 可選（例 ['甲配','乙配']，用來確認甲乙畫面沒變），預設 MO+ 三家。
+window.__momoSettleChipSnap=function(shopsArg){
+  const shops=(Array.isArray(shopsArg)&&shopsArg.length)?shopsArg:['MO+麻吉','MO+森之旅','MO+玩樂'], out={at:new Date().toISOString(), skipped:[], rows:{}};
+  const pick=ov=>{ const keep=[], rest=[]; Array.from(ov?ov.children:[]).forEach(n=>{ const c=' '+(n.className||'')+' '; (/ (mm-banner-warn|mm-kpi-note|mm-settle-info) /.test(c)?keep:rest).push(n.outerHTML); }); return { keep, rest:rest.join('') }; };
+  shops.forEach(shop=>{
+    if(!document.getElementById('momo-tbl-'+shop) && (_momoSub[shop]||'profit')==='profit') momoRenderShop(shop);
+    if(!document.getElementById('momo-tbl-'+shop)){ out.skipped.push(shop); return; }
+    const was=_momoPeriodSel[shop];
+    momoAllPeriods(shop).forEach(pk=>{
+      _momoPeriodSel[shop]=pk; momoRenderProfitBody(shop,false);
+      const st=document.getElementById('momo-status-'+shop), p=pick(document.getElementById('momo-ov-'+shop));
+      out.rows[shop+'|'+pk]={ chip:st?st.innerHTML:null, banners:p.keep, rest:p.rest };
+    });
+    _momoPeriodSel[shop]=was; momoRenderProfitBody(shop,false);
+  });
+  return out;
+};
 // 月對帳 sys（系統計算側）：從 parsed（feeBreakdown/feeTotals）+ 已提領合計 組出。純函式、Node 可驗。
 function momoBuildMoPlusReconSys(parsed, withdrawnTotal){
   const fb=(parsed&&parsed.feeBreakdown)||{A:{},B:{},C:{},D:{}}, ft=(parsed&&parsed.feeTotals)||{};
@@ -20953,19 +20973,103 @@ function momoPeriodSettleDue(periodKey, nowTs){
   const dueTs = new Date(y,mo-1,endDay,23,59,59).getTime() + 12*86400000;   // 期別末 +12 天
   return { dueTs, due: (nowTs||Date.now())>=dueTs };
 }
+// ─── harness 抽取標記：MOPLUS-SETTLE-COVER-PURE-BEGIN
+// #523 MO+ 期別有沒有補齊：看對帳明細「來源月檔」有沒有傳，不看日期。純函式（不讀 Store、不看時間），node 測試 scripts/moplus-settle-cover.test.cjs。
+//   MO+ 對帳明細照「結算」歸月：M 月上半大多在 M 月檔（2026-01～10 實測 80～100%），M 月下半大多在 M+1 月檔（77～100%）。
+//   M 月檔要 M+1 月初才拿得到，M+1 月檔要 M+2 月初才拿得到。
+//   periodKey＝'YYYY-MM-H1|H2|FULL'；srcList＝這家已上傳的來源月（YYMM 4 碼，momoListMoPlusOriginsDocs 的 key）；opts.firstPeriod（預設 '2026-01'，之前不提醒）。
+//   每個半月的 state：
+//     complete     需要的檔都有；或在 firstPeriod、這家第一個來源月之前（不提醒）
+//     h1Mostly     上半月：M 月檔有、M+1 月檔還沒傳（大致完整）
+//     waitNext     下半月：M 月檔有、M+1 月檔還沒傳
+//     waitSelf     M 月檔還沒傳、之後的月份也都還沒傳（通常是整期 E001 估算）
+//     missingSelf  M 月檔沒傳、但之後的月份已經傳了（漏傳）
+//     gap          M 月檔有、M+1 月檔沒傳、但更後面的月份已經傳了（漏傳）
+//   key＝這個半月主要靠哪份檔（上半月＝M 月檔、下半月＝M+1 月檔）；missing＝還沒有的檔。檔＝{ src:'YYMM', month:'YYYY-MM', availMonth:'YYYY-MM'（幾月初拿得到）, later:之後的月份已傳 }。
+//   worst＝最嚴重的半月狀態（gap＝missingSelf ＞ waitSelf ＞ waitNext ＞ h1Mostly ＞ complete）。
+const MOPLUS_SETTLE_RANK={ complete:0, h1Mostly:1, waitNext:2, waitSelf:3, missingSelf:4, gap:4 };
+function momoMoPlusSettleCover(periodKey, srcList, opts){
+  const m=/^(\d{4})-(\d{2})-(H1|H2|FULL)$/.exec(periodKey||''); if(!m) return null;
+  const firstPeriod=(opts&&opts.firstPeriod)||'2026-01';
+  const ymAdd=(ym,n)=>{ let y=+ym.slice(0,4), mo=+ym.slice(5,7)+n; while(mo>12){ mo-=12; y++; } return y+'-'+String(mo).padStart(2,'0'); };
+  const srcs=(srcList||[]).map(String).filter(s=>/^\d{4}$/.test(s)).sort();
+  const have=new Set(srcs), lastSrc=srcs.length?srcs[srcs.length-1]:null;
+  const firstYm=srcs.length?('20'+srcs[0].slice(0,2)+'-'+srcs[0].slice(2,4)):null;
+  const file=ym=>{ const src=ym.slice(2,4)+ym.slice(5,7); return { src, month:ym, availMonth:ymAdd(ym,1), later:!!(lastSrc && lastSrc>src) }; };
+  const ym=m[1]+'-'+m[2], self=file(ym), next=file(ymAdd(ym,1));
+  const halves=(m[3]==='FULL'?['H1','H2']:[m[3]]).map(h=>{
+    const selfMiss=!have.has(self.src), nextMiss=!have.has(next.src);
+    let state;
+    if(ym<firstPeriod || (firstYm && ym<firstYm)) state='complete';
+    else if(selfMiss) state=self.later?'missingSelf':'waitSelf';
+    else if(nextMiss) state=next.later?'gap':(h==='H1'?'h1Mostly':'waitNext');
+    else state='complete';
+    const missing= state==='complete' ? [] : [self,next].filter(f=>!have.has(f.src));
+    return { pk:ym+'-'+h, half:h, state, key:(h==='H1'?self:next), missing };
+  });
+  const worst=halves.reduce((a,b)=>MOPLUS_SETTLE_RANK[b.state]>MOPLUS_SETTLE_RANK[a]?b.state:a, 'complete');
+  return { period:periodKey, month:ym, view:m[3], halves, worst };
+}
+// 提醒文字（#523，純函式）：cover＝上面的結果；o.e001Est＝整期走 E001 估算；o.qty＝{ 半月 pk: 已結算件數 }。
+//   回傳 { incomplete（晶片要不要從 ✓ 改成 ◐ 未補齊）, chipTip, warn:[橘色橫幅的行，HTML], info（灰字一行 HTML，或 ''）, zeroWarn（零動銷清單要不要提醒）}。
+//   月份一律程式帶入；不出現「提早下載對帳明細」之類的字眼。
+function momoMoPlusSettleText(cover, o){
+  const out={ incomplete:false, chipTip:'', warn:[], info:'', zeroWarn:false };
+  if(!cover) return out;
+  const qty=(o&&o.qty)||{}, e001Est=!!(o&&o.e001Est);
+  const lab=ym=>ym.slice(0,4)+'/'+ym.slice(5,7), mn=ym=>String(+ym.slice(5,7));
+  const HN={ H1:'上半月', H2:'下半月' };
+  const isWait=s=>s==='waitNext'||s==='waitSelf', isBad=s=>s==='gap'||s==='missingSelf';
+  out.incomplete=isWait(cover.worst)||isBad(cover.worst);
+  out.zeroWarn=out.incomplete;
+  const uniq=a=>a.filter((f,i)=>a.findIndex(g=>g.src===f.src)===i).sort((x,y)=>x.src<y.src?-1:1);
+  const bad=cover.halves.filter(h=>isBad(h.state)), wait=cover.halves.filter(h=>isWait(h.state));
+  const avail=f=>mn(f.availMonth)+' 月初上傳 '+mn(f.month)+' 月對帳明細';
+  if(out.incomplete){
+    const miss=uniq([].concat(...cover.halves.filter(h=>isWait(h.state)||isBad(h.state)).map(h=>h.missing)));
+    out.chipTip='還沒補齊：'+miss.map(f=>'缺 '+lab(f.month)+' 對帳明細'+(f.later?'（之後的月份已上傳，請到「月對帳」補傳）':'（'+mn(f.availMonth)+' 月初上傳後補齊）')).join('；')+'。目前只含已結算的部分，銷量、營收偏低。';
+  }
+  if(bad.length){
+    const hasH1=cover.halves.some(h=>h.half==='H1');
+    uniq([].concat(...bad.map(h=>h.missing.filter(f=>f.later)))).forEach(f=>{
+      const selfNote=(f.month===cover.month && hasH1)?'上半月幾乎沒有資料，':'';
+      out.warn.push('⚠ <b>缺 '+lab(f.month)+' 對帳明細</b>（之後的月份已上傳），'+selfNote+'這期銷量、營收不會自動補齊，請到「月對帳」補傳。');
+    });
+  } else if(e001Est && wait.length){
+    const t=wait.length>1 ? wait.map(h=>HN[h.half]+'要等 '+avail(h.key)).join('、') : '要等 '+avail(wait[0].key);
+    out.warn.push('🕐 <b>本期還沒有對帳明細</b>，目前是訂單明細估算；'+t+'才會補齊。');
+  } else if(wait.length){
+    const subj=cover.view!=='FULL' ? lab(cover.month)+' '+HN[cover.view] : (wait.length>1 ? lab(cover.month)+' 整月' : lab(cover.month)+' 整月（'+HN[wait[0].half]+'）');
+    const q=wait.filter(h=>Number(qty[h.pk])>0);
+    const cnt=!q.length ? '' : (cover.view!=='FULL' ? '（目前 '+Number(qty[q[0].pk]).toLocaleString()+' 件）'
+      : '（'+q.map(h=>HN[h.half]+'目前 '+Number(qty[h.pk]).toLocaleString()+' 件').join('、')+'）');
+    out.warn.push('🕐 <b>'+subj+'還沒補齊</b>'+cnt+'：要等 '+uniq(wait.map(h=>h.key)).map(avail).join('、')+'。銷量、營收、動銷率、零動銷清單、漲跌先不要當依據；毛利率、淨利率、成本可以參考。');
+  } else {
+    const h1=cover.halves.find(h=>h.state==='h1Mostly');
+    if(h1){ const nx=h1.missing[0]; out.info='ℹ 上半月大致完整，少數訂單要等 '+mn(nx.month)+' 月對帳明細上傳後補上。'; }
+  }
+  return out;
+}
+// ─── harness 抽取標記：MOPLUS-SETTLE-COVER-PURE-END
+// 非純包裝：這家的來源月清單（已訂閱的 momo_moplus_origins，不多讀雲端）→ momoMoPlusSettleCover。
+function momoMoPlusSettleCoverFor(shop, period){
+  if(!momoIsMoPlus(shop)||!period) return null;
+  let srcs=[]; try{ srcs=Object.keys(momoListMoPlusOriginsDocs(shop)); }catch(e){}
+  return momoMoPlusSettleCover(period, srcs, { firstPeriod:MOMO_FIRST_PERIOD });
+}
 // 部分結算期別偵測（2026-10 第三段，只標示、不改任何數字、不混 E001 估算）：
 //   某期別「已有結算資料（對帳明細 origins／products 有該期別）」但「結算尚未完整」＝部分結算。
 //   ⚠ 為什麼會發生：對帳明細 M 月檔只含「到月底前已結清」的訂單，M 月下半月的大部分要等 M+1 月檔。M+1 檔上傳前，該半月只會有零星已結算列
 //     （例：好麻吉 2026-09 下半月只有 8 個 SKU／18 件），而 momoSettledPeriods 判「任一 SKU 出現＝已結算」→ E001 估算（需全未結算才覆蓋）被擋 → 畫面只顯示那零星數字。
-//   判斷：settled.has(期別) 且 期別末 +12 天尚未到（momoPeriodSettleDue.due===false）。已過期仍零星的歷史期別不標（那是對帳明細本身就少，不是結算中）。
-//   回傳 [{pk,label,qty}]，qty＝該期別已結算件數（products 該期別 cell 的對帳數量合計）。
-function momoMoPlusPartialSettle(shop, period){
-  const out=[]; if(!momoIsMoPlus(shop)||!period) return out;
+//   判斷（#523 起）：settled.has(期別) 且 momoMoPlusSettleCover 判這個半月還沒補齊（不是 complete／h1Mostly）。不再看日期（momoPeriodSettleDue 留著不用）。
+//   cover＝momoMoPlusSettleCover 的結果（呼叫端算好傳進來）。回傳 [{pk,label,qty}]，qty＝該期別已結算件數（products 該期別 cell 的對帳數量合計）。
+function momoMoPlusPartialSettle(shop, period, cover){
+  const out=[]; if(!momoIsMoPlus(shop)||!period||!cover) return out;
   let settled; try{ settled=momoMoPlusE001Ctx(shop).settled; }catch(e){ return out; }
   const prods=momoLoadProducts(shop)||[];
-  momoExpandPeriod(period).forEach(pk=>{
-    if(!settled.has(pk)) return;
-    const d=momoPeriodSettleDue(pk); if(!d||d.due) return;
+  cover.halves.forEach(h=>{
+    const pk=h.pk;
+    if(!settled.has(pk) || h.state==='complete' || h.state==='h1Mostly') return;
     let qty=0; prods.forEach(p=>{ const c=p&&p.periods&&p.periods[pk]; if(c) qty+=Number(momoReadCell(c,p.sku).qty)||0; });
     out.push({pk, label:momoPeriodLabel(pk), qty});
   });
@@ -22296,6 +22400,9 @@ function momoRenderProfitBody(shop, tableOnly){
     const fi = (isJiaYi&&mo)?momoMonthFeeInfo(shop, mo):null;
     // 對帳狀態（甲乙）：已對帳→期別旁極簡小綠標；未對帳→灰標 + 短橫幅（費用估算來源 + 虛高警示不弱化）
     let statusBanner='', statusChip='';
+    // #523 MO+ 有沒有補齊：看下個月（或當月）對帳明細有沒有傳，不看日期。只影響晶片與提醒文字，不碰任何數字。甲乙配＝null。
+    const _moCover=(momoIsMoPlus(shop) && period) ? momoMoPlusSettleCoverFor(shop, period) : null;
+    const _moSettleTxt=_moCover ? momoMoPlusSettleText(_moCover, { e001Est:_e001Est, qty:Object.fromEntries(momoMoPlusPartialSettle(shop, period, _moCover).map(x=>[x.pk, x.qty])) }) : null;
     if(isJiaYi && period){
       if(fi&&fi.reconciled){
         statusChip=`<span class="mm-status ok" title="營收=對帳金額(未稅,已扣退貨)、費用=對帳單各項含稅整額（不抵進項稅、同 KPI）按營收攤">✓ 已對帳</span>`;
@@ -22330,7 +22437,9 @@ function momoRenderProfitBody(shop, tableOnly){
       if(settledN===total && total>0){
         // 沿用甲乙配晶片值/樣式/容器；tooltip 用 MO+ 自己的口徑（不沿用甲乙的「÷1.05 按營收攤」，套 MO+ 會誤導）。
         const _okTip=('資料來源＝對帳明細（逐訂單逐 SKU）。營收＝A 貨款＋B 運費代收（含稅）；淨利＝營收×100/105 − 成本 − D 手續費逐列 − C 代扣運費逐列（B 同訂單營收攤）。').replace(/"/g,'&quot;');
-        statusChip=`<span class="mm-status ok" title="${_okTip}">✓ 已對帳</span>`;
+        // #523：每個半月都有結算資料，但下個月（或當月）對帳明細還沒傳 → 橘標「◐ 未補齊」（上半月只差下個月＝h1Mostly 仍是 ✓）
+        if(_moSettleTxt && _moSettleTxt.incomplete) statusChip=`<span class="mm-status no" title="${_moSettleTxt.chipTip.replace(/"/g,'&quot;')}">◐ 未補齊</span>`;
+        else statusChip=`<span class="mm-status ok" title="${_okTip}">✓ 已對帳</span>`;
       } else if(settledN>0){
         // 部分結算：整期別展開後只有部分半月上傳了對帳明細 → 橘標並列出未結算期別（避免「✓ 已對帳」誤導成整月都對過）。沿用 mm-status no 的橘色 warn 樣式。
         const _pTip=('部分期別已結算（'+settledN+'/'+total+'）；'+unsettled.map(_plabel).join('、')+' 尚未上傳對帳明細，該期別數字仍為估算，整月為「已結算＋估算」混合。').replace(/"/g,'&quot;');
@@ -22375,20 +22484,18 @@ function momoRenderProfitBody(shop, tableOnly){
     const kpiNotes = estNote + filterNote;
     // 乙配「口徑已變更·不可對照」橫幅已於 2026-08-18 移除：七個月已同口徑、無 5→6 斷點，該說明過期（留著反讓新同事困惑能不能對比）。
     // E001 未結算：改用甲配狀態晶片「⚠ 未對帳」（見 statusChip MO+ 分支），不另做橫幅。
-    // MO+ 狀態橫幅：結算中(+12天未到) / 資料不完整(缺 origins 來源) / 雙寫不一致 / 缺成本彙總
-    let moPlusBanner='';
+    // MO+ 狀態橫幅：還沒補齊（#523 看對帳明細有沒有傳） / 資料不完整(缺 origins 來源) / 雙寫不一致 / 缺成本彙總
+    let moPlusBanner='', moPlusSettleInfo='';
     if(momoIsMoPlus(shop) && period){
       const parts=[];
-      const sd=momoPeriodSettleDue(period, Date.now());
-      if(sd && !sd.due){ const dd=new Date(sd.dueTs);
-        const _ps=momoMoPlusPartialSettle(shop, period);   // 部分結算半月（有已結算資料但期別末+12天未到）→ 標「僅含已結算 N 件」；不改數字、不混 E001 估算
-        const _psTxt=_ps.length?('：'+_ps.map(x=>`${x.label}僅含已結算 <b>${x.qty.toLocaleString()}</b> 件`).join('；')):'';
-        parts.push(`🕐 <b>本期結算中</b>${_psTxt}（期別末 +12 天、${dd.getMonth()+1}/${dd.getDate()} 後才完整；momo 猶豫期滿+撥入信託才計入）→ 數字會隨後續對帳明細補齊，本期偏低是正常${_ps.length?'；未混入 E001 估算':''}`); }
+      // #523：結算提醒改看對帳明細有沒有傳（momoMoPlusSettleCover / momoMoPlusSettleText），不再看「期別末 +12 天」
+      if(_moSettleTxt) parts.push(..._moSettleTxt.warn);
       const inc=momoMoPlusCompleteness(shop);
       if(inc.length){ const srcs=[...new Set(inc.flatMap(x=>x.missingSrc))].sort(); parts.push(`⚠ <b>資料不完整</b>：${inc.length} 個 SKU×期別 缺來源 ${_momoEsc(srcs.join('、'))} 的逐列成本 → 該期別毛利不可信，補上傳對應對帳明細`); }
       const mm=momoMoPlusConsistency(shop);
       if(mm.length){ parts.push(`⚠ <b>雙寫不一致</b>：${mm.length} 個 SKU×期別 商品數量與逐列成本(origins)對不上 → 請回報`); }
       if(parts.length) moPlusBanner=`<div class="mm-banner mm-banner-warn" style="line-height:1.9">${parts.join('<br>')}</div>`;
+      if(_moSettleTxt && _moSettleTxt.info) moPlusSettleInfo=`<div class="mm-settle-info">${_moSettleTxt.info}</div>`;   // #523 上半月大致完整：灰字一行
     }
     // ④ 缺成本 chip（取代原「🟠 本期 N 個商品缺成本」純計數）：去重原廠編號、按影響營收排序、可查清單/匯出 CSV 拿去補 cost_by_origin。
     let moPlusMissCostChip='';
@@ -22432,7 +22539,7 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     let reconAlertBanner=''; try{ reconAlertBanner=momoReconAlertBannerHtml(shop, period); }catch(e){}   // 罰金／非例行費用（只讀已存對帳 doc，只加顯示）
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=reconAlertBanner+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+kpiNotes+overview+statusBanner;   // kpiNotes（估算/篩選）緊貼 KPI 卡上方＝標示跟著數字走
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=reconAlertBanner+moPlusBanner+moPlusSettleInfo+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+kpiNotes+overview+statusBanner;   // kpiNotes（估算/篩選）緊貼 KPI 卡上方＝標示跟著數字走
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -34430,6 +34537,8 @@ function _mzRender(){
   const warns=[];
   if(kind==='mobic'&&!ctx.has)warns.push('還沒有莫筆克庫存資料，庫存全部列在③。');
   if(!r.prevYm)warns.push('選定月份是 MOMO 最早的月份，「上月營收」一律顯示 —。');
+  // #523 MO+：這期對帳明細還沒補齊（含整期 E001 估算）→ 銷量偏低，清單裡可能有其實有賣的商品
+  if(momoIsMoPlus(shop)){ try{ if(momoMoPlusSettleText(momoMoPlusSettleCoverFor(shop, ym+'-FULL'),{}).zeroWarn) warns.push('這期銷量還沒補齊，清單裡的商品可能其實有賣，先不要據此下架。'); }catch(err){} }
   const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
   const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
   const pct=Math.round((ctx.ratio==null?1:ctx.ratio)*100);
