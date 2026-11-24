@@ -18450,9 +18450,31 @@ function momoScheduleSnapshotRerender(shop, tableOnly){
     for(const s in batch){
       // flush 時重驗守衛：200ms 內使用者可能已切走賣場/子分頁 → 該表不在就跳過（比照原各 handler 的終端守衛）
       if((_momoSub[s]||'profit')!=='profit') continue;
-      if(document.getElementById('momo-tbl-'+s)){ const _ks=_momoSnapKeepSave(s); momoRenderProfitBody(s, batch[s].tableOnly); _momoSnapKeepRestore(s,_ks); }   // 快照重繪：保捲動位置／輸入焦點
+      if(document.getElementById('momo-tbl-'+s)){ const _ks=_momoSnapKeepSave(s); const _sh=_momoShellRefreshIfStale(s); momoRenderProfitBody(s, _sh?false:batch[s].tableOnly); _momoSnapKeepRestore(s,_ks); }   // 快照重繪：保捲動位置／輸入焦點；殼過期（#528）先重畫殼再完整重繪
     }
   }, MOMO_SNAP_RERENDER_DEBOUNCE_MS);
+}
+// #528：第一次進 MOMO 某賣場時，殼（月份下拉、總／上架／下架數，momoProfitTableHTML）可能在雲端資料到之前就畫好了
+//   （本機沒有這家的主檔 ⇒「尚無期別資料」、總 0、期別空白 ⇒ 表格全 0）；之後的快照事件只重畫表格，殼一直停在空的。
+//   只在「目前就在這家的總表」而且殼確實過期時重畫殼：月份選項數跟現在的資料不同，或殼上的「總」是 0 但主檔已經到了。
+//   月份沿用 momoProfitTableHTML 原本的規則：已選的月份還在選項裡就不換；選項沒變、數量對得上時完全不動（跟改版前一樣）。
+function _momoShellRefreshIfStale(shop){
+  if(curMomoShop!==shop) return false;
+  const act=document.querySelector('.shop-content.active');
+  if(!act || act.id!=='momo-content-'+shop) return false;
+  const c=document.getElementById('momo-sub-content-'+shop);
+  const sel=c && c.querySelector('select.mm-sel');
+  if(!sel) return false;
+  const shown=[...sel.options].map(o=>o.value).filter(Boolean).length;
+  const monthsChanged = shown!==momoVisibleMonths(shop).length;
+  const totEl=c.querySelector('.mm-stat .mm-stat-item b');
+  const productsArrived = !!totEl && totEl.textContent.trim()==='0' && momoLoadProducts(shop).length>0;
+  if(!monthsChanged && !productsArrived) return false;
+  const ae=document.activeElement;   // 殼裡的搜尋框若正在輸入：重畫後還原焦點與游標（值本來就從 _momoSearch 畫回來）
+  const f=(ae && ae.id && c.contains(ae) && ae.tagName==='INPUT') ? { id:ae.id, ss:ae.selectionStart, se:ae.selectionEnd } : null;
+  c.innerHTML=momoProfitTableHTML(shop);
+  if(f){ const el=document.getElementById(f.id); if(el){ try{ el.focus(); if(f.ss!=null) el.setSelectionRange(f.ss, f.se); }catch(e){} } }
+  return true;
 }
 // momo_products 訂閱推來更新時的精準重繪（不走 App.render/renderFromCloud、不整頁重繪，避免踢人）。
 //   ⚠ 收緊守衛：① 變的是「當前 curMomoShop」② active 容器是 momo-content-*（使用者真的在 MOMO 頁，比照 v199 inShopee）
