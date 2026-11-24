@@ -14363,7 +14363,7 @@ function _kpiBooksSnapGet(month){
   if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
   return _kpiBooksSnapLocal.get(month)||null;
 }
-// 成本表跟 MOMO 一起懶載入（__loadMomoSubs）；帶入前先要求載入，最多等 15 秒
+// 成本表懶載入（#531 起只訂成本表 __loadMomoCostSub，見 momoCostEnsureCloud）；帶入前先要求載入，最多等 15 秒
 // ── KPI 共用：商品成本用共用成本表「當下」算的帶入（博客來、FriDay、MOMO 的 MO+、酷澎），成本表要先接上雲端 ──
 const KPI_COST_WAIT_MSG='成本表還沒接上雲端（載入中或網路慢），為了不用這台的舊成本算，這次不帶入，請稍後再按一次';
 let _kpiCostWaitP=null, _kpiCostWaitFailAt=0;
@@ -15136,7 +15136,7 @@ function _kpiCoupangSnapGet(month){
   if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
   return _kpiCoupangSnapLocal.get(month)||null;
 }
-// 酷澎報表＋成本表跟 MOMO 一起懶載入（__loadCoupangSubs / __loadMomoSubs）；帶入前先要求載入，最多等 15 秒。
+// 酷澎報表＋成本表懶載入（__loadCoupangSubs / __loadMomoCostSub，#531 起不再連帶 MOMO 組）；帶入前先要求載入，最多等 15 秒。
 //   就緒＝成本表有值 ＋ 酷澎 collection 至少收到一次快照（用 _profitMem 有無 ec_coupang| key 判斷；正式站必有既有報表 doc）。
 //   2026-11-18 補修：成本是帶入當下用本機成本表算的（coupangKpiFromProfit 讀 momoLoadCostByOrigin，報表本身不存成本），
 //   所以成本表一律要先接上雲端（momoCostEnsureCloud：本機 dirty 以外＝雲端），本機有舊表也一樣；沒接上不准帶入。
@@ -27316,7 +27316,7 @@ function momoCostDirtyGet(){ try{ const l=localStorage.getItem(momoCostDirtyKey(
 function momoCostDirtyAdd(origin){ try{ const s=new Set(momoCostDirtyGet()); s.add(origin); localStorage.setItem(momoCostDirtyKey(),JSON.stringify([...s])); }catch{} }
 function momoCostDirtyClear(keys){ try{ if(!keys){ localStorage.removeItem(momoCostDirtyKey()); return; } const rm=new Set(keys); const left=momoCostDirtyGet().filter(k=>!rm.has(k)); localStorage.setItem(momoCostDirtyKey(),JSON.stringify(left)); }catch{} }
 // ── 共用成本表「已接上雲端」（2026-11-18 成本表訂閱補修）──
-//   成本表訂閱跟 MOMO 組一起懶載（__loadMomoSubs，載過不重訂）。只要本機有一份舊表、又沒進過 MOMO 頁，就會一直用舊表算
+//   成本表訂閱懶載（#531 起獨立成 __loadMomoCostSub，載過不重訂；MOMO 頁的 __loadMomoSubs 也走它）。只要本機有一份舊表、又沒接過雲端，就會一直用舊表算
 //   （實例：Gini 本機 7,128 筆 vs 雲端 7,212 筆、488 筆不同，好麻吉 2026-10 淨利 84,542 vs 84,608）。
 //   momoCostEnsureCloud()：確保訂閱已開 → 讀一次雲端現值 → 等到「本機（dirty 以外）＝雲端」才回 true（訂閱的套用規則不動：有 dirty 的不覆蓋）。
 //   比對的雲端現值會在 momoCostByOriginReady（別人改了、訂閱套用了）或每 3 秒重讀，避免拿過期的那份比。逾時回 false。
@@ -27337,7 +27337,7 @@ function momoCostMatchesCloud(){
 }
 let _costEnsureP=null;
 function momoCostEnsureCloud(timeoutMs){
-  try{ if(typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
+  try{ if(typeof window.__loadMomoCostSub==='function') window.__loadMomoCostSub(); }catch(e){}   // #531：只訂成本表，不連帶整個 MOMO 組
   if(_costCloudMap && _costCloudAt && momoCostMatchesCloud()) return Promise.resolve(true);
   if(_costEnsureP) return _costEnsureP;
   _costEnsureP=(async()=>{
@@ -28463,7 +28463,7 @@ function setCoupangShop(shop,btn){
   if(shop===CUP_BUYOUT_TAB){ cupShowBuyoutPlaceholder(btn); return; }   // 買斷＝說明頁：在開訂閱、清其他通路畫面之前就攔下
   // ⚡ 懶載酷澎組（coupang_reports/msf/note）。含總表：酷澎逐店表需要各店 coupang doc；切回同平台不重訂。
   try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
-  // 酷澎頁的成本一律接雲端成本表：不看本機有沒有（本機有舊表也要訂閱，不然一直用舊表算）。momoCostEnsureCloud 會開 MOMO 組訂閱（載過不重訂），
+  // 酷澎頁的成本一律接雲端成本表：不看本機有沒有（本機有舊表也要訂閱，不然一直用舊表算）。momoCostEnsureCloud 只開成本表訂閱（#531，載過不重訂；不開 MOMO 組），
   //   訂閱照既有規則套用（有 dirty 的不覆蓋）、發 momoCostByOriginReady → _cupRedrawIfVisible 重畫；接上後再補一次重畫。
   try{ momoCostEnsureCloud().then(ok=>{ if(ok) _cupRedrawIfVisible(); else console.warn('[酷澎] 成本表 20 秒內沒有接上雲端，暫用本機成本表'); cupOvCostSettled(ok); }); }catch(e){}
   // 換通路先清已選未處理的檔案（_cupFiles 是兩家共用的全域）：杜絕「好麻吉選的檔切到露營館直接產表」。同一家重畫不清（上傳分頁靠 _cupFiles 顯示已選檔名）。

@@ -1074,7 +1074,7 @@ try {
           if (changed.length) { console.log('[momo_e001] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoE001Ready', { detail: { changed } })); }
         }, err => { console.error('[momo_e001 subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_e001 subscribe failed', e); }
-      __subMomoCost();
+      window.__loadMomoCostSub();   // #531：成本表訂閱獨立出來（酷澎／PChome 頁只訂這一份）；已訂過就不重訂
       __markSubsMaybeAllLoaded();
     };
 
@@ -1161,7 +1161,7 @@ try {
       __markSubsMaybeAllLoaded();
     };
 
-    // ══ MOMO 組成員（成本）：momo_cost_by_origin。定義在酷澎組後、由 __loadMomoSubs 呼叫（原廠編號→成本，MO+ 毛利依賴）══
+    // ══ MOMO 組成員（成本）：momo_cost_by_origin。定義在酷澎組後、經 window.__loadMomoCostSub 呼叫（__loadMomoSubs 與 profit.js momoCostEnsureCloud 都走它；原廠編號→成本，MO+ 毛利依賴）══
     const __subMomoCost = () => {
       // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
       try {
@@ -1215,6 +1215,15 @@ try {
           if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
         }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
+    };
+    // #531：只訂成本表（momo_cost_by_origin/account 一份）。酷澎、PChome、KPI 帶入只需要成本表，經 profit.js momoCostEnsureCloud 呼叫這支，
+    //   不再連帶訂整個 MOMO 組（約 102 份）。__loadMomoSubs 也改呼叫這支，所以不管誰先呼叫，成本表都只訂一次。
+    //   不寫進 __loadedSubGroups（那是四組的旗標，__heavyProfitSubsLoaded 看它）；只讀成本表不代表 MOMO 組已載入。
+    let __momoCostSubbed = false;
+    window.__loadMomoCostSub = () => {
+      if (__momoCostSubbed) return;
+      __momoCostSubbed = true;
+      __subMomoCost();
     };
 
     // ══ 蝦皮組成員②：aff_rpt（好麻吉聯盟行銷分頁）。由 __loadShopeeSubs 呼叫。══
@@ -2087,6 +2096,7 @@ try {
   //     __loadArchiveSubs ── profits archive docs（舊月）。觸發：setShop 到蝦皮賣場（看舊月）、工作日誌。
   //     __loadMomoSubs    ── momo_products/origins/reconcile/s1103/stock/e001/cost。觸發：setMomoShop（含總表→逐 SKU 加總全賣場）、工作日誌點 MOMO chip 明細。
   //     __loadCoupangSubs ── coupang_reports/msf/note。觸發：setCoupangShop。
+  //     __loadMomoCostSub ── 只有 momo_cost_by_origin（#531）。觸發：profit.js momoCostEnsureCloud（酷澎、PChome、KPI 帶入）、__loadMomoSubs。
   //   各組 __loadedSubGroups(Set) 守衛：只訂一次、切頁/切回不重訂；四組到齊才把相容旗標 __heavyProfitSubsLoaded 設 true。
   //   保留 __loadHeavyProfitSubs shim（一次載滿四組）僅為相容/除錯，正常流程不再呼叫。
   //   ⚠ 洞察/首頁/蝦皮總表/KPI月結不需任何重量級組：洞察讀 app/profit（本檔 boot 立即訂的當月 doc）ec_notes、
