@@ -676,6 +676,11 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-sync-unchanged>summary::-webkit-details-marker{display:none;}
 .mm-sync-unchanged>summary::before{content:'▸ ';}
 .mm-sync-unchanged[open]>summary::before{content:'▾ ';}
+/* 商品同步（甲乙配）差異預覽：已下架、不建檔（#510，只顯示、不勾選）。顏色走 :root 變數 */
+.mm-sync-inact{font-size:12px;color:var(--text-muted);padding:6px 0;border-top:1px solid var(--border);}
+.mm-sync-inact>summary{cursor:pointer;user-select:none;}
+.mm-sync-inact-note{margin-top:4px;}
+.mm-sync-inact-list{max-height:170px;overflow:auto;font-size:11px;line-height:1.7;margin-top:4px;padding-left:8px;}
 /* 商品同步：產生差異預覽按鈕旁的提示（缺什麼 / 會比什麼） */
 .mm-gen-hint{font-size:12px;color:#9ca3af;margin-left:10px;}
 .mm-atleast{color:#6b7280;font-size:12px;}

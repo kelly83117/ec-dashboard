@@ -18138,7 +18138,35 @@ async function momoSyncProductsMerge(shop, opts){
   _momoDocCapGuard(shop, _outItems);   // 🛡 單檔上限：合併結果超過 95% ⇒ throw、不推（lastpushed 不更新、dirty 留著）
   await window.__cloudMomo.setShop(shop, _outItems);   // 整包寫回 merged（已保留雲端獨有、只覆蓋 dirty、bootstrap 不刪）
   _momoProductsLastPushedSet(shop, plan.merged);   // 🔴 推成功才更新 baseline → 下輪 dirty 歸零
+  _momoProductsWriteBackLocal(shop, local, plan.merged);   // #510：本機跟上合併結果（跟 lastpushed 同一份）
   return { shadow:false, plan };
+}
+// #510：推送成功後把合併結果寫回本機（localStorage／_profitMem／_mem），跟 lastpushed 同一份（照 PChome pchomeSyncOptlog 推完寫回本機的做法）。
+//   為什麼：推送當下的雲端回音被 dirty 守衛跳過，之後雲端沒再變就不會再收到快照 → 本機一直是推之前那份，lastpushed 卻已是合併結果。
+//     同一個分頁之後再存檔、再同步：雲端已刪掉的品號變成「新增」被推回去；別台先推上去的品號變成「刪除」被刪掉（20 筆以內刪除防線不攔）。
+//   🔴 推送期間本機又存過（現值≠推送時讀到的那份）⇒ 不寫回（會蓋掉剛存的修改），console 留一行；下一次同步照常比 lastpushed。
+//   寫法照 momoSaveProducts：先寫 JSON、寫不進去才改 LZ1（beforeLz 先壓同通路 lastpushed，維持「products 是 LZ1 ⇒ lastpushed 是 LZ1 或不存在」）；
+//   內容跟本機一樣就不寫。不標 pending／dirty、不設 _momoJustSaved。回 'skip-changed'|'same'|'json'|'lz'|'fail'。
+function _momoProductsWriteBackLocal(shop, pushedFrom, merged){
+  const k=momoProductsKey(shop);
+  let now; try{ now=momoPendingProducts(k); }catch(e){ now=undefined; }
+  if(now!==pushedFrom && _momoStableStr(now)!==_momoStableStr(pushedFrom)){
+    try{ console.warn('[products merge] '+shop+' 推送期間本機又存過 → 不把合併結果寫回本機（保住剛存的修改；下次同步照常比對）'); }catch{}
+    return 'skip-changed';
+  }
+  let json; try{ json=JSON.stringify(merged); }catch(e){ try{ console.error('[products merge] '+shop+' 合併結果寫回本機失敗：',e); }catch{} return 'fail'; }
+  let w='same';
+  if(!_momoLsSameContent(k,json)){
+    if(!_LS_COMPRESS_MOMO_WRITE){ try{ localStorage.setItem(k,json); w='json'; }catch(e){ w='fail'; } }
+    else w=_momoLsWrite(k,json,{beforeLz:()=>{ try{ _momoLsCompressOne(momoProductsLastPushedKey(shop),{ignoreRecent:true}); }catch(e){} }});
+    if(w==='fail'){ try{ console.error('[products merge] '+shop+' 合併結果寫不進本機（空間不足）；這個分頁照常用記憶體裡的合併結果，重新整理後由雲端快照補上'); }catch{} }
+  }
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=merged; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=merged; }catch{}
+  if(_momoStableStr(merged)!==_momoStableStr(pushedFrom)){   // 合併帶進了別台的修改 → 畫面跟上（同 firebase.js 訂閱收到更新時發的事件）
+    try{ window.dispatchEvent(new CustomEvent('momoDataReady',{detail:{changedShops:[shop]}})); }catch{}
+  }
+  return w;
 }
 window.__momoMergeShadow=function(shop){ return momoSyncProductsMerge(shop,{shadow:true}); };   // Console 診斷：只讀+log，不寫、不改 baseline
 // 🔴 單賣場【真寫】enforce 入口（stage-1 逐賣場啟用用；不動全域閘門 __MOMO_MERGE_ENFORCE，其他人維持 shadow）。
@@ -27680,7 +27708,7 @@ function momoBuildSyncPlan(parsed){
   ['甲配','乙配'].forEach(shop=>{
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
-    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], reactivate=[], f1102Only=[], blankStatus=[], newItems=[], noCost=[];
+    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], reactivate=[], f1102Only=[], blankStatus=[], newItems=[], newInactive=[], noCost=[];
     const seen=new Set();
     // 「本期」＝這個賣場有資料的最新月份；本期有銷售＝同動銷率分子口徑（grossQty>0 或營收≠0）。只對「將標下架」的少數候選算。
     const salesMonth=(momoVisibleMonths(shop).slice(-1)[0])||'';
@@ -27695,6 +27723,9 @@ function momoBuildSyncPlan(parsed){
         const newCost=(hasCost && inc.origin && costMap[inc.origin]!==undefined)?costMap[inc.origin]:null;
         const p=bySku.get(sku);
         if(!p){   // 未建檔
+          // #510：銷售狀況不是「進行」（含空白）→ 不進「一鍵新增」，預覽另列「已下架、不建檔」只顯示。
+          //   不然主檔清掉的已下架品號會被一鍵新增加回來，而且是上架狀態（沒有 discontinued）、上架日變今天。
+          if(inc.status!=='進行'){ newInactive.push({sku, origin:inc.origin, name:inc.name, status:inc.status}); return; }
           newItems.push({sku, origin:inc.origin, name:inc.name, purchasePrice:inc.purchasePrice, salePrice:inc.salePrice, cost:(newCost!=null?newCost:0), status:inc.status});
           if(hasCost && newCost===null && inc.origin) noCost.push({sku, origin:inc.origin, name:inc.name});
           return;
@@ -27736,7 +27767,7 @@ function momoBuildSyncPlan(parsed){
     const activeCount=master.filter(p=>p.discontinued!==true).length;
     // 防呆：將標下架超過「現有上架商品」的 60% → 這份商品資訊可能不完整或傳錯店，要勾「我確定」才能寫入
     const overHalf=activeCount>0 && (discontinued.length/activeCount)>0.6;
-    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,reactivate,f1102Only,blankStatus,newItems,noCost,notSeen,activeCount,overHalf,salesMonth};
+    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,reactivate,f1102Only,blankStatus,newItems,newInactive,noCost,notSeen,activeCount,overHalf,salesMonth};
   });
   return plan;
 }
@@ -27901,9 +27932,10 @@ function momoRenderSyncPreview(shop){
       +cat('商品名稱有變動',sp.nameChanged,'momoSyncApplyName','套用名稱','#374151')
       +statusBlock(s,sp)
       +cat('未建檔品項',sp.newItems,'momoSyncApplyNew','一鍵新增','#5b5fcf')
+      +momoSyncInactiveNewHtml(sp.newInactive)
       +(sp.noCost.length?`<div style="font-size:12px;color:#f97316;padding:6px 0;border-top:1px solid #f3f4f6">查無成本 ${sp.noCost.length}（莫筆克表沒這些原廠編號，成本不動）：${sp.noCost.slice(0,10).map(x=>x.origin).join('、')}</div>`:'')
       +(sp.notSeen.length?`<details style="font-size:12px;color:#9ca3af;padding:6px 0;border-top:1px solid #f3f4f6"><summary style="cursor:pointer">本次未比對到 ${sp.notSeen.length}（主檔有、這份 MOMO資訊沒有；<b>不會自動改上下架</b>，因為這份檔不一定是完整在架清單）</summary><div style="max-height:170px;overflow:auto;font-size:11px;line-height:1.7;margin-top:4px;padding-left:8px">${sp.notSeen.slice(0,500).map(k=>'· '+_momoEsc(k)).join('<br>')}${sp.notSeen.length>500?'<br>…共 '+sp.notSeen.length+' 筆':''}</div></details>`:'');
-    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!(sp.reactivate&&sp.reactivate.length)&&!(sp.f1102Only&&sp.f1102Only.length)&&!(sp.blankStatus&&sp.blankStatus.length)&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
+    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!(sp.reactivate&&sp.reactivate.length)&&!(sp.f1102Only&&sp.f1102Only.length)&&!(sp.blankStatus&&sp.blankStatus.length)&&!sp.newItems.length&&!(sp.newInactive&&sp.newInactive.length)&&!sp.noCost.length&&!sp.notSeen.length;
     return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:13px;font-weight:700;margin-bottom:2px">${s}</div>
       ${clean?'<div style="font-size:12px;color:#10b981">無差異</div>':inner}</div>`;
@@ -27924,12 +27956,21 @@ function momoRenderSyncPreview(shop){
     const extras=[];
     if(osp.noCost.length)  extras.push(osp.noCost.length+' 筆查無成本');
     if(osp.notSeen.length) extras.push(osp.notSeen.length+' 筆未比對到');
+    if(osp.newInactive&&osp.newInactive.length) extras.push(osp.newInactive.length+' 筆已下架不建檔');
     const msg = parts.length ? (other+'另有 '+parts.join('、')+' — 切換到'+other+'分頁處理')
               : extras.length ? (other+'另有 '+extras.join('、')+'（切換到'+other+'分頁查看）')
               : (other+'無差異');
     otherHint=`<button onclick="momoJumpShop('${other}')" style="width:100%;text-align:left;margin-top:6px;padding:8px 12px;border-radius:8px;border:1px dashed #c7c9e6;background:#f5f6ff;color:#5b5fcf;font-size:12px;font-weight:600;cursor:pointer">↪ ${msg}</button>`;
   }
   el.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">差異預覽（套用後才寫入；成本/價格走歷程）</div>${shopBlock(shop)}${otherHint}${uw}`;
+}
+// #510：商品資訊檔有、主檔沒有、銷售狀況不是「進行」的品號 → 只列出來（沒有勾選、沒有按鈕），不會被「一鍵新增」建檔。樣式在 css/profit.css .mm-sync-inact*。
+function momoSyncInactiveNewHtml(items){
+  const a=items||[]; if(!a.length) return '';
+  const rows=a.slice(0,500).map(x=>'· '+_momoEsc(x.name||'')+' <span class="mm-muted">'+_momoEsc(x.sku)+'（銷售狀況：'+_momoEsc(x.status||'空白')+'）</span>').join('<br>');
+  return `<details class="mm-sync-inact"><summary>已下架、不建檔（${a.length.toLocaleString()} 筆）</summary>`
+    +`<div class="mm-sync-inact-note">商品資訊檔裡有、主檔沒有，但銷售狀況不是「進行」：不會被「一鍵新增」建檔。</div>`
+    +`<div class="mm-sync-inact-list">${rows}${a.length>500?'<br>…共 '+a.length.toLocaleString()+' 筆':''}</div></details>`;
 }
 // 跳到另一個 MOMO 賣場分頁：click 真 tab 才會同步高亮 pill（setMomoShop 靠 btn 設 active）
 function momoJumpShop(shop){
