@@ -864,6 +864,9 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-anlz-name.muted{color:#9ca3af;font-weight:600;}
 .mm-anlz-metrics{font-size:12px;color:#4b5563;margin-bottom:8px;}
 .mm-anlz-metrics b{color:#1a1a2e;}
+/* #532：MO+ 銷量還沒補齊（總表提醒列的間距、分析卡的一行灰字）。只用 :root 變數，不動 --bg。 */
+.mm-ov-settle{margin-bottom:10px;}
+.mm-anlz-settle{font-size:11px;color:var(--text-muted);margin:-4px 0 8px;line-height:1.5;cursor:help;}
 .mm-anlz-pt{margin-left:6px;font-size:11px;font-weight:700;}
 .mm-anlz-pt.muted{color:#9ca3af;font-weight:400;}
 .mm-anlz-sugg{flex:1;display:flex;flex-direction:column;gap:6px;}   /* flex:1 → 建議區撐開、按鈕永遠貼卡片底部（等高關鍵，勿改成內容撐高） */
@@ -1951,6 +1954,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-au-tbl .km-au-c{width:34px;text-align:center;padding-left:4px;padding-right:4px;}
 .km-au-tbl .km-au-c input{width:15px;height:15px;cursor:pointer;accent-color:var(--primary);}
 .km-au-snap{font-size:12px;color:#047857;background:var(--success-soft);border-radius:6px;padding:6px 10px;margin-bottom:10px;}
+/* #532：KPI 帶入預覽的口徑說明（灰字一行） */
+.km-au-basis{font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6;}
 .km-au-check.ok{color:#047857;}.km-au-check.bad{color:#dc2626;}
 .km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
 .km-f-common td{background:#fcfcfd;}
