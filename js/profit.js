@@ -35148,6 +35148,30 @@ window.__healthProductEvents={
 //       2026-11-02 實測：只看商品數 > 0 時，甲配 2026-09 先算出 264/563，幾秒後雲端到齊才變 273/563 → 所以要等。
 //     ・PChome：訂單、商品清單、對帳三份雲端快照都到了（firebase.js 開站就訂，快照緩存在 window.__pchome*CloudLatest）。
 //   🔴 呼叫端必須在 __ensureProfit resolve 之後才叫（本函式在 profit.js 裡，叫得到就代表已載入、守衛已掛）。
+// ─── harness 抽取標記：HEALTH-MOMO-READY-PURE-BEGIN
+// #544（純函式）：健檢的 MOMO 商品層，某一家主檔算不算「到齊」。s＝{ inMem, dirty, local, n }：
+//   inMem＝Store._profitMem 已有（雲端灌進來的，或這個分頁剛存過）；dirty＝本機有沒同步的修改（ec_momo_products_dirty）；
+//   local＝本機那份的讀取狀態（'ok'｜'absent'｜'bad'，同 _momoLsRead；記憶體 _mem 有陣列也算 'ok'）；n＝本機那份的商品數。
+//   不 dirty ⇒ 只認 inMem（本機那份可能是舊的，照 #416 起的規則等雲端）；dirty ⇒ 雲端訂閱不會蓋（保護未同步修改），本機讀得到而且有商品就算到齊。
+function healthMomoShopReady(s){
+  if(!s) return false;
+  if(s.inMem) return true;
+  return !!s.dirty && s.local==='ok' && Number(s.n)>0;
+}
+// ─── harness 抽取標記：HEALTH-MOMO-READY-PURE-END
+// 非純包裝：讀這一家目前的狀態（讀取順序同 momoLoadProducts：_mem → localStorage，LZ1 一樣走 _momoLsRead；不直接 JSON.parse）。只讀。
+function _healthMomoShopState(shop){
+  const k=momoProductsKey(shop), s={ inMem:false, dirty:false, local:'absent', n:0 };
+  try{ s.inMem=!!(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!=null); }catch{}
+  if(s.inMem) return s;
+  try{ s.dirty=_momoIsDirty(k); }catch{}
+  if(!s.dirty) return s;
+  try{
+    if(typeof Store!=='undefined'&&Store._mem&&Array.isArray(Store._mem[k])){ s.local='ok'; s.n=Store._mem[k].length; }
+    else { const r=_momoLsRead(k,'array'); s.local=r.state; s.n=(r.state==='ok'&&Array.isArray(r.value))?r.value.length:0; }
+  }catch{ s.local='bad'; }
+  return s;
+}
 window.__healthLoadProducts=async function(platform,opts){
   const o=opts||{},LIMIT=o.limitMs||300000,QUIET=o.quietMs==null?3000:o.quietMs;
   const t0=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -35172,7 +35196,9 @@ window.__healthLoadProducts=async function(platform,opts){
     }
     if(platform==='momo'){
       if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();
-      const ok=await until(()=>mem('ec_momo_products|甲配')&&mem('ec_momo_products|乙配')&&memPrefix('ec_momo_reconcile|'));
+      // #544：甲配／乙配各自「到齊」＝雲端已灌進 _profitMem，或本機有沒同步的修改（dirty，雲端訂閱刻意不蓋）而且本機那份讀得到、有商品。
+      //   不 dirty 時照舊只看 _profitMem（本機 localStorage 可能是舊的，不能拿來當到齊）。判斷是純函式 healthMomoShopReady。
+      const ok=await until(()=>healthMomoShopReady(_healthMomoShopState('甲配'))&&healthMomoShopReady(_healthMomoShopState('乙配'))&&memPrefix('ec_momo_reconcile|'));
       return {ready:ok,timeout:!ok};
     }
     if(platform==='pchome'){
