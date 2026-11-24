@@ -169,7 +169,7 @@ const HEALTH_RULES = _hlDeepFreeze({
     shopee:  { label: '蝦皮',         order: 1, pureRate: [0, 0.24], sellThrough: [0.30, 0.65], stFlag: 'uncal', members: '好麻吉、玩樂、森之旅、維克' },
     momoJia: { label: 'MOMO 甲配',    order: 2, pureRate: [0, 0.39], sellThrough: [0.42, 0.50], members: 'MOMO 甲配' },
     momoYi:  { label: 'MOMO 乙配（寄倉）', order: 3, pureRate: [0, 0.26], sellThrough: [0.65, 0.73], members: 'MOMO 乙配（寄倉）' },
-    moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
+    moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 好麻吉、MO+ 森之旅、MO+ 玩樂' },
     coupang: { label: '酷澎 商城',    order: 5, pureRate: [0, 0.34], sellThrough: [0.24, 0.33], stFlag: 'few', stN: 5, members: '酷澎 商城-好麻吉、酷澎 商城-玩樂' },   // v9：動銷率起始值＝好麻吉 2026-06～10（用 2026-11-17 主檔回算）的 P10／P75 附近，樣本 5 個月；只給舊面向函式，不影響總分
     small:   { label: '小通路',       order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
     other:   { label: '業外',         order: 7, pureRate: [0, 0.10], sellThrough: null, members: '業外' },
@@ -195,7 +195,7 @@ const HEALTH_CHANNELS = _hlDeepFreeze([
   { id: 'shopee-wick',    label: '維克',            type: 'shopee',  group: 'shopee',  shop: '維克',   prod: { platform: 'shopee', shop: '維克' } },
   { id: 'momo-jia',       label: 'MOMO 甲配',       type: 'momoJia', group: 'momo',    shop: 'MOMO-甲配', prod: { platform: 'momo', shop: '甲配' } },
   { id: 'momo-yi',        label: 'MOMO 乙配（寄倉）', type: 'momoYi', group: 'momo',    shop: 'MOMO-寄倉', prod: { platform: 'momo', shop: '乙配' } },
-  { id: 'moplus-maji',    label: 'MO+ 麻吉',        type: 'moplus',  group: 'momo',    shop: 'mo+0號店(好麻吉)', prod: { platform: 'momo', shop: 'MO+麻吉' } },
+  { id: 'moplus-maji',    label: 'MO+ 好麻吉',      type: 'moplus',  group: 'momo',    shop: 'mo+0號店(好麻吉)', prod: { platform: 'momo', shop: 'MO+麻吉' } },
   { id: 'moplus-sen',     label: 'MO+ 森之旅',      type: 'moplus',  group: 'momo',    shop: 'mo+1號店(森之旅)', prod: { platform: 'momo', shop: 'MO+森之旅' } },
   { id: 'moplus-wanle',   label: 'MO+ 玩樂',        type: 'moplus',  group: 'momo',    shop: 'mo+2號店(玩樂)',   prod: { platform: 'momo', shop: 'MO+玩樂' } },
   { id: 'coupang-maji',   label: '酷澎 商城-好麻吉', type: 'coupang', group: 'coupang', shop: '商城-好麻吉', cup: '麻吉' },     // cup＝淨利表酷澎的賣場名（動銷率走 profit.js __healthCoupangSt，v9）
@@ -586,6 +586,8 @@ function _hlProdNormalize(raw) {
         costKnown: !!r.costKnown, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0, cost: _hlFinite(+r.cost) && r.cost != null ? +r.cost : null }; });
     // 動銷率的分子分母：profit.js 直接取 momoPeriodTotals（同 MOMO 總覽），這裡不另算
     base.st = raw.st && _hlFinite(+raw.st.sold) && _hlFinite(+raw.st.total) ? { sold: +raw.st.sold, total: +raw.st.total } : null;
+    // #532：MO+ 這個月銷量還沒補齊（profit.js 用 momoMoPlusSettleCoverFor 判斷）。🔴 刻意不可列舉：只給畫面標「暫定」與「近 6 月」排除用，不影響分數、不進 JSON。
+    if (raw.settle && raw.settle.incomplete) Object.defineProperty(base, 'settle', { value: { worst: raw.settle.worst || null, tip: String(raw.settle.tip || '') }, enumerable: false, configurable: true });
   } else if (raw.platform === 'pchome') {
     base.latestExport = raw.latestExport || ''; base.subTotals = raw.subTotals || {};
     rows = (raw.rows || []).map(r => { const pages = (r.pages && r.pages.length) ? r.pages.slice() : ['code:' + r.key];
@@ -730,6 +732,18 @@ function _hlProdOf(ch, month, snap) {
   return { state: 'ready', snap: s };
 }
 const HL_TIMEOUT_MSG = '商品資料載入逾時，請先進淨利表再回來，再按「↻ 重新計算」';
+// #532：MO+ 這個月銷量還沒補齊 ⇒ 回 { worst, tip }（tip＝profit.js momoMoPlusSettleText 的 chipTip），否則 null。純函式，只讀 snap 裡的商品層快照。
+//   只用來標「暫定」、寫提醒、讓「近 6 月」不算這個月；分數照算（純利率來自 KPI 月結，是結算月口徑，不受影響）。
+function _hlSettleOf(ch, month, snap) {
+  if (!ch || !ch.prod || ch.prod.platform !== 'momo') return null;
+  const p = _hlProdOf(ch, month, snap);
+  return p.state === 'ready' && p.snap && p.snap.settle ? p.snap.settle : null;
+}
+// 提醒的完整一句（卡片「暫定」的滑鼠提示、細項提醒列共用）
+function _hlSettleText(s, month) {
+  const why = String((s && s.tip) || '').replace(/^還沒補齊：/, '');
+  return `${_hlYmLabel(month)} 銷量還沒補齊${why ? '：' + why : '。'}動銷率、需注意商品、銷量漲跌先不要當依據；純利率（KPI 月結）不受影響。動銷率分數先標「暫定」。`;
+}
 // 載入中的說明字：60 秒以上「仍在載入（已等 N 秒）」；5 分鐘以上再加「請先進淨利表點一下這個平台」——都還在等，資料一到自動重算（不放棄）
 const HL_WAIT_SLOW = 60, HL_WAIT_HINT = 300;
 function _hlLoadingMsg(sec) {
@@ -1195,6 +1209,8 @@ function _hlStdSellMonth(ch, month, snap, r) {
   if (r.status === 'closed') return Object.assign(base, { closed: true, reason: r.reason });
   const s = _hlStdSub(r, 'structure', 'sellThrough');
   if (!s || s.status === 'na') return Object.assign(base, { na: true, reason: (s && s.reason) || '不適用' });
+  // #532：MO+ 這個月銷量還沒補齊 ⇒ 不算進平均（分數照算，只是平均不用這個月）
+  if (_hlSettleOf(ch, month, snap)) return Object.assign(base, { settle: true, reason: `${_hlYmLabel(month)} 銷量還沒補齊（動銷率暫定，不算進平均）` });
   const n = s.stCount;
   if (s.status === 'ok' && n && _hlFinite(n.num) && _hlFinite(n.den) && n.den > 0) {
     const p = _hlStdSub(r, 'profit', 'pureRate');
@@ -1229,9 +1245,10 @@ function _hlStdHistAgg(perCh, months) {
       missing: missing.map(r => ({ label: r.label, reason: r.reason })) });
   });
   const rates = monthly.map(x => x.rate);
+  const settleN = months.filter((m, i) => perCh.some(p => p.rows[i] && p.rows[i].settle)).length;   // #532：有 MO+ 銷量還沒補齊、沒算進去的月份數
   return { months: months.slice(), monthly, excluded, n: monthly.length, num, den, rate: den > 0 ? num / den : null,
     min: rates.length ? Math.min(...rates) : null, max: rates.length ? Math.max(...rates) : null,
-    refOnly, wait, waitReason: waitRow ? waitRow.reason : '' };
+    refOnly, wait, waitReason: waitRow ? waitRow.reason : '', settleN };
 }
 // 全部列的歷史。回 { pureRate:{ 'c|通路 id':歷史, 't|類型':歷史 }, sellThrough:{…} }（每個通路每個月只算一次 computeChannelHealth）。
 function healthStdHistoryAll(months, snap, channels) {
@@ -1270,13 +1287,14 @@ function _hlStdHistText(h, itemKey) {
   // 格子只放一行：平均（粗體）＋範圍（灰色小字）＋不是 6 個月才寫「n 個月」；原本格子裡的完整文字（line1／line2）放在提示最上面。
   const nNote = h.n === HL_STD_HIST_N ? '' : `${h.n} 個月`;
   const withFull = (l1, l2) => `${l1}\n${l2}\n\n${tip}`;
-  if (!h.n) return { line1: '—', line2: '0 個月', avg: '—', range: '', nNote: '0 個月', tip, ref: false };
+  const settleNote = h.settleN ? `不含未補齊 ${h.settleN} 個月` : '';   // #532：MO+ 銷量還沒補齊的月份沒算進去（灰字）
+  if (!h.n) return { line1: '—', line2: '0 個月', avg: '—', range: '', nNote: '0 個月', settleNote, tip, ref: false };
   if (h.refOnly) {
     const l1 = `平均 ${_hlFmtPct(h.rate)}`, l2 = `僅供參考・${small}・${h.n} 個月`;
-    return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: '', nNote: '', refNote: '僅供參考', tip: withFull(l1, l2), ref: true };
+    return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: '', nNote: '', refNote: '僅供參考', settleNote, tip: withFull(l1, l2), ref: true };
   }
   const l1 = `平均 ${_hlFmtPct(h.rate)}`, l2 = h.n === 1 ? '1 個月' : `${pct1(h.min)}～${pct1(h.max)}・${h.n} 個月`;
-  return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: h.n === 1 ? '' : `${pct1(h.min)}–${pct1(h.max)}`, nNote, tip: withFull(l1, l2), ref: false };
+  return { line1: l1, line2: l2, avg: _hlFmtPct(h.rate), range: h.n === 1 ? '' : `${pct1(h.min)}–${pct1(h.max)}`, nNote, settleNote, tip: withFull(l1, l2), ref: false };
 }
 // 動銷率「近 6 月」的 ⓘ 文案（依這一列的資料來源）。'c|通路 id' 或 't|類型'；這一列沒有商品資料 ⇒ ''。
 const HL_STD_BIAS_SHOPEE = '蝦皮的商品狀態是報表匯出當下的狀態，不是當月的。補傳的舊月份，在架數可能跟當時實際不同，月份越舊越不準，只當參考。';
@@ -1455,7 +1473,7 @@ function _hlGuideFullHtml(rules) {
   const pts = [
     '<b>純利率</b>＝純利 ÷ 營收；<b>毛利率</b>＝（營收 − 商品成本）÷ 營收。都取 KPI 月結（整月，跟財務對得上）。',
     `<b>動銷率</b>＝這個月有賣出的商品 ÷ 在架商品。蝦皮用洞察表「整月商品表現」，MOMO、PChome、酷澎商城跟各自的淨利表同一套算法${noSt.length ? `；${e(noSt.join('、'))}不算動銷率` : ''}。`,
-    `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}${Object.keys(HL_TYPE_PROVISIONAL).filter(t => R.score.items.some(it => it.lines && it.lines[t])).map(t => e(HL_TYPE_PROVISIONAL[t]) + '。').join('')}`,
+    `上架狀態是<b>匯出當下／現在</b>的，不是當月的，所以舊月份的動銷率只當參考。${st && st.provisional ? '動銷率分數線目前是<b>暫定</b>。' : ''}${Object.keys(HL_TYPE_PROVISIONAL).filter(t => R.score.items.some(it => it.lines && it.lines[t])).map(t => e(HL_TYPE_PROVISIONAL[t]) + '。').join('')}MO+ 的下半月要等下個月的對帳明細才補齊：還沒補齊的月份，動銷率照算但標<b>暫定</b>，評分標準視窗的「近 6 月」也不算這個月。`,
     `<b>不給分的情況</b>：標準未設定、KPI 還沒填完、資料不足、營收未滿 ${R.minRev / 10000} 萬。卡片右上角不放分數、改寫原因（滑鼠移上去看完整說明），不算 0 分。`,
     `<b>表現好／需注意商品</b>只列本月或上月營收 ${e(minRev)} 元以上的商品。`,
   ];
@@ -2192,12 +2210,13 @@ function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
       const light = d.scored ? _hlScoreLight(x.score) : _hlMetricLight(d, x.v, pv);
       const full = x.v == null ? '沒有資料' : d.unit === 'pct' ? _hlFmtPct(x.v) : _hlFmtMoney(x.v);
       const sc = d.scored ? (x.score != null ? `得分 ${x.score} 分｜` : `沒有分數（${_HL_STATUS_TEXT[x.status] || '沒有資料'}）｜`) : '';
-      const tip = `${d.label} ${_hlYmLabel(r.month)}：${full}｜${sc}比上月 ${_hlMetricDiffText(d, x.v, pv)}${!d.scored && light ? `（${LW[light]}）` : ''}`;
+      const prov = d.key === 'sellThrough' && _hlSettleOf(ch, r.month, snap) ? '｜暫定：銷量還沒補齊' : '';   // #532：只改滑鼠提示
+      const tip = `${d.label} ${_hlYmLabel(r.month)}：${full}｜${sc}比上月 ${_hlMetricDiffText(d, x.v, pv)}${!d.scored && light ? `（${LW[light]}）` : ''}${prov}`;
       return `<td class="hl-num hl-mc${light ? ' hl-mc-' + light : ''}" title="${escapeHtml(tip)}">${escapeHtml(_hlMetricFmt(d, x.v))}</td>`;
     }).join('');
     const open = openKey === d.key;
     const row = `<tr class="hl-mt-row${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-met="${d.key}">
-      <th scope="row">${escapeHtml(d.label)}<span class="hl-mt-k${d.scored ? ' hl-mt-scored' : ''}">${d.scored ? '計分' : '參考'}</span></th>${cells}<td class="hl-mt-trend">${escapeHtml(_hlTrendText(d, vals))}</td></tr>`;
+      <th scope="row">${escapeHtml(d.label)}<span class="hl-mt-k${d.scored ? ' hl-mt-scored' : ''}">${d.scored ? '計分' : '參考'}</span></th>${cells}<td class="hl-mt-trend">${escapeHtml(_hlTrendText(d, vals) + (d.key === 'sellThrough' && _hlSettleOf(ch, month, snap) ? '・暫定' : ''))}</td></tr>`;
     // 口徑變更提醒（例：成本更新）：那一列下面一行，點 ⓘ 看完整說明
     const notes = _hlNotices(month, d.key).map(n => `<tr class="hl-mt-note"><td colspan="${shown.length + 2}"><div class="hl-notice">${_hlNoticeHtml(n)}</div></td></tr>`).join('');
     const pageNote = d.key === 'sellThrough' ? _hlMomoPageNote(ch, month, trend[trend.length - 1], snap) : [];
@@ -2249,7 +2268,8 @@ function _hlTileChipHtml(r, col, snap) {
   if (it.status === 'ok') {
     const R = healthRulesForMonth(r.month, snap && snap.healthRuleVersions);
     const share = r.pureOnly ? '總分只看這一項' : `佔總分 ${Math.round(it.w * 100)}%`;   // 只看純利率時權重是 100%，不寫規則上的 50%
-    return `<span class="hl-tile-chip hl-l-${_hlLight(it.score, R)}" title="${escapeHtml(`${it.label} ${it.score} 分（${share}）`)}">${it.score}分</span>`;
+    const prov = key === 'sellThrough' && _hlTileSettleTip(r, snap) ? '・暫定：銷量還沒補齊' : '';   // #532：只改滑鼠提示，chip 的字與顏色不變
+    return `<span class="hl-tile-chip hl-l-${_hlLight(it.score, R)}" title="${escapeHtml(`${it.label} ${it.score} 分（${share}）${prov}`)}">${it.score}分</span>`;
   }
   if (_HL_TILE_CHIP_WAIT[it.status]) return `<span class="hl-tile-chip hl-l-none" title="${escapeHtml(`${it.label}：${_HL_TILE_CHIP_WAIT[it.status]}`)}">…</span>`;
   return '';
@@ -2262,13 +2282,21 @@ function _hlTileChipHtml(r, col, snap) {
 //   ① 左名稱；右邊有分數＝徽章（title＝總分算法，_hlTileBadgeHtml）＋正下方「比上月 ±N」灰字；沒分數＝灰字簡短原因（_hlTileNoScore，title＝完整說明）或「載入中…」。
 //   ② 營收／純利金額列；③ 三欄比率，有計分的指標小標旁加分數 chip（_hlTileChipHtml）。以前的第二列「分數：…」拿掉了。
 const _HL_TILE_WAIT = { prodLoading: '載入中…', prodIdle: '未載入', prodTimeout: '載入逾時' };
+// #532：這張卡的動銷率有計分、但 MO+ 銷量還沒補齊 ⇒ 提示全文；否則 ''。
+function _hlTileSettleTip(r, snap) {
+  const it = (r.items || []).find(x => x.key === 'sellThrough');
+  if (!it || it.status !== 'ok') return '';
+  const s = _hlSettleOf(HEALTH_CHANNELS.find(c => c.id === r.id), r.month, snap);
+  return s ? _hlSettleText(s, r.month) : '';
+}
 function _hlTileHtml(r, prev, rank, open, snap) {
   const R = healthRulesForMonth(r.month, snap && snap.healthRuleVersions);
   const ns = r.score == null ? _hlTileNoScore(r, R) : null;
   const tip = ns && ns.tip ? ` title="${escapeHtml(ns.tip)}"` : '';
   // 右邊：上＝徽章（或簡短原因／載入中），下＝「比上月 ±N」；沒有比上月也留一個空的位置，同排卡片第一列才一樣高
   // 類型層級暫定（HL_TYPE_PROVISIONAL，例：酷澎商城）：有分數時在「比上月」那一行後面加「・暫定」（同一個 span，第一列高度不變）
-  const provTip = r.score != null && HL_TYPE_PROVISIONAL[r.type], provHtml = provTip ? `<span title="${escapeHtml(provTip)}">暫定</span>` : '';
+  // #532：MO+ 銷量還沒補齊、動銷率有計分 ⇒ 同一個位置標「暫定」（滑鼠提示＝_hlSettleText）。分數、data-hl-fp 都不變。
+  const provTip = r.score != null && (HL_TYPE_PROVISIONAL[r.type] || _hlTileSettleTip(r, snap)), provHtml = provTip ? `<span title="${escapeHtml(provTip)}">暫定</span>` : '';
   const deltaRaw = r.score == null ? '' : _hlTileDeltaHtml(r, prev);
   const delta = deltaRaw ? (provHtml ? deltaRaw.slice(0, deltaRaw.lastIndexOf('</span>')) + '・' + provHtml + '</span>' : deltaRaw)
     : (provHtml ? `<span class="hl-tile-delta">${provHtml}</span>` : '<span class="hl-tile-delta" aria-hidden="true"></span>');
@@ -2549,11 +2577,17 @@ function _hlCardHtml(r, snap) {
         </div>
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
+      ${_hlSettleNoteHtml(ch, r.month, snap)}
       ${_hlTagListsHtml(ch, r.month, snap)}
       ${_hlShopeeStNote(ch, r)}
       ${ch ? _hlMonthTableHtml(ch, computeHealthTrend(ch, r.month, HL_MONTH_N + 1, snap), snap, _hlMetCols(), _hlState.metOpen) : ''}
       ${r.next.length ? `<div class="hl-next">之後加入：${escapeHtml(r.next.join('、'))}</div>` : ''}
     </div>`;
+}
+// #532：MO+ 這個月銷量還沒補齊 ⇒ 細項最上面一行提醒（商品清單、逐月表都在它下面）；其他情況回 ''。
+function _hlSettleNoteHtml(ch, month, snap) {
+  const s = _hlSettleOf(ch, month, snap);
+  return s ? `<div class="hl-st-note hl-settle-note">🕐 ${escapeHtml(_hlSettleText(s, month))}</div>` : '';
 }
 // 蝦皮這個月動銷率沒有數字時，細項裡寫一行原因（尚未上傳、讀取失敗、資料不足）
 function _hlShopeeStNote(ch, r) {
@@ -2985,7 +3019,7 @@ function _hlStdHistView(key) {
   const info = bias ? ` <span class="hl-std-hist-info" title="${escapeHtml(bias)}" aria-label="${escapeHtml(bias)}">ⓘ</span>` : '';
   const sub = x => (x ? ` <span class="hl-std-hist-sub">${escapeHtml(x)}</span>` : '');
   const body = t.avg != null
-    ? `<span class="hl-std-hist-avg">${escapeHtml(t.avg)}</span>${sub(t.refNote)}${sub(t.range)}${sub(t.nNote)}`
+    ? `<span class="hl-std-hist-avg">${escapeHtml(t.avg)}</span>${sub(t.refNote)}${sub(t.range)}${sub(t.nNote)}${sub(t.settleNote)}`
     : `<span class="hl-std-hist-avg">${escapeHtml(t.line1)}</span>${sub(t.line2)}`;
   return { t, html: `<div class="hl-std-hist-line">${body}${info}</div>` };
 }

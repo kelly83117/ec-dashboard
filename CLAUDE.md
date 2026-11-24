@@ -384,6 +384,13 @@ ESM 有個致命陷阱必須牢記：
   - 判斷是純函式 `momoMoPlusSettleCover(期別, 來源月清單, {firstPeriod})`（profit.js `MOPLUS-SETTLE-COVER-PURE-BEGIN/END`，不讀 Store、不看時間），文字是 `momoMoPlusSettleText`；來源月清單＝`Object.keys(momoListMoPlusOriginsDocs(shop))`（已訂閱的 `momo_moplus_origins`，**不多讀雲端**），包裝在 `momoMoPlusSettleCoverFor`。
     每個半月：complete／h1Mostly（上半月，下個月檔還沒傳，灰字「大致完整」，晶片仍 ✓）／waitNext（下半月，下個月檔還沒傳）／waitSelf（當月檔還沒傳、之後也沒傳，通常是 E001 估算）／missingSelf、gap（缺檔但之後的月份已傳＝漏傳，請補傳）。2026-01 以前與該店第一個來源月以前不提醒；整月取最差。
   - 畫面：`settledN===total` 但 waitNext／waitSelf／gap／missingSelf ⇒ 晶片「◐ 未補齊」（提示寫缺哪個月的對帳明細）；「◐ 部分對帳」「⚠ 未對帳」分支、🟡 KPI 黃字、資料不完整、雙寫不一致都沒動。MO+ 零動銷彈窗在同樣條件下多一行「先不要據此下架」。甲配、乙配完全不適用。
+  - **健檢／總表也有**（#532，2026-11-24）：判斷一樣只用 `momoMoPlusSettleCoverFor`／`momoMoPlusSettleText`，**不改任何數字或分數**。甲配、乙配不適用（銷量依 C1105 下單日、營收依整月對帳單，沒有「等下個月檔」）。
+    - 通路健檢：`__healthProductSnapshot` 的 MOMO 分支帶 `out.settle={incomplete,worst,tip}`（只有 MO+），health.js `_hlProdNormalize` 存成**不可列舉**的 `settle`、`_hlSettleOf` 讀它（純函式，不多讀）。
+      卡片「比上月」那一行加「・暫定」（同酷澎暫定的位置，title＝`_hlSettleText`）、動銷率 chip 的 title、細項最上面一行 🕐 提醒、逐月表動銷率格子 title 與趨勢字加「・暫定」、說明文字一句。分數照算，`data-hl-fp`、`__healthBacktest` 逐字不變。
+      評分標準視窗「近 6 月」的**動銷率**不算未補齊的月份（`_hlStdSellMonth` 回 `settle:true`），格子灰字「不含未補齊 N 個月」；純利率（KPI 月結＝結算月口徑）照算。只剩營收未滿的月份時照原規則顯示「僅供參考」。
+    - MOMO 總表（`momoRenderSummary`）：任一家 MO+ 本期**或上期**未補齊 ⇒ 上方橫幅（`momoOvSettleBannerHtml`）、總營收／總淨利／總銷量的 ▲▼ 變灰「—」（加權淨利率照常）、MO+ 分析卡一行灰字、圖表標籤加「（未補齊）」、趨勢圖月份加「*」。數字、圖表資料都不變。沒有商品主檔的 MO+ 店不算（`momoOvSettleShops`）。
+    - KPI「從對帳單帶入」：這個月 MO+ 未補齊時預覽多一行灰字（`km-au-basis`）說明 KPI 是對帳明細月份（結算）口徑、不受影響；帶入值不變。
+    - 「還缺哪份檔」文字共用純函式 `momoMoPlusSettleNeedText`（在 MOPLUS-SETTLE-COVER-PURE 區段）。Console 只讀：`__momoOvSnap('YYYY-MM')`（總表卡片、▲▼、提醒列、分析卡、圖表標籤與數字）。node 測試 `scripts/moplus-settle-health.test.cjs`。
   - 🔴 **不可以為了這個提醒去改** `momoSettledPeriods`、`momoMoPlusSettledStat`、`_e001Est`、`momoAggregatePeriods`、`momoPeriodTotals`。改提醒前後用 `__momoE001RegressSnap()`（數字，`scripts/e001-origin.regress.cjs` 比對）與 `__momoSettleChipSnap()`（晶片＋提醒 innerHTML，可傳 `['甲配','乙配']`）各拍一次，只有「還沒補齊」與 E001 期別可以不同。node 測試 `scripts/moplus-settle-cover.test.cjs`（`MOPLUS_BACKUP_JSON` 指到 v3 備份時用實際來源月清單）。
 - `coupang_products` collection — 酷澎商品主檔（Wing「價格／庫存／銷售狀態」price_inventory 匯出檔，2026-11-18 C2），**不放 app/main、不經 Store**。每通路 4 片：doc id `{maji|luying}_{0..3}`（`COUPANG_SHOP_DOCID`），露營館也是 4 片。
   - **分片**：`BigInt(Product ID) % 4`（profit.js 純函式 `cupProductsShardOf`，同一商品頁的選項一定同一片；Product ID 空白或不是純數字歸第 0 片、log 計數 `badPid`）。
