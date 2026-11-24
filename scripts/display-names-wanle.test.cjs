@@ -47,7 +47,7 @@ eq((read('js/pages/dashboard.js').match(/platformDisplayName\(/g) || []).length,
 const dash = read('js/pages/dashboard.js');
 ok(dash.includes('data-rh-goch="${escapeHtml(val)}"') && dash.includes('data-rh-ch="${escapeHtml(val)}"'), '歷年表 data-rh-* 仍用原名');
 ok(dash.includes('chLink(ch, platformDisplayName(ch))') && dash.includes('chChip(c, platformDisplayName(c))'), '歷年表只換 label 參數');
-eq((dash.match(/酷澎好麻吉 2026-10-25～11-30 含玩樂（試算表回填後會拆開）。/g) || []).length, 2, '歷年營收兩處註解換成拆分前那句');
+eq((dash.match(/酷澎玩樂 2026-10-25 起另列。/g) || []).length, 2, '歷年營收兩處註解換成拆分後那句');
 ok(!/露營館/.test(dash), 'dashboard.js 沒有露營館');
 // sheetsync 預覽不換字
 ok(!read('js/pages/sheetsync.js').includes('platformDisplayName'), 'sheetsync.js 不用顯示名（預覽對得上試算表欄名）');
