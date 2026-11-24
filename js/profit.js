@@ -37934,6 +37934,18 @@ function pchomeBoxFreightRate(month){ var kpi=pchomeKpiShipByMonth(), MIN=PCHOME
   var d={rate:PCHOME_BOX_FREIGHT, source:'default', srcMonth:null, display:PCHOME_BOX_FREIGHT, B:0, T:0}; if(unreasonable) d.unreasonable=unreasonable; return d; }
 // 費率來源文案（feeTip 用；default 要引導去 KPI 填）。
 function _pchomeFrSrcText(fr){ if(!fr) return ''; if(fr.source==='kpi-actual') return '取自 '+fr.srcMonth+' KPI 實際'; if(fr.source==='kpi-carry') return '沿用 '+fr.srcMonth+' KPI，本月尚未填寫'; return '預設，KPI 月結表尚未填「宅配通運費」（填了即改用實際）'; }
+/* ═══ PCH-PNMIS-PURE-BEGIN：對帳商品編號 vs 上架清單（#527）純函式；node 測試 scripts/pchome-pn-mismatch.test.cjs 用標記抽取 ═══
+   商品主檔的 商品編號 是陣列：一個料號掛兩個商品頁（D46-11～20、F394-03／04…）就有兩個。舊判斷把整個陣列串成「A,B」跟對帳的單一編號比，
+   雙頁料號一定被判不一致。改成：對帳的商品編號只要是主檔這個料號的任一個商品編號就合法；兩邊任一邊空白不判（同舊規則）。
+   主檔只有一個商品編號（或是字串）時，結果跟舊判斷逐字相同。 */
+function pchomePnMismatch(reconPN, listPN){
+  var r=String(reconPN==null?'':reconPN).trim(); if(!r) return false;
+  var arr=Array.isArray(listPN)?listPN:(listPN==null?[]:[listPN]), ok=[];
+  arr.forEach(function(v){ v=String(v==null?'':v).trim(); if(v) ok.push(v); });
+  if(!ok.length) return false;
+  return ok.indexOf(r)<0;
+}
+/* ═══ PCH-PNMIS-PURE-END ═══ */
 function pchomeProfitCalc(entry, shop){
   var segs=(entry&&entry.segments)||[];
   var rows=(segs[PCHOME_SEG[shop]]||{rows:[]}).rows||[];
@@ -38116,7 +38128,7 @@ function pchomeProfitCalc(entry, shop){
     var _itemShow=(ck&&o.營收>0), 商品淨利=_itemShow?(o.營收-costTotal-feeUntax):null, 商品淨利率=_itemShow?商品淨利/o.營收:null;   // 分攤運費包材前：營收−成本−平台費(未稅)；缺成本或營收≤0→null（顯「—」）
     var name=(p&&p.商品名)?p.商品名:o.商品名, spec=(p&&p.規格)?p.規格:o.規格;
     var reconPN=o.reconPN||'', listPN=(p&&p.商品編號)?String(p.商品編號).trim():'';   // 商品編號兩來源：對帳明細 vs 上架清單
-    var pnMismatch=!!(reconPN&&listPN&&reconPN!==listPN);                                // 不一致→標示、不靜默挑一個
+    var pnMismatch=pchomePnMismatch(reconPN, p&&p.商品編號);                             // 不一致→標示、不靜默挑一個（雙頁料號：任一個商品編號都算合法，#527）
     // 供貨價（未稅）：對帳明細單位成本(含稅)÷1.05 為權威；零銷無對帳明細 → fallback 用上架清單「成本」欄(含稅、同基準，實測與對帳明細單位成本相等 F204-10/F421-12 皆一致)÷1.05；兩者皆無 → null 顯「—」。純顯示欄、不進淨利/成本計算。
     var supplyUntax=(o.單位成本>0)?o.單位成本/1.05:((p&&Number(p.供貨價)>0)?Number(p.供貨價)/1.05:null);
     var price=(p&&p.售價!=null&&Number(p.售價)>0)?Number(p.售價):null;   // 售價：上架清單網路價（含稅、僅參考）；無清單→null 顯「—」
