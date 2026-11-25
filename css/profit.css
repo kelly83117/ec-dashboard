@@ -2344,7 +2344,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .mm-ptbl td.cup-pg-stk-code{position:sticky;left:0;z-index:2;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .mm-ptbl td.cup-pg-stk-name{position:sticky;left:120px;z-index:2;box-shadow:var(--cup-pg-shadow);}
 .mm-ptbl td.cup-pg-mem-code{padding-left:26px;}
-.cup-pg-arrow{display:inline-block;width:16px;color:var(--text-muted);}
+/* 外層列的展開箭頭（2026-11-25 起比照 PChome，放在品名前）共用下方 .pch-pg-arrow。 */
 .cup-pg-flag{margin-top:2px;font-size:10px;font-weight:600;color:var(--danger);}
 .mm-sub-line.cup-wing-sub{white-space:normal;overflow-wrap:anywhere;line-height:1.35;}   /* 淨利表品名下方 Wing 商品 ID：名稱欄窄也要看得到完整 ID（可換行、不截斷） */
 .cup-ana-wing{margin-top:2px;font-size:12px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;}   /* 酷澎商品彈窗：Wing 商品 ID（2026-11-25） */

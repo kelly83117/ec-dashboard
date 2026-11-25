@@ -30982,11 +30982,11 @@ function cupSidListedOf(shop){
   return L;
 }
 // 淨利表品名下方那一行小字：有 Wing 商品 ID ⇒「Wing 商品 ID {sid}｜頁 {dispId}」；沒有 ⇒ 跟改版前逐字相同。
-function cupIdSubHtml(shop, dispId, code){
-  const raw=String(dispId||''), did=_momoEsc(raw), sid=cupSidOf(shop, dispId, code);
-  if(sid==null) return did?`<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>`:'';
+function cupIdSubHtml(shop, dispId, code, tail){   // tail＝接在小字最後的純文字（合併商品頁外層列的「 · N 個規格」）；沒給＝跟改版前逐字相同
+  const raw=String(dispId||''), did=_momoEsc(raw), sid=cupSidOf(shop, dispId, code), t=tail?_momoEsc(String(tail)):'';
+  if(sid==null) return did?`<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}${t}</div>`:(t?`<div class="mm-sub-line">${t.replace(/^ · /,'')}</div>`:'');
   const st=cupSidText(sid), tip='Wing 商品 ID '+st+'（在 Wing 後台用這個搜尋）'+(raw?'\n商品頁 ID '+raw+'（前台的商品頁）':'');
-  return `<div class="mm-sub-line cup-wing-sub" title="${_momoEsc(tip)}">Wing 商品 ID ${_momoEsc(st)}${raw?'｜頁 '+did:''}</div>`;
+  return `<div class="mm-sub-line cup-wing-sub" title="${_momoEsc(tip)}">Wing 商品 ID ${_momoEsc(st)}${raw?'｜頁 '+did:''}${t}</div>`;
 }
 // 寫本機：LZ1 → setItem → 讀回比對；壓不了改寫 JSON；都不行回 false（記憶體不改）。
 function cupSaveProductsLocal(shop, doc, opts){   // opts.fromSync＝同步確認後寫回（不標 dirty、不進待同步）
@@ -32824,10 +32824,14 @@ function renderCoupangTableBody(shop){
   const tdsOf=(r,kind,g)=>cols.map(c=>{
       const v=r[c.k];
       if(kind==='group'){
-        if(c.k==='code') return `<td class="tl cup-pg-stk-code"><span class="cup-pg-arrow">${g.open?'▾':'▸'}</span>${g.members.length} 個規格</td>`;
-        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), did=_momoEsc(String(g.pageId));
+        // 外層列比照 PChome（_pchomePageCell 'name'）：展開箭頭在品名前、「N 個規格」接在識別碼小字最後。
+        //   原廠編號欄放代表編號（成員裡編號最小的，不跟排序變）＋「等 N 個」，滑鼠提示列出全部成員編號。
+        if(c.k==='code'){ const cs=g.members.map(m=>String(m.code==null?'':m.code)).filter(Boolean).sort((a,b)=>a<b?-1:(a>b?1:0));
+          const rep=cs[0]||'—', tip='這個商品頁的 '+g.members.length+' 個規格：'+cs.slice(0,30).join('、')+(cs.length>30?' …':'');
+          return `<td class="tl cup-pg-stk-code" title="${_momoEsc(tip)}">${_momoEsc(rep)}<div class="mm-sub-line">等 ${g.members.length} 個</div></td>`; }
+        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v));
           const flag=r.missN>0?`<div class="cup-pg-flag" title="淨利、淨利率只算有成本的規格（同上方大數字卡）">含 ${r.missN} 個缺成本</div>`:'';
-          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${cupIdSubHtml(shop, g.pageId, g.members[0]&&g.members[0].code)}${flag}</td>`; }
+          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="pch-pg-arrow">${g.open?'▾':'▸'}</span><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${cupIdSubHtml(shop, g.pageId, g.members[0]&&g.members[0].code, ' · '+g.members.length+' 個規格')}${flag}</td>`; }
         if(c.k==='note') return `<td class="tl" id="${_cupPageDomId(shop,g.pageId)}" onclick="event.stopPropagation()">${cupPageNoteCellHtml(shop,g.pageId,g.members)}</td>`;
         if(c.fmt==='netCell' && r.costStatus==='ok' && v!=null){
           const nTip=`商品頁合計（${g.members.length} 個規格${r.missN>0?'，其中 '+r.missN+' 個缺成本不計':''}）：淨利 ${momoMoney(v)} ＝ 營收 ${momoMoney(r.cRev||0)} − 營業稅 ${momoMoney(r.tax||0)}（營收×5/105）− 成本 ${momoMoney(r.cost||0)} − 平台費用 ${momoMoney(r.cFee||0)}`;
