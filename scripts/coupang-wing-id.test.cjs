@@ -14,7 +14,7 @@ const code=[
   between('const _cupSidIdxCache','// 寫本機：LZ1',false),
   between('/* ═══ CUP-PG-PURE-BEGIN','/* ═══ CUP-PG-PURE-END ═══ */'),
   between('/* ═══ CUP-ZERO-PURE-BEGIN','/* ═══ CUP-ZERO-PURE-END ═══ */'),
-  'return { cupSidIndex, cupSidLookup, cupSidText, cupSidOf, cupIdSubHtml, cupGroupByPage, cupGroupFilter, _czBuild, cupProductsListed, cupSellThroughCalc,',
+  'return { cupSidIndex, cupSidLookup, cupSidText, cupSidOf, cupIdSubHtml, cupGroupByPage, cupGroupFilter, _czBuild, cupProductsListed, cupSellThroughCalc, cupSidListed, cupSidSellThroughCalc,',
   '  setDocs:d=>{ __docs=d; }, setBad:b=>{ _cupProdBad=b; } };' ].join('\n');
 const T=new Function(code)();
 let n=0; const ok=(c,m)=>{ assert.ok(c,m); n++; };
@@ -76,16 +76,17 @@ const doc={schema:1,latestExport:LT,items:[
 { const rows=[{code:'F421-11',qty:1,rev:10,dispId:'702043094007833'}];
   const r=T._czBuild({doc,rows,prevRows:null,hist:[],names:{byDisp:{},byCode:{},byOther:{}}});
   const all=['have','zero','unknown'].flatMap(g=>r.groups[g]);
-  const card=T.cupSellThroughCalc(rows,T.cupProductsListed(doc).listed);
-  ok(r.unsold===card.den-card.num,'筆數＝卡片 den − num');
-  ok(eq(all.find(x=>x.pid==='595827072335878').sids,[OAT]),'燕麥杯頁帶 sids');
-  ok(eq(all.find(x=>x.pid==='590679256252419').sids,['1134696002411485','1134696003491166']),'多 sid 頁帶兩個');
-  ok(eq(all.find(x=>x.pid==='P-NOSID').sids,[]),'沒有 sid ⇒ 空陣列');
+  const card=T.cupSidSellThroughCalc(rows,T.cupSidListed(doc).listed,T.cupSidIndex(doc));
+  ok(r.unsold===card.den-card.num,'筆數＝卡片 den − num（2026-11-25 起 Wing 商品口徑）');
+  ok(!all.some(x=>x.unit===OAT),'燕麥杯：另一頁有賣 ⇒ 整個 Wing 商品不列');
+  const bag=all.find(x=>x.unit===BAG); ok(bag&&eq(bag.sids,[BAG])&&bag.pages.length===4,'醫藥包 4 頁收成一列、帶 sids');
+  ok(all.filter(x=>x.pages.indexOf('590679256252419')>=0).map(x=>x.unit).sort().join()==='1134696002411485,1134696003491166','一頁兩個 sid ⇒ 兩列各一個 sid');
+  ok(eq(all.find(x=>x.unit==='p:P-NOSID').sids,[]),'沒有 sid ⇒ 商品頁自己一列、sids 空陣列');
   ok(!all.some(x=>x.pid==='702043094007833'),'有賣的頁不列'); }
 
 // ── 接線：畫面字樣、匯出欄位、搜尋提示 ──
 { ok(src.includes('<th class="tl us-th-case">Wing 商品 ID</th><th>庫存</th>'),'零動銷表頭改名');
-  ok(src.includes("['分組','商品名稱','Wing 商品 ID(sid)','酷澎編號(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']"),'零動銷匯出加 sid、保留 pid');
+  ok(src.includes("['分組','商品名稱','Wing 商品 ID(sid)','商品頁 ID(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']"),'零動銷匯出加 sid、保留 pid');
   ok(src.includes("d.ym+' 零動銷',[5,6,8],"),'零動銷匯出數字欄位跟著右移一格');
   ok(src.includes("cols.map(c=>c.label).concat(['Wing 商品 ID','商品頁 ID'])"),'淨利表匯出兩欄加在最後');
   ok(src.includes("_cupSearch[shop], r=>cupSidText(cupSidOf(shop,r.dispId,r.code)))"),'合併商品頁搜尋接 sid');
@@ -111,7 +112,7 @@ if(BK){
   const rep=get('coupang_reports/maji_2026-10'), none=rep.rows.filter(r=>T.cupSidOf('麻吉',r.dispId,r.code)==null).length;
   console.log('[備份] 好麻吉主檔 pid '+Object.keys(idx.byPid).length+'、sid '+new Set(items.map(x=>x.sid).filter(Boolean)).size+'、一頁多 sid '+multi.length+' 頁；2026-10 報表 '+rep.rows.length+' 列，查不到 sid '+none+' 列');
   const z=T._czBuild({doc:real,rows:rep.rows,prevRows:null,hist:[],names:{byDisp:{},byCode:{},byOther:{}}});
-  ok(z.unsold===930,'[備份] 零動銷仍是 930');
-  ok(['have','zero','unknown'].flatMap(g=>z.groups[g]).every(x=>x.sids.length>0),'[備份] 零動銷 930 列都有 sid');
+  ok(z.unsold===564,'[備份] 零動銷 564（Wing 商品口徑）');
+  ok(['have','zero','unknown'].flatMap(g=>z.groups[g]).every(x=>x.sids.length>0),'[備份] 零動銷 564 列都有 sid');
 }
 console.log('coupang-wing-id: '+n+' 項通過'+(BK?'（含真實備份）':''));

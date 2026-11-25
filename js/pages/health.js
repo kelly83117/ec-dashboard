@@ -59,7 +59,7 @@ function _hlDeepFreeze(o) {
 //     MO+ 不含 2026-09：下半月幾乎沒有資料（MO+ 麻吉 8 個商品、約 2 千元），未來補齊後可重算。
 //     🔴 這裡只改 BASE（2026-10 以前）。2026-11 起吃雲端 app/health_rules 那一版，要管理員在「⚙ 評分標準」另存。
 const HEALTH_RULES = _hlDeepFreeze({
-  version: 'v10-2026-11',   // v10（2026-11-18）：酷澎商城分數線（暫定）純利率 25/22/15、動銷率 33/27/23（score.items 的 lines.coupang）。v9（2026-11-18）：酷澎商城開始算動銷率（types.coupang.sellThrough 非 null，只顯示；分數線沒設＝不給分）。v8（2026-11-10）：蝦皮純利率線改回 25/20/18（見 score.items 的 pureRate）
+  version: 'v11-2026-11',   // v11（2026-11-25）：酷澎動銷率改 Wing 商品（sid）口徑，線改 40/35/31、types.coupang.sellThrough 改 [0.32, 0.40]（同 v10 算法用新口徑重算；只影響 BASE＝2026-10 以前）。v10（2026-11-18）：酷澎商城分數線（暫定）純利率 25/22/15、動銷率 33/27/23（score.items 的 lines.coupang）。v9（2026-11-18）：酷澎商城開始算動銷率（types.coupang.sellThrough 非 null，只顯示；分數線沒設＝不給分）。v8（2026-11-10）：蝦皮純利率線改回 25/20/18（見 score.items 的 pureRate）
   from: '2026-01',                     // 這份規則從哪個月起適用（第一版＝firstMonth；之後的版本見 healthRulesForMonth）
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
@@ -76,13 +76,16 @@ const HEALTH_RULES = _hlDeepFreeze({
   //   酷澎商城線（v10，2026-11-18，Gini 決定、老闆事後確認，暫定）：好麻吉 2026-06～10 照 MOMO v6 算法（P75 往上／P50 往下／P10 往下取整，_hlPercentiles）。
   //     純利率 25/22/15（P10 15.5／P50 22.7／P75 24.2）、動銷率 33/27/23（23.8／27.5／32.1）。露營館共用類型線（目前營收未滿 3 萬，不評分）。3 個月後再校。
   //     2026-11 起的雲端版本用 __healthCoupangLines() 加（見檔尾）。畫面標「暫定」靠 HL_TYPE_PROVISIONAL。
+  //   酷澎動銷率線 v11（2026-11-25）：動銷率改以 Wing 商品（供應商商品 ID＝主檔 sid）為單位後，用同一套算法重算好麻吉 2026-06～10
+  //     （31.72／31.65／35.59／39.60／40.51 ⇒ P10 31.67／P50 35.59／P75 39.60）⇒ 40/35/31。同算法套舊口徑會得到 v10 的 33/27/23。純利率線不變。
+  //     🔴 雲端 app/health_rules 的 2026-11 版沒動，2026-11 起的酷澎線要管理員在「⚙ 評分標準」改。檔尾 HL_CUP_LINES 是 11/18 那次補雲端線的紀錄工具，維持 33/27/23。
   score: {
     tiers: [100, 80, 60],
     items: [
       { key: 'pureRate', label: '純利率', short: '純利', w: 0.5, dim: 'profit', provisional: false,
         lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20], coupang: [0.25, 0.22, 0.15] } },
       { key: 'sellThrough', label: '動銷率', short: '動銷', w: 0.5, dim: 'structure', provisional: true,
-        lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14], coupang: [0.33, 0.27, 0.23] } },
+        lines: { momoJia: [0.49, 0.47, 0.44], momoYi: [0.74, 0.70, 0.67], moplus: [0.34, 0.21, 0.14], coupang: [0.40, 0.35, 0.31] } },
     ],
   },
   // 面向（權重合計 100）。impl＝這個規則版本已實作；沒實作的不算進「依 N/M」的 M，卡片底部灰字列出。
@@ -170,7 +173,7 @@ const HEALTH_RULES = _hlDeepFreeze({
     momoJia: { label: 'MOMO 甲配',    order: 2, pureRate: [0, 0.39], sellThrough: [0.42, 0.50], members: 'MOMO 甲配' },
     momoYi:  { label: 'MOMO 乙配（寄倉）', order: 3, pureRate: [0, 0.26], sellThrough: [0.65, 0.73], members: 'MOMO 乙配（寄倉）' },
     moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.06, 0.295], members: 'MO+ 好麻吉、MO+ 森之旅、MO+ 玩樂' },
-    coupang: { label: '酷澎 商城',    order: 5, pureRate: [0, 0.34], sellThrough: [0.24, 0.33], stFlag: 'few', stN: 5, members: '酷澎 商城-好麻吉、酷澎 商城-玩樂' },   // v9：動銷率起始值＝好麻吉 2026-06～10（用 2026-11-17 主檔回算）的 P10／P75 附近，樣本 5 個月；只給舊面向函式，不影響總分
+    coupang: { label: '酷澎 商城',    order: 5, pureRate: [0, 0.34], sellThrough: [0.32, 0.40], stFlag: 'few', stN: 5, members: '酷澎 商城-好麻吉、酷澎 商城-玩樂' },   // v11（2026-11-25）：Wing 商品口徑的 P10 31.67→0.32、P75 39.60→0.40（v9 商品頁口徑是 [0.24, 0.33]）。v9：動銷率起始值＝好麻吉 2026-06～10（用 2026-11-17 主檔回算）的 P10／P75 附近，樣本 5 個月；只給舊面向函式，不影響總分
     small:   { label: '小通路',       order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
     other:   { label: '業外',         order: 7, pureRate: [0, 0.10], sellThrough: null, members: '業外' },
   },
@@ -657,15 +660,15 @@ function _hlShopeeStApply(subs, ch, m, snap) {
 const HL_MOMO_ST_FORMULA = '本期有銷售的商品頁 ÷（目前上架 ∪ 本期有銷售）';
 const HL_MOMO_ST_DESC = `同淨利表 MOMO 總覽：${HL_MOMO_ST_FORMULA}。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
 const HL_PCHOME_ST_FORMULA = '本期有銷售的商編數 ÷（目前上架 ∪ 本期有銷售）的商編數';
-const HL_CUP_ST_FORMULA = '本月有賣出的商品頁 ÷（目前上架 ∪ 本月有賣出）的商品頁';
-const HL_CUP_ST_DESC = `同淨利表酷澎總表的動銷率卡：${HL_CUP_ST_FORMULA}。商品頁＝酷澎商品編號。上架狀態是目前的商品主檔，過去月份會隨上下架變動。`;
+const HL_CUP_ST_FORMULA = '本月有賣出的 Wing 商品 ÷（目前上架 ∪ 本月有賣出）的 Wing 商品';
+const HL_CUP_ST_DESC = `同淨利表酷澎總表的動銷率卡：${HL_CUP_ST_FORMULA}。以 Wing 商品（供應商商品 ID）為單位：一個 Wing 商品可能有好幾個前台商品頁，任一頁有賣就算有賣。2026/11/25 起改用此口徑，跟之前的數字不能直接比。上架狀態是目前的商品主檔，過去月份會隨上下架變動。`;
 const HL_PCHOME_ST_DESC = `同淨利表 PChome 總覽卡：${HL_PCHOME_ST_FORMULA}。商編＝商品編號去最後一段規格碼、去重；轉單、寄倉合併。上架狀態是現在的狀態，過去月份會隨上下架變動。`;
 // 動銷率 ⓘ 說明分平台（照程式實際算法：_hlShopeeStApply／_hlMomoStApply／_hlSellThrough＋profit.js __healthProductSnapshot 的 PChome sold＝hasBiz、active＝!discontinued）
 const HL_ST_HOW_LINES = Object.freeze([
   '蝦皮＝洞察表整月商品表現，正常商品裡這個月有賣出的比例。',
   `MOMO＝同淨利表 MOMO 總覽，${HL_MOMO_ST_FORMULA}。`,
   `PChome＝同淨利表 PChome 總覽卡，${HL_PCHOME_ST_FORMULA}；商編＝商品編號去最後一段規格碼、去重，轉單、寄倉合併。`,
-  `酷澎商城＝同淨利表酷澎總表的動銷率卡，${HL_CUP_ST_FORMULA}；上架＝出現在最新一次上傳的商品清單、而且不是停售。上架狀態是目前的商品主檔，過去月份會隨上下架變動。`,
+  `酷澎商城＝同淨利表酷澎總表的動銷率卡，${HL_CUP_ST_FORMULA}；以 Wing 商品（供應商商品 ID）為單位，任一前台頁有賣就算有賣（2026/11/25 起改用此口徑，跟之前的數字不能直接比）；上架＝出現在最新一次上傳的商品清單、而且不是停售。上架狀態是目前的商品主檔，過去月份會隨上下架變動。`,
 ]);
 // 把 MOMO 的動銷率子指標換成 momoPeriodTotals 的數字（純函式：只讀 snap.prod 的 st，由 profit.js 帶進來）。跟 minSold 脫鉤：只要這個月有商品層資料就算。
 //   商品層還沒好、這個月沒有銷售資料 ⇒ 不動，沿用 _hlStructureDim 給的狀態（載入中、尚未上傳…）。
@@ -690,12 +693,12 @@ function _hlMomoStApply(subs, ch, m, snap) {
   sT.trace = { src, text: `有銷售的商品頁 ${st.sold} ÷ 上架或有銷售的商品頁 ${st.total}（同淨利表 MOMO 總覽）` };
 }
 // 酷澎商城的動銷率（v9，2026-11-18）：純函式，只讀 snap.coupangSt（由 _hlCollect 向 profit.js __healthCoupangSt 要，key＝'麻吉|2026-10'）。
-//   跟淨利表酷澎總表的動銷率卡同一套（以商品頁計）。不靠商品層，所以手機寬度也照算。snap 沒有 coupangSt（只算 KPI 的呼叫端、模擬、node 測試）⇒ 不適用。
+//   跟淨利表酷澎總表的動銷率卡同一套（2026-11-25 起以 Wing 商品＝供應商商品 ID 計；BASE 分數線 v11 已用新口徑重算 40/35/31；雲端 2026-11 版要管理員另改）。不靠商品層，所以手機寬度也照算。snap 沒有 coupangSt（只算 KPI 的呼叫端、模擬、node 測試）⇒ 不適用。
 //   主檔或報表還沒到齊 ⇒ 載入中（不能當 0）；沒有主檔／這個月沒有報表 ⇒ 尚未上傳。
 function _hlCoupangStApply(subs, ch, m, snap) {
   if (!ch || !ch.cup) return;
   const by = k => subs.find(x => x.key === k), sT = by('sellThrough');
-  [by('sellThroughPage'), by('deadDupPages')].forEach(x => { if (x) Object.assign(x, { status: 'na', reason: '不適用：酷澎動銷率本身就以商品頁計', raw: null, score: null, trace: null }); });
+  [by('sellThroughPage'), by('deadDupPages')].forEach(x => { if (x) Object.assign(x, { status: 'na', reason: '不適用：酷澎動銷率以 Wing 商品計（一個 Wing 商品的好幾個前台頁合在一起）', raw: null, score: null, trace: null }); });
   if (!sT) return;
   Object.assign(sT, { formula: HL_CUP_ST_FORMULA, note: HL_CUP_ST_DESC });
   const set = (status, reason, stText) => Object.assign(sT, { status, reason, raw: null, score: null, trace: null }, stText ? { stText } : null);
@@ -706,15 +709,15 @@ function _hlCoupangStApply(subs, ch, m, snap) {
   const listTxt = e.latest ? `清單 ${String(e.latest).slice(5, 10).replace('-', '/')}` : '清單日期不明';
   if (e.state === 'noProducts') return set('pending', '還沒有酷澎商品主檔（淨利表 → 酷澎 → 商品同步，上傳 price_inventory 並同步）', '尚未上傳');
   if (e.state === 'noReport') return set('pending', `${_hlYmLabel(m)} 還沒有酷澎訂單報表（淨利表 → 酷澎）`, '尚未上傳');
-  if (!(e.den > 0)) return set('insufficient', '資料不足：沒有上架或有賣出的商品頁');
+  if (!(e.den > 0)) return set('insufficient', '資料不足：沒有上架或有賣出的 Wing 商品');
   set('ok', '');
   sT.raw = e.num / e.den;
   _hlStCount(sT, e.num, e.den);
   sT.score = _hlLinear(sT.raw, sT.zero, sT.full);
   sT.note = `${HL_CUP_ST_DESC}這裡用的是目前的商品主檔（${listTxt}）。`;
   sT.trace = { src: `酷澎商品主檔（${listTxt}）＋${_hlYmLabel(m)} 訂單報表 ${ch.cup === '麻吉' ? '好麻吉' : ch.cup}`,
-    text: `本月有賣出的商品頁 ${e.num} ÷（目前上架 ${e.listedN} ∪ 本月有賣出）${e.den} 頁`
-      + (e.soldNotListed ? `（其中 ${e.soldNotListed} 頁本月有賣、但不在最新清單上架中）` : '')
+    text: `本月有賣出的 Wing 商品 ${e.num} ÷（目前上架 ${e.listedN} ∪ 本月有賣出）${e.den} 個`
+      + (e.soldNotListed ? `（其中 ${e.soldNotListed} 個本月有賣、但不在最新清單上架中）` : '')
       + `；上架狀態是目前的商品主檔（${listTxt}），過去月份會隨上下架變動` };
 }
 // 這個通路這個月的商品層快照狀態：{ state:'na'|'notLoaded'|'loading'|'timeout'|'ready', snap? }

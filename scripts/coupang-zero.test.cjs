@@ -1,5 +1,6 @@
 // 酷澎「🎯 零動銷」（2026-11-25 第 1 塊）純函式測試：node scripts/coupang-zero.test.cjs
-//   從 js/profit.js 抽 CUP-PM-PURE（cupProductsListed／cupSellThroughCalc，動銷率卡同一套）與 CUP-ZERO-PURE。
+//   從 js/profit.js 抽 CUP-PM-PURE（2026-11-25 起動銷率卡用 cupSidListed／cupSidSellThroughCalc＝Wing 商品口徑）與 CUP-ZERO-PURE。
+//   這裡的合成主檔沒有 sid ⇒ 每個商品頁自己算一個 Wing 商品單位，行為跟商品頁口徑相同；sid 的規則見 coupang-sid-unit.test.cjs。
 //   另外檢查 _zeroTip 的 coupang 分支、按鈕與 window 名單都接上了。
 //   CUP_BACKUP_JSON=<v3 備份檔> node scripts/coupang-zero.test.cjs   ← 另外用真實主檔／報表驗 2026-10 筆數（只印數字，不印內容）
 //   資料預設全是合成的假資料；不碰瀏覽器、不碰雲端。
@@ -8,7 +9,7 @@ const fs=require('fs'), path=require('path'), assert=require('assert');
 const src=fs.readFileSync(path.join(__dirname,'..','js','profit.js'),'utf8').replace(/\r\n/g,'\n');
 const between=(a,b)=>{ const i=src.indexOf(a), j=src.indexOf(b,i); if(i<0||j<0) throw new Error('找不到 '+a); if(src.indexOf(a,i+1)>=0) throw new Error('標記重複 '+a); return src.slice(i,j+b.length); };
 const code=[ between('/* ═══ CUP-PM-PURE-BEGIN','/* ═══ CUP-PM-PURE-END ═══ */'), between('/* ═══ CUP-ZERO-PURE-BEGIN','/* ═══ CUP-ZERO-PURE-END ═══ */'),
-  'return { cupProductsListed, cupSellThroughCalc, _czBuild, _czNameIndex, _czOpenNote, _czIds };' ].join('\n');
+  'return { cupProductsListed, cupSellThroughCalc, cupSidIndex, cupSidListed, cupSidSellThroughCalc, _czBuild, _czNameIndex, _czOpenNote, _czIds };' ].join('\n');
 const T=new Function(code)();
 let n=0; const ok=(c,m)=>{ assert.ok(c,m); n++; };
 const LT='2026-11-17 20:50:12', OLD='2026-10-01 10:00:00';
@@ -30,7 +31,8 @@ const noNames={byDisp:{},byCode:{},byOther:{}};
     it('14','P10','A',2) ]};                          // P10：A 也掛在 P1 ⇒ 共用
   const rows=[row('L',3,300,'P8/P9'), row('M',1,100,'PX'), row('A',0,0,'P10'), row('Z',0,0,'')];
   const r=T._czBuild({doc,rows,prevRows:null,hist:[],names:noNames});
-  const card=T.cupSellThroughCalc(rows, T.cupProductsListed(doc).listed);
+  const card=T.cupSidSellThroughCalc(rows, T.cupSidListed(doc).listed, T.cupSidIndex(doc));
+  const old=T.cupSellThroughCalc(rows, T.cupProductsListed(doc).listed); ok(old.num===card.num&&old.den===card.den,'沒有 sid ⇒ 跟商品頁口徑一樣');
   ok(r.num===card.num&&r.den===card.den,'num／den 跟卡片同一支');
   ok(r.unsold===card.den-card.num,'筆數＝卡片 den − num');
   ok(card.num===3&&card.den===9&&r.unsold===6,'分母＝上架 8 頁 ∪ 有賣 3 頁（PX 不在清單）＝9；零動銷 6');
@@ -85,18 +87,18 @@ const noNames={byDisp:{},byCode:{},byOther:{}};
   ok(/openCoupangZeroModal,closeCoupangZeroModal,coupangZeroSetMonth,coupangZeroExportExcel,__cupZeroSnap,/.test(src),'window 名單');
   ok(src.includes('id="cz-modal-overlay"')&&src.includes('id="cz-modal-body"')&&src.includes('id="cz-modal-title"'),'cz overlay'); }
 
-// ── 選填：真實備份（2026-10 好麻吉 930、玩樂 79） ──
+// ── 選填：真實備份（2026-10 Wing 商品口徑：好麻吉 564（商品頁口徑是 930）、玩樂 79） ──
 const BK=process.env.CUP_BACKUP_JSON;
 if(BK){
   const d=JSON.parse(fs.readFileSync(BK,'utf8'));
   const dec=v=>{ if(v==null) return v; if('stringValue' in v) return v.stringValue; if('integerValue' in v) return Number(v.integerValue); if('doubleValue' in v) return v.doubleValue; if('booleanValue' in v) return v.booleanValue; if('nullValue' in v) return null; if('timestampValue' in v) return v.timestampValue; if('arrayValue' in v) return (v.arrayValue.values||[]).map(dec); if('mapValue' in v){ const o={},f=v.mapValue.fields||{}; for(const k in f) o[k]=dec(f[k]); return o; } return v; };
   const get=k=>{ const x=d[k]; if(!x||!x.fields) return null; const o={}; for(const f in x.fields) o[f]=dec(x.fields[f]); return o; };
-  const want={ maji:{n:930,g:[530,400,0]}, luying:{n:79,g:[77,2,0]} };
+  const want={ maji:{n:564,g:[313,251,0]}, luying:{n:79,g:[77,2,0]} };
   Object.keys(want).forEach(id=>{
     const items=[]; let latest=''; for(let i=0;i<4;i++){ const s=get('coupang_products/'+id+'_'+i); if(!s) continue; items.push(...s.items); if(s.latestExport>latest) latest=s.latestExport; }
     const doc={schema:1,latestExport:latest,items}, rep=get('coupang_reports/'+id+'_2026-10');
     const r=T._czBuild({doc,rows:rep.rows,prevRows:null,hist:[],names:noNames});
-    const card=T.cupSellThroughCalc(rep.rows, T.cupProductsListed(doc).listed);
+    const card=T.cupSidSellThroughCalc(rep.rows, T.cupSidListed(doc).listed, T.cupSidIndex(doc));
     const g=[r.groups.have.length,r.groups.zero.length,r.groups.unknown.length];
     console.log('[備份] '+id+' 2026-10：卡片 '+card.num+'/'+card.den+'，零動銷 '+r.unsold+'（'+g.join('／')+'），跨頁共用 '+r.multiPage);
     ok(r.unsold===card.den-card.num,id+' 筆數＝卡片 den − num');

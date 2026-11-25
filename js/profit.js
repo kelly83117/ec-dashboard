@@ -30972,6 +30972,15 @@ function cupSidOf(shop, dispId, code){
   let idx=_cupSidIdxCache.get(d); if(!idx){ idx=cupSidIndex(d); _cupSidIdxCache.set(d, idx); }
   return cupSidLookup(idx, dispId, code);
 }
+// 動銷率（Wing 商品口徑）用的在架清單：跟著主檔 doc 換（WeakMap），主檔沒到 ⇒ null。卡片、總表、健檢、零動銷共用。
+const _cupSidListedCache=new WeakMap();
+function cupSidListedOf(shop){
+  let d=null; try{ d=cupLoadProducts(shop); }catch(e){ return null; }
+  if(!d||_cupProdBad[shop]) return null;
+  let L=_cupSidListedCache.get(d);
+  if(!L){ let idx=_cupSidIdxCache.get(d); if(!idx){ idx=cupSidIndex(d); _cupSidIdxCache.set(d, idx); } L=cupSidListed(d, idx); _cupSidListedCache.set(d, L); }
+  return L;
+}
 // 淨利表品名下方那一行小字：有 Wing 商品 ID ⇒「Wing 商品 ID {sid}｜頁 {dispId}」；沒有 ⇒ 跟改版前逐字相同。
 function cupIdSubHtml(shop, dispId, code){
   const raw=String(dispId||''), did=_momoEsc(raw), sid=cupSidOf(shop, dispId, code);
@@ -31405,29 +31414,31 @@ function cupRenderSellThrough(shop, rows, hasReport, month){
     v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent=loading?'商品主檔載入中…':'待商品同步'; dEl.style.color='#9ca3af';
     setSrc(loading?'動銷率來源：商品主檔載入中…':'動銷率來源：還沒有商品主檔（到「商品同步」分頁上傳 price_inventory）');
     if(tip) tip.title=loading?'正在讀雲端的商品主檔，讀到後自動算出動銷率。':'動銷率需要商品主檔（上架中的商品頁＝分母）。到「商品同步」分頁上傳 price_inventory 並按「☁ 同步雲端」後，大家都會看到。'; return; }
-  const L=cupProductsListed(d);
+  // 2026-11-25 酷澎第 2 塊：改以 Wing 商品（供應商商品 ID＝主檔 sid）為單位（cupSidListed／cupSidSellThroughCalc）；比上月也用同一套。
+  const L=cupSidListedOf(shop);
   const n=x=>Number(x||0).toLocaleString(), day=String(L.latest||'').slice(0,10).replace(/-/g,'/')||'—';
+  const unitNote='以 Wing 商品（供應商商品 ID）為單位：一個 Wing 商品可能有好幾個前台商品頁，任一頁有賣就算有賣。'+CUP_SID_UNIT_FROM+' 起改用此口徑，跟之前的數字不能直接比。';
   if(!hasReport){ v.textContent='—'; v.style.color='#9ca3af'; dEl.textContent='這個月沒有訂單報表'; dEl.style.color='#9ca3af';
-    setSrc('動銷率來源：上架中商品頁 '+n(L.listed.size)+' · 整頁停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（這個月沒有訂單報表）');
-    if(tip) tip.title='這個月還沒有酷澎訂單報表，算不出有賣出的商品頁。目前上架 '+L.listed.size+' 個商品頁（清單 '+_cupFmtExport(L.latest)+'）。\n'+_cupStSrcTip(L.latest); return; }
-  const r=cupSellThroughCalc(rows, L.listed);
+    setSrc('動銷率來源：上架中 Wing 商品 '+n(L.listed.size)+'（商品頁 '+n(L.pageListed.size)+'）· 整個停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（這個月沒有訂單報表）· '+CUP_SID_UNIT_FROM+' 起改用 Wing 商品口徑');
+    if(tip) tip.title=unitNote+'\n這個月還沒有酷澎訂單報表，算不出有賣出的 Wing 商品。目前上架 '+L.listed.size+' 個 Wing 商品（清單 '+_cupFmtExport(L.latest)+'）。\n'+_cupStSrcTip(L.latest); return; }
+  const r=cupSidSellThroughCalc(rows, L.listed, L.idx);
   v.style.color='';
   if(r.pct!=null) v.innerHTML=r.pct.toFixed(1)+'% <span class="cup-st-frac">('+n(r.num)+' / '+n(r.den)+')</span>'; else v.textContent='—';
   // 第二行：比上月（上月訂單報表 × 同一份目前清單）。上升綠、下降紅（A-310）。
   const prevM=month?cupPrevMonth(month):null, prev=prevM?cupLoadReport(shop,prevM):null;
   dEl.style.color='';
   if(!prev||!Array.isArray(prev.rows)){ dEl.textContent='（無上月報表可比）'; }
-  else { const p=cupSellThroughCalc(prev.rows, L.listed), lbl='較 '+(+prevM.slice(5,7))+'月 ';
+  else { const p=cupSidSellThroughCalc(prev.rows, L.listed, L.idx), lbl='較 '+(+prevM.slice(5,7))+'月 ';
     if(r.pct==null||p.pct==null) dEl.textContent='';
     else { const dd=r.pct-p.pct, t=Math.abs(dd).toFixed(1);
       if(t==='0.0'){ dEl.textContent=lbl+'持平'; dEl.classList.add('cup-st-flat'); }
       else { dEl.textContent=lbl+(dd>0?'▲ ':'▼ ')+t+'pp'; dEl.classList.add(dd>0?'cup-st-up':'cup-st-down'); } } }
-  setSrc('動銷率來源：上架中商品頁 '+n(L.listed.size)+' · 本月有賣 '+n(r.num)+(r.soldNotListed>0?'（其中 '+n(r.soldNotListed)+' 個不在上架清單）· ':' · ')+'整頁停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（過去月份也用這份清單）');
-  if(tip) tip.title='以商品頁（酷澎商品編號）計算。\n分子＝本月訂單有賣出的商品頁 '+r.num+' 個。\n分母＝目前上架 '+r.listedN+' 個商品頁 ∪ 本月有賣出 ⇒ '+r.den+' 個商品頁（其中 '+r.soldNotListed+' 個商品頁本月有賣、但不在最新清單上架中）。\n上架＝出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。\n'+_cupStSrcTip(L.latest);
+  setSrc('動銷率來源：上架中 Wing 商品 '+n(L.listed.size)+'（商品頁 '+n(L.pageListed.size)+'）· 本月有賣 '+n(r.num)+(r.soldNotListed>0?'（其中 '+n(r.soldNotListed)+' 個不在上架清單）· ':' · ')+'整個停售 '+n(L.stopped.size)+' · 清單日期 '+day+'（過去月份也用這份清單）· '+CUP_SID_UNIT_FROM+' 起改用 Wing 商品口徑，跟之前的數字不能直接比');
+  if(tip) tip.title=unitNote+'\n分子＝本月訂單有賣出的 Wing 商品 '+r.num+' 個（訂單的商品頁經商品主檔換成 Wing 商品；一頁掛好幾個 Wing 商品時每個都算有賣'+(r.unmapped?'；主檔查不到的 '+r.unmapped+' 個商品頁各自算一個':'')+'）。\n分母＝目前上架 '+r.listedN+' 個 Wing 商品 ∪ 本月有賣出 ⇒ '+r.den+' 個（其中 '+r.soldNotListed+' 個本月有賣、但不在最新清單上架中）。\n上架＝底下有選項出現在最新一次上傳的 price_inventory（'+_cupFmtExport(L.latest)+'）而且不是停售；過去月份也用目前這份清單。比上月也用同一套算法。\n'+_cupStSrcTip(L.latest);
 }
 function _cupStSrcTip(latest){ return '主檔來自雲端（最新匯出 '+_cupFmtExport(latest)+'），任何一台上傳並同步後大家都會看到。'; }
-// ══ 通路健檢的酷澎動銷率（2026-11-18 第 3 塊）：唯讀轉接，跟上面總表動銷率卡同一套（cupProductsListed＋cupSellThroughCalc）══
-//   window.__healthCoupangSt(shop, month) → { state:'ok'|'loading'|'noProducts'|'noReport', num, den, listedN, soldNotListed, latest }
+// ══ 通路健檢的酷澎動銷率（2026-11-18 第 3 塊）：唯讀轉接，跟上面總表動銷率卡同一套（2026-11-25 起 Wing 商品口徑：cupSidListed＋cupSidSellThroughCalc）══
+//   window.__healthCoupangSt(shop, month) → { state:'ok'|'loading'|'noProducts'|'noReport', num, den, listedN, soldNotListed, unmapped, latest, unit:'sid' }
 //   🔴 主檔或報表沒到齊回 loading，不能當 0：主檔看雲端快照到齊（_cupProdCloud[shop].complete）；報表看 coupang_reports 訂閱
 //     有沒有送過資料（coupangReportReady 事件，或記憶體已經有酷澎報表）。訂閱開了 15 秒都沒有任何報表 ⇒ 當成到齊（回 noReport）。
 //   不寫任何東西；名稱不以 __cloud 開頭，不影響本機防寫物件數。
@@ -31438,7 +31449,6 @@ function _cupReportsReady(){
   try{ if(Object.keys(Store._profitMem||{}).some(k=>cupIsReportKey(k))){ _cupRepSeen=true; return true; } }catch(e){}
   return !!_cupRepSubAt && Date.now()-_cupRepSubAt>15000;
 }
-const _cupListedCache=new WeakMap();   // 主檔 doc → cupProductsListed 結果（doc 換了就重算）
 window.__healthCoupangSt=function(shop, month){
   const out={ state:'loading', num:null, den:null, listedN:null, soldNotListed:null, latest:'' };
   try{ if(typeof window.__loadCoupangSubs==='function'){ if(!_cupRepSubAt) _cupRepSubAt=Date.now(); window.__loadCoupangSubs(); } }catch(e){}
@@ -31447,13 +31457,13 @@ window.__healthCoupangSt=function(shop, month){
   const c=_cupProdCloud[shop];
   if(!(c&&c.complete)) return out;
   if(!d) return Object.assign(out, { state:'noProducts' });
-  let L=_cupListedCache.get(d); if(!L){ L=cupProductsListed(d); _cupListedCache.set(d, L); }
-  out.latest=L.latest; out.listedN=L.listed.size;
+  const L=cupSidListedOf(shop);   // 2026-11-25：Wing 商品（sid）口徑，同動銷率卡
+  out.latest=L.latest; out.listedN=L.listed.size; out.unit='sid';
   if(!_cupReportsReady()) return out;
   const rep=cupLoadReport(shop, month);
   if(!rep||!Array.isArray(rep.rows)) return Object.assign(out, { state:'noReport' });
-  const r=cupSellThroughCalc(rep.rows, L.listed);
-  return Object.assign(out, { state:'ok', num:r.num, den:r.den, soldNotListed:r.soldNotListed });
+  const r=cupSidSellThroughCalc(rep.rows, L.listed, L.idx);
+  return Object.assign(out, { state:'ok', num:r.num, den:r.den, soldNotListed:r.soldNotListed, unmapped:r.unmapped });
 };
 // Console 只讀：本機主檔狀態（不回傳內容）
 window.__cupProductsState=function(){ const out={}; ['麻吉','露營館'].forEach(s=>{ const d=cupLoadProducts(s); let chars=0; try{ chars=(localStorage.getItem(cupProductsKey(s))||'').length; }catch(e){}
@@ -31647,13 +31657,14 @@ function renderCoupangReturnsBanner(shop, hasMsf){
 }
 
 /* ═══ CUP-OV-PURE-BEGIN：酷澎｜總表（2026-11-19，Vanessa）資料層純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage ═══
-   口徑＝淨利表（跟個別通路頁上方五張卡同一套：cupEnrichRows → cupKpi；動銷率 cupProductsListed → cupSellThroughCalc），不讀 KPI 月結表。 */
+   口徑＝淨利表（跟個別通路頁上方五張卡同一套：cupEnrichRows → cupKpi；動銷率 2026-11-25 起 cupSidListed → cupSidSellThroughCalc），不讀 KPI 月結表。 */
 // 一個通路一個月的合計。rows＝cupEnrichRows 過的列（null＝這個月沒有報表）；listedSet＝cupProductsListed().listed（null＝沒有主檔）。
 //   rate＝cupKpi 的加權淨利率（%；分母 cRev 只算有成本的列，同個別通路頁那張卡）。
-function cupOvCalc(rows, listedSet){
+//   sidIdx（選填，2026-11-25）＝cupSidIndex(主檔)：有給 ⇒ listedSet 是 cupSidListed().listed，動銷率走 Wing 商品口徑（cupSidSellThroughCalc）；沒給 ⇒ 舊的商品頁口徑。
+function cupOvCalc(rows, listedSet, sidIdx){
   const has=Array.isArray(rows), R=has?rows:[], k=cupKpi(R);
   const cRev=R.filter(r=>r.costStatus==='ok').reduce((s,r)=>s+(r.rev||0),0);
-  const st=(has&&listedSet)?cupSellThroughCalc(R, listedSet):null;
+  const st=(has&&listedSet)?(sidIdx?cupSidSellThroughCalc(R, listedSet, sidIdx):cupSellThroughCalc(R, listedSet)):null;
   return { has, rev:k.rev, net:k.net, cRev, rate:k.rate, qty:k.qty, stNum:st?st.num:null, stDen:st?st.den:null, stPct:st?st.pct:null, rows:R };
 }
 // 商品主檔 → 原廠編號的庫存：同一個原廠編號在【最新清單】的所有選項庫存加總。不在最新清單、或任一選項庫存不明 ⇒ 不放進表（不判）。
@@ -31730,8 +31741,8 @@ function cupOvAnalysisCalc(shop, curRows, prevRows, opt){
 function cupOvShopData(shop, month){
   const rep=month?cupLoadReport(shop, month):null;
   const rows=rep?cupEnrichRows(rep.rows||[]):null;
-  let listed=null; try{ const d=cupLoadProducts(shop); if(d&&!_cupProdBad[shop]) listed=cupProductsListed(d).listed; }catch(e){}
-  return Object.assign(cupOvCalc(rows, listed), { shop, month });
+  let L=null; try{ L=cupSidListedOf(shop); }catch(e){}   // 2026-11-25：動銷率改 Wing 商品口徑（同個別通路頁的卡）
+  return Object.assign(cupOvCalc(rows, L?L.listed:null, L?L.idx:null), { shop, month });
 }
 function cupShopAnalysis(shop, month, prevMonth, incomplete){
   const cur=cupOvShopData(shop, month), prev=prevMonth?cupOvShopData(shop, prevMonth):null;
@@ -31848,7 +31859,7 @@ function cupRenderOverview(){
   const topCards=topShops.map((sh,i)=>'<div class="mm-ov-card'+(oddT&&i===topShops.length-1?' mm-anlz-span':'')+'"><div class="mm-ov-h">'+esc(cupShopDisplay(sh))+' 銷量 Top 10（'+esc(mLbl)+'）</div><div class="mm-ov-canvas"><canvas id="cup-ov-top10-'+sh+'"></canvas></div></div>').join('');
   el.innerHTML='<div class="mm-row cup-ov-head"><span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="cupOvSetMonth(this.value)">'+monthOpts+'</select></span>'
       +'<span class="cup-ov-right">通路總覽 · 好麻吉＋玩樂（合計）</span></div>'
-    +'<div class="cup-ov-note">本頁是淨利表口徑：好麻吉＋玩樂合計，不含買斷，也不含 KPI 另外扣的耗材與退貨運費。月結數字請看 KPI。</div>'
+    +'<div class="cup-ov-note">本頁是淨利表口徑：好麻吉＋玩樂合計，不含買斷，也不含 KPI 另外扣的耗材與退貨運費。月結數字請看 KPI。動銷率以 Wing 商品（供應商商品 ID）為單位，'+CUP_SID_UNIT_FROM+' 起改用此口徑，跟之前的數字不能直接比。</div>'
     +noteHtml+'<div class="mm-kpis cup-ov-kpis">'+cardHTML+'</div>'+anlzSection
     +'<div class="mm-ov-grid"><div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-trend"></canvas></div></div>'
     +'<div class="mm-ov-card"><div class="mm-ov-h">各通路淨利率（各月）</div><div class="mm-ov-canvas"><canvas id="cup-ov-margin"></canvas></div></div></div>'
@@ -33425,6 +33436,29 @@ function cupSidLookup(idx, dispId, code){
   const a=[...set].sort(); return a.length===1?a[0]:a;
 }
 function cupSidText(v){ return v==null?'':(Array.isArray(v)?v.join('、'):String(v)); }
+// ── 動銷率改以 Wing 商品（sid）為單位（2026-11-25 酷澎第 2 塊）。舊的 cupProductsListed／cupSellThroughCalc（商品頁）留著做對照。──
+//   單位 key：sid 本身；主檔查不到 sid 的商品頁 ⇒ 'p:'+Product ID 自己算一個（不會跟 sid 撞，sid 是純數字）。
+//   一頁對到好幾個 sid（好麻吉 4 頁）⇒ 這頁在架／有賣，它的每個 sid 都算在架／有賣。
+const CUP_SID_UNIT_FROM='2026/11/25';   // 改用 Wing 商品口徑的日期（卡片、ⓘ、健檢說明都寫這個）
+function cupSidUnitsOfPid(idx, pid){ const s=cupSidLookup(idx, pid, null); return s==null?['p:'+pid]:(Array.isArray(s)?s:[s]); }
+function cupSidUnitLabel(u){ return String(u).indexOf('p:')===0?'':String(u); }   // 'p:…' ⇒ 沒有 Wing 商品 ID
+// 在架的 Wing 商品＝在架商品頁（cupProductsListed：最新清單、不是 판매중지）底下所有 sid。pagesOf＝{ 單位: [在架的商品頁…] }。
+function cupSidListed(doc, idx){
+  idx=idx||cupSidIndex(doc);
+  const L=cupProductsListed(doc), listed=new Set(), stopped=new Set(), pagesOf={};
+  [...L.listed].sort().forEach(pid=>cupSidUnitsOfPid(idx,pid).forEach(u=>{ listed.add(u); (pagesOf[u]=pagesOf[u]||[]).push(pid); }));
+  L.stopped.forEach(pid=>cupSidUnitsOfPid(idx,pid).forEach(u=>{ if(!listed.has(u)) stopped.add(u); }));
+  return { listed, stopped, latest:L.latest, pagesOf, pageListed:L.listed, idx };
+}
+// 動銷率（Wing 商品）：分子＝報表 qty>0 的 dispId（"/" 拆開）逐頁換成 sid（查不到＝'p:'+dispId）；分母＝在架 ∪ 分子。
+//   unmapped＝報表有賣、主檔查不到 sid 的商品頁數；soldPages＝有賣的商品頁（零動銷提示用）。
+function cupSidSellThroughCalc(rows, listedSet, idx){
+  const sold=new Set(), soldPages=new Set(), unmapped=new Set();
+  (rows||[]).forEach(r=>{ if(!r||!(Number(r.qty)>0)) return; String(r.dispId||'').split('/').map(x=>x.trim()).filter(Boolean).forEach(d=>{
+    soldPages.add(d); const us=cupSidUnitsOfPid(idx||{byPid:{},byCode:{}}, d); if(us[0].indexOf('p:')===0) unmapped.add(d); us.forEach(u=>sold.add(u)); }); });
+  const den=new Set(listedSet||[]); let soldNotListed=0; sold.forEach(x=>{ if(!den.has(x)){ den.add(x); soldNotListed++; } });
+  return { num:sold.size, den:den.size, listedN:(listedSet?listedSet.size:0), soldNotListed, unmapped:unmapped.size, pct:(den.size>0?sold.size/den.size*100:null), sold, soldPages };
+}
 /* ═══ CUP-PM-PURE-END ═══ */
 /* ═══ CUP-PS-PURE-BEGIN：酷澎商品主檔雲端分片與合併（PR-C2 第 1 塊）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage／Firestore ═══ */
 //   雲端形狀：coupang_products/{maji|luying}_{0..3}，每份 { schema:1, shop, shard, shards:4, items:[…], latestExport, updatedAt }。
@@ -34596,8 +34630,9 @@ function _zeroTip(kind,o){
     L.push('三組怎麼分：看莫筆克公司倉（PChome 料號＝原廠編號），這款所有料號加總大於 0 是「有庫存」、全部是 0 是「沒庫存」；有料號不在莫筆克資料、加總又不大於 0 算「庫存不明」。PChome 可賣量只放在滑鼠提示和 Excel，不用來分組。');
     L.push('通路健檢的 PChome 動銷率是轉單＋寄倉合併、日曆月計算，數字會跟這裡不同。');
   }else if(kind==='coupang'){
-    L.push('以商品頁（酷澎編號）為單位。三組怎麼分：看酷澎商品主檔的庫存，這頁所有選項加總大於 0 是「有庫存」、全部是 0 是「沒庫存」；有選項沒有庫存數字算「庫存不明」。');
-    L.push('同一個原廠編號掛在好幾頁時，庫存是同一批貨（看庫存欄的滑鼠提示），不要把幾頁的庫存相加。');
+    L.push('以 Wing 商品（供應商商品 ID）為單位：一個 Wing 商品可能有好幾個前台商品頁，任一頁本月有賣就不列（看 Wing 商品 ID 欄的滑鼠提示）。'+CUP_SID_UNIT_FROM+' 起改用此口徑，跟之前的數字不能直接比。');
+    L.push('三組怎麼分：看酷澎商品主檔的庫存，這個 Wing 商品在最新清單的所有選項加總大於 0 是「有庫存」、全部是 0 是「沒庫存」；有選項沒有庫存數字算「庫存不明」。');
+    L.push('同一個原廠編號掛在好幾個 Wing 商品時，庫存是同一批貨（看庫存欄的滑鼠提示），不要相加。');
   }else if(kind==='f1102'){
     L.push('三組怎麼分：看 MOMO 寄倉 F1102 可賣量，大於 0 是「有庫存」；F1102 沒有的品號算「沒庫存」（未寄倉賣不了）。');
   }else if(kind==='mobic'){
@@ -34820,16 +34855,15 @@ function __momoZeroSnap(ym){
   return out;
 }
 // ══════ 「🎯 零動銷」彈窗（酷澎兩館：好麻吉＝麻吉、玩樂＝露營館；2026-11-25 第 1 塊）══════
-//   列出「選定月份在架、整月沒有賣出」的商品頁，給操作人員拉動銷率用。版面照蝦皮版、MOMO 版，樣式共用 us-*，DOM 自己一份（cz-）。
+//   列出「選定月份在架、整月沒有賣出」的 Wing 商品，給操作人員拉動銷率用。版面照蝦皮版、MOMO 版，樣式共用 us-*，DOM 自己一份（cz-）。
 //   🔴 純讀取：不寫雲端、不寫 localStorage、不另外讀雲端（主檔、報表都是既有訂閱進記憶體的）。
-//   定義＝個別通路頁動銷率卡同一套（cupProductsListed＋cupSellThroughCalc）：
-//     在架＝選項出現在最新一次 price_inventory 清單、而且不是 판매중지（同頁任一選項上架＝這頁上架）；以商品頁（Product ID＝報表 dispId）為單位。
-//     零動銷＝在架的頁 − 這個月報表 qty>0 的 dispId（"/" 拆開）⇒ 筆數一定＝卡片的分母－分子。
-//   庫存＝這頁在最新清單裡所有選項的 stock 加總（不同選項是不同 SKU，不重複算）；>0＝①、全部有數字且 0＝②、有選項沒數字＝③。
-//     同一個原廠編號掛在好幾頁時庫存是共用的（v920 算原廠編號庫存取最大值）：清單照頁加總，只在滑鼠提示寫「也掛在另外 N 頁」。
-//   品名：主檔不存品名 ⇒ 本通路任一月報表同 dispId 的列名 → 兩館任一報表同原廠編號 → PChome、MOMO 主檔同原廠編號 → 沒有。
-//   上月營收＝前一個月報表裡掛在這頁的列營收合計；最近有賣＝往回找報表裡這頁 qty>0 的最近一個月。
-/* ═══ CUP-ZERO-PURE-BEGIN：酷澎零動銷純函式，node 測試用標記抽取（依賴 CUP-PM-PURE 的 cupProductsListed／cupSellThroughCalc），不碰 DOM／Store／localStorage ═══ */
+//   定義＝個別通路頁動銷率卡同一套（2026-11-25 第 2 塊起 Wing 商品口徑：cupSidListed＋cupSidSellThroughCalc）：
+//     在架＝在架商品頁（選項出現在最新一次 price_inventory 清單、而且不是 판매중지）底下所有 Wing 商品（sid）；主檔查不到 sid 的頁自己算一個。
+//     零動銷＝在架的 Wing 商品 − 這個月報表 qty>0 的 dispId（"/" 拆開）經主檔換成的 sid ⇒ 筆數一定＝卡片的分母－分子。一頁掛好幾個 sid ⇒ 這頁有賣就每個 sid 都算有賣。
+//   庫存＝這個 sid 在最新清單裡所有選項的 stock 加總；>0＝①、全部有數字且 0＝②、有選項沒數字＝③。同一個原廠編號掛在好幾個 sid 時，只在滑鼠提示寫「也掛在另外 N 個 Wing 商品」。
+//   品名：這個 sid 底下有品名的頁（本通路任一月報表同 dispId 的列名）→ 兩館任一報表同原廠編號 → PChome、MOMO 主檔同原廠編號 → 沒有。
+//   上月營收＝前一個月報表裡掛在這個 sid 任一頁的列營收合計；最近有賣＝往回找報表裡這個 sid 任一頁 qty>0 的最近一個月。
+/* ═══ CUP-ZERO-PURE-BEGIN：酷澎零動銷純函式，node 測試用標記抽取（依賴 CUP-PM-PURE 的 cupSidIndex／cupSidListed／cupSidSellThroughCalc），不碰 DOM／Store／localStorage ═══ */
 const CUP_ZERO_OPEN={ '露營館':'2026-10-25' };   // 開賣日（那個月上方加黃字）；新增酷澎通路有開賣日就加
 function _czIds(s){ return String(s||'').split('/').map(x=>x.trim()).filter(Boolean); }
 // 品名索引。own＝本通路報表 rows 陣列（舊到新）、all＝兩館報表 rows 陣列（舊到新）、other＝{ 原廠編號: 品名 }（PChome、MOMO 主檔）
@@ -34840,40 +34874,47 @@ function _czNameIndex(own, all, other){
   return { byDisp, byCode, byOther:other||{} };
 }
 // o＝{ doc:主檔, rows:這個月報表列, prevRows:上個月報表列｜null, hist:[{ym, rows}]（新到舊、只含選定月份以前）, names:_czNameIndex }
+//   2026-11-25 第 2 塊：一列一個 Wing 商品（sid；主檔查不到 sid 的商品頁自己一列，unit＝'p:'+頁）。筆數＝cupSidSellThroughCalc 的 den − num。
 function _czBuild(o){
-  const doc=o.doc||{items:[]}, L=cupProductsListed(doc), st=cupSellThroughCalc(o.rows||[], L.listed);
+  const doc=o.doc||{items:[]}, idx=cupSidIndex(doc), L=cupSidListed(doc, idx), st=cupSidSellThroughCalc(o.rows||[], L.listed, idx);
   const has=(obj,k)=>Object.prototype.hasOwnProperty.call(obj,k);
-  const sold=new Set(); (o.rows||[]).forEach(r=>{ if(r&&Number(r.qty)>0) _czIds(r.dispId).forEach(d=>sold.add(d)); });
-  const latest=L.latest, byPid={}, codePages={};
+  const latest=L.latest, byUnit={}, codeUnits={}, pagesAll={};
+  Object.keys(idx.byPid).forEach(pid=>idx.byPid[pid].forEach(s=>{ (pagesAll[s]=pagesAll[s]||new Set()).add(pid); }));
   (doc.items||[]).forEach(p=>{ if(!p||!p.pid||!latest||p.lastSeen!==latest) return;
-    (byPid[p.pid]=byPid[p.pid]||[]).push(p);
-    if(p.code) (codePages[p.code]=codePages[p.code]||new Set()).add(p.pid); });
+    const s=String(p.sid==null?'':p.sid).trim(), u=s||('p:'+p.pid);
+    (byUnit[u]=byUnit[u]||[]).push(p);
+    if(p.code) (codeUnits[p.code]=codeUnits[p.code]||new Set()).add(u); });
   const names=o.names||{byDisp:{},byCode:{},byOther:{}};
-  const revOf=(rows,pid)=>{ if(!rows) return null; let v=0, shared=false; rows.forEach(r=>{ if(!r) return; const ids=_czIds(r.dispId); if(ids.indexOf(pid)<0) return; v+=Number(r.rev)||0; if(ids.length>1) shared=true; }); return {v,shared}; };
-  const groups={have:[],zero:[],unknown:[]}; let multiPage=0;
-  [...L.listed].filter(pid=>!sold.has(pid)).forEach(pid=>{
-    const opts=(byPid[pid]||[]).slice().sort((a,b)=>String(a.sku)<String(b.sku)?-1:String(a.sku)>String(b.sku)?1:0);
+  const pagesOfUnit=u=>u.indexOf('p:')===0?new Set([u.slice(2)]):(pagesAll[u]||new Set());
+  const revOf=(rows,pg)=>{ if(!rows) return null; let v=0, shared=false; rows.forEach(r=>{ if(!r) return; const ids=_czIds(r.dispId); if(!ids.some(d=>pg.has(d))) return; v+=Number(r.rev)||0; if(ids.some(d=>!pg.has(d))) shared=true; }); return {v,shared}; };
+  const groups={have:[],zero:[],unknown:[]}; let multiPage=0, multiUnitPage=0;
+  [...L.listed].filter(u=>!st.sold.has(u)).forEach(u=>{
+    const opts=(byUnit[u]||[]).slice().sort((a,b)=>String(a.sku)<String(b.sku)?-1:String(a.sku)>String(b.sku)?1:0);
     const vals=opts.map(x=>x.stock).filter(v=>v!=null&&v!==''&&!isNaN(+v)).map(Number);
     const stock=vals.length?vals.reduce((t,v)=>t+v,0):null;
     const g=vals.length&&stock>0?'have':(vals.length&&vals.length===opts.length?'zero':'unknown');
     const codes=[...new Set(opts.map(x=>String(x.code||'')).filter(Boolean))].sort();
-    const sids=[...new Set(opts.map(x=>String(x.sid==null?'':x.sid).trim()).filter(Boolean))].sort();   // Wing 商品 ID（只顯示，不影響分組與筆數）
-    const shared=codes.map(c=>({code:c,others:(codePages[c]?codePages[c].size:1)-1})).filter(x=>x.others>0);
+    const label=cupSidUnitLabel(u), sids=label?[label]:[];
+    const pages=(L.pagesOf[u]||[]).slice(), pg=pagesOfUnit(u);
+    const pageSold=pages.map(p=>({ pid:p, sold:st.soldPages.has(p) }));
+    const shared=codes.map(c=>({code:c,others:(codeUnits[c]?codeUnits[c].size:1)-1})).filter(x=>x.others>0);
     if(shared.length) multiPage++;
+    if(pages.some(p=>(idx.byPid[p]||[]).length>1)) multiUnitPage++;
     let name='', nameSrc='';
-    if(names.byDisp[pid]){ name=names.byDisp[pid]; nameSrc='report'; }
+    const p1=pages.find(p=>names.byDisp[p]);
+    if(p1){ name=names.byDisp[p1]; nameSrc='report'; }
     else { const c1=codes.find(c=>has(names.byCode,c)); if(c1){ name=names.byCode[c1]; nameSrc='reportCode'; }
       else { const c2=codes.find(c=>has(names.byOther,c)&&names.byOther[c]); if(c2){ name=names.byOther[c2]; nameSrc='other'; } } }
-    const pr=o.prevRows?revOf(o.prevRows,pid):null;
-    const last=(o.hist||[]).find(h=>(h.rows||[]).some(r=>r&&Number(r.qty)>0&&_czIds(r.dispId).indexOf(pid)>=0));
-    groups[g].push({ pid, sids, name, nameSrc, codes, optN:opts.length, stock, partial:vals.length>0&&vals.length<opts.length, shared,
+    const pr=o.prevRows?revOf(o.prevRows,pg):null;
+    const last=(o.hist||[]).find(h=>(h.rows||[]).some(r=>r&&Number(r.qty)>0&&_czIds(r.dispId).some(d=>pg.has(d))));
+    groups[g].push({ unit:u, sids, pid:pages.join('、'), pages, pageSold, name, nameSrc, codes, optN:opts.length, stock, partial:vals.length>0&&vals.length<opts.length, shared,
       rev:pr?pr.v:null, revShared:!!(pr&&pr.shared), lastSold:last?last.ym:'' });
   });
-  const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.pid<b.pid?-1:a.pid>b.pid?1:0);
+  const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.unit<b.unit?-1:a.unit>b.unit?1:0);
   groups.have.sort((a,b)=>(b.stock-a.stock)||byRev(a,b));
   groups.zero.sort(byRev); groups.unknown.sort(byRev);
-  return { groups, num:st.num, den:st.den, listedN:L.listed.size, soldNotListed:st.soldNotListed, latest,
-    unsold:groups.have.length+groups.zero.length+groups.unknown.length, multiPage };
+  return { groups, num:st.num, den:st.den, listedN:L.listed.size, soldNotListed:st.soldNotListed, unmapped:st.unmapped, latest,
+    unsold:groups.have.length+groups.zero.length+groups.unknown.length, multiPage, multiUnitPage };
 }
 // 開賣那個月的黃字（'2026-10-25' 開賣、選 2026-10 ⇒ { date:'2026/10/25', days:7 }）；不是開賣月回 null
 function _czOpenNote(shop, ym){
@@ -34974,18 +35015,23 @@ function _czRender(){
   const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
   const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
   const srcTxt={report:'品名來自這個通路的酷澎報表',reportCode:'品名來自酷澎報表（同原廠編號）',other:'品名來自 PChome／MOMO 主檔（同原廠編號）'};
-  const nameTip=x=>(x.name||'（沒有品名）')+'\nWing 商品 ID：'+((x.sids&&x.sids.length)?x.sids.join('、'):'（主檔沒有）')+'\n商品頁 ID：'+x.pid+(x.codes.length?'\n原廠編號：'+x.codes.join('、'):'')+'\n選項數：'+x.optN+(x.nameSrc?'\n'+srcTxt[x.nameSrc]:'');
+  const srcTxtU={report:'品名來自這個通路的酷澎報表（這個 Wing 商品底下的頁）',reportCode:srcTxt.reportCode,other:srcTxt.other};
+  // 前台頁一覽（2026-11-25 第 2 塊）：「共 4 個前台頁，本月都沒賣」＋逐頁（最多列 12 頁）
+  const pagesTip=x=>{ const P=x.pageSold||[], soldN=P.filter(p=>p.sold).length;
+    if(P.length<=1) return '前台商品頁 '+(P[0]?P[0].pid:'—')+(P[0]&&P[0].sold?'（本月有賣）':'（本月沒賣）');
+    return '共 '+P.length+' 個前台頁，'+(soldN?'其中 '+soldN+' 頁本月有賣':'本月都沒賣')+'\n'+P.slice(0,12).map(p=>'・'+p.pid+(p.sold?'　本月有賣':'　本月沒賣')).join('\n')+(P.length>12?'\n…另外 '+(P.length-12)+' 頁':''); };
+  const nameTip=x=>(x.name||'（沒有品名）')+'\nWing 商品 ID：'+((x.sids&&x.sids.length)?x.sids.join('、'):'（主檔沒有，以商品頁計）')+'\n'+pagesTip(x)+(x.codes.length?'\n原廠編號：'+x.codes.join('、'):'')+'\n選項數：'+x.optN+(x.nameSrc?'\n'+srcTxtU[x.nameSrc]:'');
   const stockTip=x=>{
-    const L=[x.stock==null?'主檔沒有這頁選項的庫存數字':'這頁 '+x.optN+' 個選項的庫存加總'+(x.partial?'（部分選項沒有數字）':'')];
-    x.shared.forEach(s=>L.push(s.code+' 也掛在另外 '+s.others+' 頁，庫存共用'));
+    const L=[x.stock==null?'主檔沒有這個 Wing 商品選項的庫存數字':'這個 Wing 商品在最新清單 '+x.optN+' 個選項的庫存加總'+(x.partial?'（部分選項沒有數字）':'')];
+    x.shared.forEach(s=>L.push(s.code+' 也掛在另外 '+s.others+' 個 Wing 商品，庫存共用'));
     L.push('酷澎商品主檔，截至 '+day);
     return L.join('\n');
   };
   const nameCell=x=>x.name?e(x.name):(x.codes.length?e(x.codes.join('、')):'')+'<span class="us-na">（沒有品名）</span>';
   const row=x=>`<tr><td class="tl us-name" title="${e(nameTip(x))}"><div class="us-name-txt">${nameCell(x)}</div></td>`+
-    `<td class="tl" title="${e('Wing 商品 ID：在 Wing 後台用這個搜尋\n商品頁 ID：'+x.pid+'（前台的商品頁）')}">${(x.sids&&x.sids.length)?e(x.sids.join('、')):'<span class="us-na">—</span>'}<div class="us-id-sub">頁 ${e(x.pid)}</div></td>`+
-    `<td title="${e(stockTip(x))}">${num(x.stock)}${x.partial?'<div class="us-sub">部分選項沒有數字</div>':''}${x.shared.length?'<div class="us-sub">庫存跟其他頁共用</div>':''}</td>`+
-    `<td${x.revShared?' title="這頁在報表裡跟其他頁合在同一列，營收是那幾頁合計"':''}>${num(x.rev)}</td>`+
+    `<td class="tl" title="${e('Wing 商品 ID：在 Wing 後台用這個搜尋\n'+pagesTip(x))}">${(x.sids&&x.sids.length)?e(x.sids.join('、')):'<span class="us-na">—</span>'}<div class="us-id-sub">${(x.pages||[]).length>2?'共 '+x.pages.length+' 個前台頁':'頁 '+e(x.pid)}</div></td>`+
+    `<td title="${e(stockTip(x))}">${num(x.stock)}${x.partial?'<div class="us-sub">部分選項沒有數字</div>':''}${x.shared.length?'<div class="us-sub">庫存跟其他 Wing 商品共用</div>':''}</td>`+
+    `<td${x.revShared?' title="這個 Wing 商品的頁在報表裡跟其他頁合在同一列，營收是那幾頁合計"':''}>${num(x.rev)}</td>`+
     `<td>${x.lastSold?_usYmLabel(x.lastSold):'<span class="us-na">—</span>'}</td></tr>`;
   const pmm=d.prevMonthNo;
   const th=`<tr><th class="tl">商品名稱</th><th class="tl us-th-case">Wing 商品 ID</th><th>庫存</th><th title="${d.prevYm?pmm+' 月這個通路的營收':'沒有上個月的報表'}">上月營收</th><th>最近有賣</th></tr>`;
@@ -35001,9 +35047,10 @@ function _czRender(){
 function coupangZeroExportExcel(){
   const d=_czView.data; if(!d) return;
   const day=_czDay(d.res.latest);
-  const aoa=[['分組','商品名稱','Wing 商品 ID(sid)','酷澎編號(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']];
+  // 2026-11-25 第 2 塊：一列一個 Wing 商品；商品頁 ID 多頁用頓號（欄位位置不變）
+  const aoa=[['分組','商品名稱','Wing 商品 ID(sid)','商品頁 ID(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']];
   _CZ_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label, x.name||'（沒有品名）', (x.sids||[]).join('、'), x.pid, x.codes.join('、'), x.optN, x.stock==null?'':x.stock,
-    (x.stock==null?'主檔沒有庫存數字':x.optN+' 個選項加總'+(x.partial?'（部分選項沒有數字）':''))+x.shared.map(s=>'；'+s.code+' 也掛在另外 '+s.others+' 頁，庫存共用').join('')+'（酷澎商品主檔，截至 '+day+'）',
+    (x.stock==null?'主檔沒有庫存數字':x.optN+' 個選項加總'+(x.partial?'（部分選項沒有數字）':''))+x.shared.map(s=>'；'+s.code+' 也掛在另外 '+s.others+' 個 Wing 商品，庫存共用').join('')+'（酷澎商品主檔，截至 '+day+'）',
     x.rev==null?'':Math.round(x.rev), x.lastSold?_usYmLabel(x.lastSold):''])));
   _zeroWriteXlsx(aoa,'零動銷_酷澎'+String(cupShopDisplay(d.shop)).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,d.ym+' 零動銷',[5,6,8],
     [{wch:12},{wch:40},{wch:18},{wch:18},{wch:16},{wch:8},{wch:10},{wch:44},{wch:12},{wch:10}]);
@@ -35017,7 +35064,7 @@ function __cupZeroSnap(ym){
     if(!d){ out[shop]={state:'主檔還沒載入'}; return; }
     if(!rep||!Array.isArray(rep.rows)){ out[shop]={state:'這個月沒有報表'}; return; }
     const r=_czBuild({doc:d,rows:rep.rows,prevRows:null,hist:[],names:{byDisp:{},byCode:{},byOther:{}}});
-    const card=cupSellThroughCalc(rep.rows, cupProductsListed(d).listed);
+    const L=cupSidListedOf(shop), card=cupSidSellThroughCalc(rep.rows, L.listed, L.idx);   // 2026-11-25：Wing 商品口徑（同卡片）
     out[shop]={清單筆數:r.unsold,卡片分母減分子:card.den-card.num,有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,
       跨頁共用:r.multiPage,動銷率:card.num+'/'+card.den,主檔截至:_czDay(r.latest)};
   });
