@@ -30963,6 +30963,22 @@ function cupLoadProducts(shop){
   _cupProdMem[shop]=doc;
   return doc;
 }
+// Wing 商品 ID：cupSidOf(通路, dispId, 原廠編號) → 字串｜陣列｜null（純函式在 CUP-PM-PURE 的 cupSidIndex／cupSidLookup）。
+//   主檔沒到（本機沒有、或讀不到）⇒ null，畫面就照原樣顯示酷澎編號、不報錯。對照表跟著主檔 doc 換（WeakMap）。
+const _cupSidIdxCache=new WeakMap();
+function cupSidOf(shop, dispId, code){
+  let d=null; try{ d=cupLoadProducts(shop); }catch(e){ return null; }
+  if(!d||_cupProdBad[shop]) return null;
+  let idx=_cupSidIdxCache.get(d); if(!idx){ idx=cupSidIndex(d); _cupSidIdxCache.set(d, idx); }
+  return cupSidLookup(idx, dispId, code);
+}
+// 淨利表品名下方那一行小字：有 Wing 商品 ID ⇒「Wing 商品 ID {sid}｜頁 {dispId}」；沒有 ⇒ 跟改版前逐字相同。
+function cupIdSubHtml(shop, dispId, code){
+  const raw=String(dispId||''), did=_momoEsc(raw), sid=cupSidOf(shop, dispId, code);
+  if(sid==null) return did?`<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>`:'';
+  const st=cupSidText(sid), tip='Wing 商品 ID '+st+'（在 Wing 後台用這個搜尋）'+(raw?'\n商品頁 ID '+raw+'（前台的商品頁）':'');
+  return `<div class="mm-sub-line cup-wing-sub" title="${_momoEsc(tip)}">Wing 商品 ID ${_momoEsc(st)}${raw?'｜頁 '+did:''}</div>`;
+}
 // 寫本機：LZ1 → setItem → 讀回比對；壓不了改寫 JSON；都不行回 false（記憶體不改）。
 function cupSaveProductsLocal(shop, doc, opts){   // opts.fromSync＝同步確認後寫回（不標 dirty、不進待同步）
   const k=cupProductsKey(shop);
@@ -31919,7 +31935,7 @@ function cupProfitTabHTML(shop){
     <div id="cup-misscost-chip-${shop}"></div>
     <div id="cup-returns-${shop}"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-      ${momoSearchBox(shop,'cup-search-'+shop,_cupSearch[shop]||'','搜尋商品名／原廠編號／酷澎編號','cupOnSearch','width:260px;max-width:48vw')}
+      ${momoSearchBox(shop,'cup-search-'+shop,_cupSearch[shop]||'','搜尋商品名／原廠編號／Wing 商品 ID／頁 ID','cupOnSearch','width:260px;max-width:48vw')}
       ${cupPageModeHtml(shop)}
       <span style="display:flex;gap:8px;align-items:center"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">階層分布</button><button class="col-pick-btn us-btn" onclick="openCoupangZeroModal('${shop}')" title="選定月份在架、整月沒有賣出的商品頁">🎯 零動銷</button></span></div>
     <div id="cup-tbl-${shop}"><div class="empty"><div class="empty-hint">到「訂單明細」上傳我的訂單（＋選填 MSF）後產表</div></div></div>`;
@@ -32031,7 +32047,8 @@ function cupExportExcel(shop){
     if(c.fmt==='pct') return v==null?'':+(v*100).toFixed(1);
     return v==null?'':v;
   };
-  const aoa=[cols.map(c=>c.label), ...rows.map(r=>cols.map(c=>cellVal(r,c)))];
+  // 2026-11-25：最後加兩欄「Wing 商品 ID」「商品頁 ID」（既有欄位順序不動；ID 一律存文字，Excel 才不會把長數字變科學記號）
+  const aoa=[cols.map(c=>c.label).concat(['Wing 商品 ID','商品頁 ID']), ...rows.map(r=>cols.map(c=>cellVal(r,c)).concat([cupSidText(cupSidOf(shop,r.dispId,r.code)), String(r.dispId||'')]))];
   const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '酷澎淨利');
   const safe=String(cupShopDisplay(shop)).replace(/[\\/:*?"<>|]/g,''); XLSX.writeFile(wb, '酷澎_'+safe+'_'+(_cupSelMonth[shop]||'')+'_淨利.xlsx');
 }
@@ -32620,7 +32637,7 @@ function _cupSearchFilter(shop,rows){
   const q=String(_cupSearch[shop]||'').trim().toLowerCase(); if(!q) return rows;
   return rows.filter(r=>{
     const name=String(r.name||'').toLowerCase(), code=String(r.code||'').toLowerCase(), disp=String(r.dispId||'').toLowerCase();
-    return name.includes(q)||code.includes(q)||disp.includes(q);
+    return name.includes(q)||code.includes(q)||disp.includes(q)||cupSidText(cupSidOf(shop,r.dispId,r.code)).includes(q);   // 也比對 Wing 商品 ID（貼 Wing 後台的 ID 就搜得到）
   });
 }
 function cupSetSort(shop,col){
@@ -32706,9 +32723,11 @@ function cupGroupSort(items, sort, isNum){
 }
 // 搜尋：比對商品名／原廠編號／酷澎編號（同 _cupSearchFilter）。任一成員符合 ⇒ 留下該組、只列符合的成員（shown）、自動展開（forceOpen）；
 //   外層合計仍是整個商品頁（不隨搜尋變）。q 空白 ⇒ 原樣。
-function cupGroupFilter(items, q){
+//   sidOf（選填）＝列 → Wing 商品 ID 文字（cupSidText(cupSidOf(…))）；有給就也比對它。
+function cupGroupFilter(items, q, sidOf){
   q=String(q||'').trim().toLowerCase(); if(!q) return items;
-  const hit=r=>String(r.name||'').toLowerCase().includes(q)||String(r.code||'').toLowerCase().includes(q)||String(r.dispId||'').toLowerCase().includes(q);
+  const hit=r=>String(r.name||'').toLowerCase().includes(q)||String(r.code||'').toLowerCase().includes(q)||String(r.dispId||'').toLowerCase().includes(q)
+    ||(typeof sidOf==='function'&&String(sidOf(r)||'').toLowerCase().includes(q));
   const out=[];
   items.forEach(it=>{
     if(it.type!=='group'){ if(hit(it.row)) out.push(it); return; }
@@ -32797,7 +32816,7 @@ function renderCoupangTableBody(shop){
         if(c.k==='code') return `<td class="tl cup-pg-stk-code"><span class="cup-pg-arrow">${g.open?'▾':'▸'}</span>${g.members.length} 個規格</td>`;
         if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), did=_momoEsc(String(g.pageId));
           const flag=r.missN>0?`<div class="cup-pg-flag" title="淨利、淨利率只算有成本的規格（同上方大數字卡）">含 ${r.missN} 個缺成本</div>`:'';
-          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div><div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>${flag}</td>`; }
+          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${cupIdSubHtml(shop, g.pageId, g.members[0]&&g.members[0].code)}${flag}</td>`; }
         if(c.k==='note') return `<td class="tl" id="${_cupPageDomId(shop,g.pageId)}" onclick="event.stopPropagation()">${cupPageNoteCellHtml(shop,g.pageId,g.members)}</td>`;
         if(c.fmt==='netCell' && r.costStatus==='ok' && v!=null){
           const nTip=`商品頁合計（${g.members.length} 個規格${r.missN>0?'，其中 '+r.missN+' 個缺成本不計':''}）：淨利 ${momoMoney(v)} ＝ 營收 ${momoMoney(r.cRev||0)} − 營業稅 ${momoMoney(r.tax||0)}（營收×5/105）− 成本 ${momoMoney(r.cost||0)} − 平台費用 ${momoMoney(r.cFee||0)}`;
@@ -32805,8 +32824,8 @@ function renderCoupangTableBody(shop){
       }
       if(kind==='member'){
         if(c.k==='code') return `<td class="tl cup-pg-stk-code cup-pg-mem-code">${_momoEsc(String(v==null?'':v))}</td>`;
-        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), did=_momoEsc(String(r.dispId||'')), ex=g.multi[String(r.code)];
-          const sub=did?`<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>`:'';
+        if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v)), ex=g.multi[String(r.code)];
+          const sub=cupIdSubHtml(shop, r.dispId, r.code);
           const tag=ex?`<div class="cup-pg-tag" title="這個原廠編號同時掛在 ${ex+1} 個商品頁，報表分不出各頁各賣多少，整筆算在這一頁">另掛 ${ex} 頁</div>`:'';
           return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${sub}${tag}</td>`; }
         if(c.k==='note'){ const esc=_momoEsc(String(v||'')), pid=_momoEsc(String(g.pageId));
@@ -32840,7 +32859,7 @@ function renderCoupangTableBody(shop){
       // 商品名：照 MOMO 名稱欄（mm-name-wrap+mm-name-clip、無硬 max-width→截斷跟著欄寬、拉寬見更多/拉滿見全名、hover title 全名）；
       //   酷澎商品編號(dispId)改放名稱下方小字（照 MOMO 品號 .mm-sub-line：font-size:10px/#9ca3af/ellipsis；多選項 / 分隔、title 全列）
       if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v));
-        const did=_momoEsc(String(r.dispId||'')); const sub = did ? `<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>` : '';
+        const sub=cupIdSubHtml(shop, r.dispId, r.code);   // 2026-11-25：有 Wing 商品 ID 就顯示「Wing 商品 ID {sid}｜頁 {dispId}」，沒有照舊
         return `<td class="tl" style="${stk('name',false)}"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${sub}</td>`; }
       if(c.k==='code'){ return `<td class="tl" style="${stk('code',false)}white-space:nowrap;font-variant-numeric:tabular-nums">${_momoEsc(String(v==null?'':v))}</td>`; }
       const disp=c.fmt?fmtFns[c.fmt](v):(v==null?'':v);
@@ -32857,7 +32876,7 @@ function renderCoupangTableBody(shop){
     const G=cupGroupByPage(_cupMergedRows[shop]||[]);
     const reg=_cupPageGroups[shop]={}; G.items.forEach(it=>{ if(it.type==='group') reg[it.pageId]=it.members.map(r=>r.code); });
     const colDef=curSort?CUP_TABLE_COLS.find(c=>c.k===curSort.col):null;
-    const items=cupGroupFilter(cupGroupSort(G.items, curSort||null, !!(colDef&&colDef.fmt)), _cupSearch[shop]);
+    const items=cupGroupFilter(cupGroupSort(G.items, curSort||null, !!(colDef&&colDef.fmt)), _cupSearch[shop], r=>cupSidText(cupSidOf(shop,r.dispId,r.code)));
     const openSet=_cupPageOpen[shop]||new Set();
     tbody=items.map(it=>{
       if(it.type!=='group') return rowTr(it.row);
@@ -33102,6 +33121,8 @@ function cupRenderAnalysis(shop, r){
   const grossTxt = r.costStatus==='ok' ? money(r.gross) : (barcode?'—':'缺成本');
   const netTxt = r.costStatus==='ok' ? money(r.net) : (barcode?'—':'缺成本');
   const did=esc(String(r.dispId||''));
+  const sidV=cupSidOf(shop, r.dispId, r.code);   // Wing 商品 ID（主檔還沒到 ⇒ null，不顯示這一行）
+  const wingLine=sidV==null?'':`<div class="cup-ana-wing" title="在 Wing 後台用這個 ID 搜尋">Wing 商品 ID ${esc(cupSidText(sidV))}</div>`;
   const mrow=(label,val,note)=>`<tr><td style="padding:6px 8px;color:#6b7280">${label}</td><td style="padding:6px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${val}</td>${note?`<td style="padding:6px 8px;color:#9ca3af;font-size:11px">${note}</td>`:'<td></td>'}</tr>`;
   const optN=((momoLoadOptlog(shop)||{})[r.code]||[]).length;
   const tabBtn=(t,label)=>`<button id="cup-ana-tab-${t}" onclick="cupAnaTab('${t}')" style="padding:8px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2px solid ${_cupAnaTab===t?'#0ea5e9':'transparent'};color:${_cupAnaTab===t?'#0ea5e9':'#6b7280'};cursor:pointer">${label}</button>`;
@@ -33144,7 +33165,7 @@ function cupRenderAnalysis(shop, r){
   ov.innerHTML=`<div class="ana-modal" style="width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3;gap:12px">
       <div style="min-width:0"><div style="font-size:16px;font-weight:800;line-height:1.35">${esc(r.name||r.code)}</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:2px">原廠編號 ${esc(r.code)}${did?' · 酷澎編號 '+did:''} · ${esc(cupShopDisplay(shop))} · ${esc(_cupSelMonth[shop]||'')}</div></div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:2px">原廠編號 ${esc(r.code)}${did?' · 酷澎編號 '+did:''} · ${esc(cupShopDisplay(shop))} · ${esc(_cupSelMonth[shop]||'')}</div>${wingLine}</div>
       <button onclick="cupCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
     </div>
     <div role="tablist" style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid #e2e8f0">${tabBtn('analysis','分析')}${tabBtn('pricing','定價與成本')}${tabBtn('optlog','優化紀錄'+(optN?' ('+optN+')':''))}</div>
@@ -33383,6 +33404,27 @@ function cupSellThroughCalc(rows, listedSet){
   const den=new Set(listedSet||[]); let soldNotListed=0; sold.forEach(x=>{ if(!den.has(x)){ den.add(x); soldNotListed++; } });
   return { num:sold.size, den:den.size, listedN:(listedSet?listedSet.size:0), soldNotListed, pct:(den.size>0?sold.size/den.size*100:null) };
 }
+// Wing 商品 ID（2026-11-25 酷澎第 1 塊）：price_inventory A 欄「供應商商品ID」＝主檔 sid，操作人員在 Wing 後台用它搜尋。
+//   只用來顯示與搜尋，不參與動銷率、零動銷、合計任何數字。主檔所有選項都算（不限最新清單）；同一個 key 有好幾個 sid ⇒ 依字串排序。
+function cupSidIndex(doc){
+  const byPid={}, byCode={}, add=(m,k,s)=>{ (m[k]=m[k]||new Set()).add(s); };
+  ((doc&&doc.items)||[]).forEach(p=>{ if(!p) return; const s=String(p.sid==null?'':p.sid).trim(); if(!s) return;
+    const pid=String(p.pid==null?'':p.pid).trim(), code=String(p.code==null?'':p.code).trim();
+    if(pid) add(byPid,pid,s); if(code) add(byCode,code,s); });
+  const fin=m=>{ const o={}; Object.keys(m).forEach(k=>{ o[k]=[...m[k]].sort(); }); return o; };
+  return { byPid:fin(byPid), byCode:fin(byCode) };
+}
+// dispId（報表「顯示產品ID」＝主檔 pid，可能是 "A/B"）→ sid；查不到再用原廠編號查；都查不到 ⇒ null。
+//   一個 sid ⇒ 字串；好幾個（一頁掛好幾個 Wing 商品，好麻吉有 4 頁）⇒ 排序過的陣列。
+function cupSidLookup(idx, dispId, code){
+  if(!idx) return null;
+  const set=new Set();
+  String(dispId==null?'':dispId).split('/').map(x=>x.trim()).filter(Boolean).forEach(p=>(idx.byPid[p]||[]).forEach(s=>set.add(s)));
+  if(!set.size){ const c=String(code==null?'':code).trim(); if(c) (idx.byCode[c]||[]).forEach(s=>set.add(s)); }
+  if(!set.size) return null;
+  const a=[...set].sort(); return a.length===1?a[0]:a;
+}
+function cupSidText(v){ return v==null?'':(Array.isArray(v)?v.join('、'):String(v)); }
 /* ═══ CUP-PM-PURE-END ═══ */
 /* ═══ CUP-PS-PURE-BEGIN：酷澎商品主檔雲端分片與合併（PR-C2 第 1 塊）純函式，node 測試用標記抽取，不碰 DOM／Store／localStorage／Firestore ═══ */
 //   雲端形狀：coupang_products/{maji|luying}_{0..3}，每份 { schema:1, shop, shard, shards:4, items:[…], latestExport, updatedAt }。
@@ -34815,6 +34857,7 @@ function _czBuild(o){
     const stock=vals.length?vals.reduce((t,v)=>t+v,0):null;
     const g=vals.length&&stock>0?'have':(vals.length&&vals.length===opts.length?'zero':'unknown');
     const codes=[...new Set(opts.map(x=>String(x.code||'')).filter(Boolean))].sort();
+    const sids=[...new Set(opts.map(x=>String(x.sid==null?'':x.sid).trim()).filter(Boolean))].sort();   // Wing 商品 ID（只顯示，不影響分組與筆數）
     const shared=codes.map(c=>({code:c,others:(codePages[c]?codePages[c].size:1)-1})).filter(x=>x.others>0);
     if(shared.length) multiPage++;
     let name='', nameSrc='';
@@ -34823,7 +34866,7 @@ function _czBuild(o){
       else { const c2=codes.find(c=>has(names.byOther,c)&&names.byOther[c]); if(c2){ name=names.byOther[c2]; nameSrc='other'; } } }
     const pr=o.prevRows?revOf(o.prevRows,pid):null;
     const last=(o.hist||[]).find(h=>(h.rows||[]).some(r=>r&&Number(r.qty)>0&&_czIds(r.dispId).indexOf(pid)>=0));
-    groups[g].push({ pid, name, nameSrc, codes, optN:opts.length, stock, partial:vals.length>0&&vals.length<opts.length, shared,
+    groups[g].push({ pid, sids, name, nameSrc, codes, optN:opts.length, stock, partial:vals.length>0&&vals.length<opts.length, shared,
       rev:pr?pr.v:null, revShared:!!(pr&&pr.shared), lastSold:last?last.ym:'' });
   });
   const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.pid<b.pid?-1:a.pid>b.pid?1:0);
@@ -34931,7 +34974,7 @@ function _czRender(){
   const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
   const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
   const srcTxt={report:'品名來自這個通路的酷澎報表',reportCode:'品名來自酷澎報表（同原廠編號）',other:'品名來自 PChome／MOMO 主檔（同原廠編號）'};
-  const nameTip=x=>(x.name||'（沒有品名）')+'\n酷澎編號：'+x.pid+(x.codes.length?'\n原廠編號：'+x.codes.join('、'):'')+'\n選項數：'+x.optN+(x.nameSrc?'\n'+srcTxt[x.nameSrc]:'');
+  const nameTip=x=>(x.name||'（沒有品名）')+'\nWing 商品 ID：'+((x.sids&&x.sids.length)?x.sids.join('、'):'（主檔沒有）')+'\n商品頁 ID：'+x.pid+(x.codes.length?'\n原廠編號：'+x.codes.join('、'):'')+'\n選項數：'+x.optN+(x.nameSrc?'\n'+srcTxt[x.nameSrc]:'');
   const stockTip=x=>{
     const L=[x.stock==null?'主檔沒有這頁選項的庫存數字':'這頁 '+x.optN+' 個選項的庫存加總'+(x.partial?'（部分選項沒有數字）':'')];
     x.shared.forEach(s=>L.push(s.code+' 也掛在另外 '+s.others+' 頁，庫存共用'));
@@ -34940,12 +34983,12 @@ function _czRender(){
   };
   const nameCell=x=>x.name?e(x.name):(x.codes.length?e(x.codes.join('、')):'')+'<span class="us-na">（沒有品名）</span>';
   const row=x=>`<tr><td class="tl us-name" title="${e(nameTip(x))}"><div class="us-name-txt">${nameCell(x)}</div></td>`+
-    `<td class="tl">${e(x.pid)}</td>`+
+    `<td class="tl" title="${e('Wing 商品 ID：在 Wing 後台用這個搜尋\n商品頁 ID：'+x.pid+'（前台的商品頁）')}">${(x.sids&&x.sids.length)?e(x.sids.join('、')):'<span class="us-na">—</span>'}<div class="us-id-sub">頁 ${e(x.pid)}</div></td>`+
     `<td title="${e(stockTip(x))}">${num(x.stock)}${x.partial?'<div class="us-sub">部分選項沒有數字</div>':''}${x.shared.length?'<div class="us-sub">庫存跟其他頁共用</div>':''}</td>`+
     `<td${x.revShared?' title="這頁在報表裡跟其他頁合在同一列，營收是那幾頁合計"':''}>${num(x.rev)}</td>`+
     `<td>${x.lastSold?_usYmLabel(x.lastSold):'<span class="us-na">—</span>'}</td></tr>`;
   const pmm=d.prevMonthNo;
-  const th=`<tr><th class="tl">商品名稱</th><th class="tl">酷澎編號</th><th>庫存</th><th title="${d.prevYm?pmm+' 月這個通路的營收':'沒有上個月的報表'}">上月營收</th><th>最近有賣</th></tr>`;
+  const th=`<tr><th class="tl">商品名稱</th><th class="tl us-th-case">Wing 商品 ID</th><th>庫存</th><th title="${d.prevYm?pmm+' 月這個通路的營收':'沒有上個月的報表'}">上月營收</th><th>最近有賣</th></tr>`;
   const grps=_CZ_GROUPS.map(G=>{
     const list=g[G.key];
     return `<details class="us-grp us-grp-${G.key}"${G.key==='have'?' open':''}><summary class="us-grp-hd">${G.label}（${list.length}）<span class="us-grp-sub">${e(G.sub)}</span></summary>`+
@@ -34958,12 +35001,12 @@ function _czRender(){
 function coupangZeroExportExcel(){
   const d=_czView.data; if(!d) return;
   const day=_czDay(d.res.latest);
-  const aoa=[['分組','商品名稱','酷澎編號(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']];
-  _CZ_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label, x.name||'（沒有品名）', x.pid, x.codes.join('、'), x.optN, x.stock==null?'':x.stock,
+  const aoa=[['分組','商品名稱','Wing 商品 ID(sid)','酷澎編號(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']];
+  _CZ_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label, x.name||'（沒有品名）', (x.sids||[]).join('、'), x.pid, x.codes.join('、'), x.optN, x.stock==null?'':x.stock,
     (x.stock==null?'主檔沒有庫存數字':x.optN+' 個選項加總'+(x.partial?'（部分選項沒有數字）':''))+x.shared.map(s=>'；'+s.code+' 也掛在另外 '+s.others+' 頁，庫存共用').join('')+'（酷澎商品主檔，截至 '+day+'）',
     x.rev==null?'':Math.round(x.rev), x.lastSold?_usYmLabel(x.lastSold):''])));
-  _zeroWriteXlsx(aoa,'零動銷_酷澎'+String(cupShopDisplay(d.shop)).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,d.ym+' 零動銷',[4,5,7],
-    [{wch:12},{wch:40},{wch:18},{wch:16},{wch:8},{wch:10},{wch:44},{wch:12},{wch:10}]);
+  _zeroWriteXlsx(aoa,'零動銷_酷澎'+String(cupShopDisplay(d.shop)).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,d.ym+' 零動銷',[5,6,8],
+    [{wch:12},{wch:40},{wch:18},{wch:18},{wch:16},{wch:8},{wch:10},{wch:44},{wch:12},{wch:10}]);
 }
 // 驗收用（只讀，名稱不以 __cloud 開頭）：__cupZeroSnap('2026-10') → 兩館的清單筆數、卡片分母－分子、三組
 function __cupZeroSnap(ym){

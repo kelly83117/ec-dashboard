@@ -2255,6 +2255,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-table td.us-name{width:100%;max-width:0;}
 .us-name-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:200px;}
 .us-sub{font-size:11px;color:var(--warn);}
+.us-table th.us-th-case{text-transform:none;}   /* 全站 th 預設全大寫；「Wing 商品 ID」照 Wing 後台的寫法顯示 */
+.us-id-sub{font-size:11px;color:var(--text-muted);}   /* 酷澎零動銷：Wing 商品 ID 下方的頁 ID（2026-11-25） */
 .us-sub-m{margin-left:2px;font-size:11px;color:var(--text-muted);}   /* MOMO：×20% 後是 0、公司倉還有貨 */
 .us-na{color:var(--text-faint);}
 .us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
@@ -2344,6 +2346,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .mm-ptbl td.cup-pg-mem-code{padding-left:26px;}
 .cup-pg-arrow{display:inline-block;width:16px;color:var(--text-muted);}
 .cup-pg-flag{margin-top:2px;font-size:10px;font-weight:600;color:var(--danger);}
+.mm-sub-line.cup-wing-sub{white-space:normal;overflow-wrap:anywhere;line-height:1.35;}   /* 淨利表品名下方 Wing 商品 ID：名稱欄窄也要看得到完整 ID（可換行、不截斷） */
+.cup-ana-wing{margin-top:2px;font-size:12px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;}   /* 酷澎商品彈窗：Wing 商品 ID（2026-11-25） */
 .cup-pg-tag{display:inline-block;margin-top:2px;padding:0 6px;border-radius:999px;background:var(--warn-soft);font-size:10px;font-weight:600;color:var(--text-muted);}
 .cup-pg-note-inp{width:120px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12px;font-weight:400;outline:none;}
 .cup-pg-note-mixed{font-size:12px;font-weight:600;color:var(--warn);cursor:pointer;text-decoration:underline dotted;}
