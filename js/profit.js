@@ -221,6 +221,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <div class="ana-modal-body us-body" id="mz-modal-body"></div>
     </div>
   </div>
+  <div class="ana-overlay" id="cz-modal-overlay" onclick="if(event.target===this)closeCoupangZeroModal()">
+    <div class="ana-modal us-modal">
+      <div class="ana-modal-hdr"><span id="cz-modal-title">🎯 零動銷</span><button class="ana-close-btn" onclick="closeCoupangZeroModal()">✕</button></div>
+      <div class="ana-modal-body us-body" id="cz-modal-body"></div>
+    </div>
+  </div>
   <div class="ana-overlay" id="tagfx-modal-overlay" onclick="if(event.target===this)closeTagFxModal()">
     <div class="ana-modal tagfx-modal">
       <div class="ana-modal-hdr"><span id="tagfx-modal-title">測試標籤成效</span><button class="ana-close-btn" onclick="closeTagFxModal()">✕</button></div>
@@ -31909,7 +31915,7 @@ function cupProfitTabHTML(shop){
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       ${momoSearchBox(shop,'cup-search-'+shop,_cupSearch[shop]||'','搜尋商品名／原廠編號／酷澎編號','cupOnSearch','width:260px;max-width:48vw')}
       ${cupPageModeHtml(shop)}
-      <span style="display:flex;gap:8px;align-items:center"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">階層分布</button></span></div>
+      <span style="display:flex;gap:8px;align-items:center"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">階層分布</button><button class="col-pick-btn us-btn" onclick="openCoupangZeroModal('${shop}')" title="選定月份在架、整月沒有賣出的商品頁">🎯 零動銷</button></span></div>
     <div id="cup-tbl-${shop}"><div class="empty"><div class="empty-hint">到「訂單明細」上傳我的訂單（＋選填 MSF）後產表</div></div></div>`;
 }
 function cupSelectMonth(shop, month){ _cupSelMonth[shop]=month; cupPageResetOpen(shop); cupRenderSub(shop); }   // 切月份：合併商品頁的展開狀態重設
@@ -34531,8 +34537,13 @@ function _zeroTip(kind,o){
   L.push('這份清單：選定月份在架、但整月沒有賣出的商品。筆數＝動銷率的「分母－分子」，賣出一件動銷率就會上升。');
   L.push(kind==='shopee'
     ?'「在架」用的是匯出整月商品表現當下的上下架狀態，不是月底的狀態。'
+    :kind==='coupang'
+    ?'「在架」是用目前最新一份商品清單（price_inventory，'+(o.listDate||'沒有清單日期')+'）判斷，不是當月的：舊月份可能列到當時還沒上架的頁，之後才停售的頁也不會出現在舊月份的清單裡。'
     :'「在架」用的是目前的上下架狀態，不是當月的；之後才下架的商品不會出現在舊月份的清單裡。');
-  if(kind==='f1102'){
+  if(kind==='coupang'){
+    L.push('以商品頁（酷澎編號）為單位。三組怎麼分：看酷澎商品主檔的庫存，這頁所有選項加總大於 0 是「有庫存」、全部是 0 是「沒庫存」；有選項沒有庫存數字算「庫存不明」。');
+    L.push('同一個原廠編號掛在好幾頁時，庫存是同一批貨（看庫存欄的滑鼠提示），不要把幾頁的庫存相加。');
+  }else if(kind==='f1102'){
     L.push('三組怎麼分：看 MOMO 寄倉 F1102 可賣量，大於 0 是「有庫存」；F1102 沒有的品號算「沒庫存」（未寄倉賣不了）。');
   }else if(kind==='mobic'){
     const pct=o.ratio!=null?Math.round(o.ratio*100):100;
@@ -34550,6 +34561,8 @@ function _zeroTip(kind,o){
   if(o.prevMonthNo)L.push('「上月營收」是 '+o.prevMonthNo+' 月這個通路的營收。');
   L.push(kind==='shopee'
     ?'「最近有賣」往回看'+(o.histFrom?' '+o.histFrom+' 起':'')+'已上傳的整月商品表現，看不到寫「—」。'
+    :kind==='coupang'
+    ?'「最近有賣」往回找最近一個有賣出的整月；酷澎最早只查到 '+(o.firstYm||'第一份報表')+'（這個通路第一份訂單報表），看不到寫「—」。'
     :'「最近有賣」往回找最近一個有賣出的整月；MOMO 最早只查到 '+MOMO_FIRST_PERIOD.replace('-','/')+'，看不到寫「—」。');
   return L.map((t,i)=>(i+1)+'. '+t).join('\n');
 }
@@ -34745,6 +34758,210 @@ function __momoZeroSnap(ym){
     out[shop]={清單筆數:r.unsold,分母減分子:t.activeTotal-t.soldActive,零動銷標籤:(tg.counts.dead_new||0)+(tg.counts.dead_long||0),
       有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,
       沒有原廠編號:r.noOrigin,莫筆克沒有:r.noMobic,F1102沒有:r.noF1102,動銷率:t.soldActive+'/'+t.activeTotal,庫存來源:r.ctx.date};
+  });
+  console.table(out);
+  return out;
+}
+// ══════ 「🎯 零動銷」彈窗（酷澎兩館：好麻吉＝麻吉、玩樂＝露營館；2026-11-25 第 1 塊）══════
+//   列出「選定月份在架、整月沒有賣出」的商品頁，給操作人員拉動銷率用。版面照蝦皮版、MOMO 版，樣式共用 us-*，DOM 自己一份（cz-）。
+//   🔴 純讀取：不寫雲端、不寫 localStorage、不另外讀雲端（主檔、報表都是既有訂閱進記憶體的）。
+//   定義＝個別通路頁動銷率卡同一套（cupProductsListed＋cupSellThroughCalc）：
+//     在架＝選項出現在最新一次 price_inventory 清單、而且不是 판매중지（同頁任一選項上架＝這頁上架）；以商品頁（Product ID＝報表 dispId）為單位。
+//     零動銷＝在架的頁 − 這個月報表 qty>0 的 dispId（"/" 拆開）⇒ 筆數一定＝卡片的分母－分子。
+//   庫存＝這頁在最新清單裡所有選項的 stock 加總（不同選項是不同 SKU，不重複算）；>0＝①、全部有數字且 0＝②、有選項沒數字＝③。
+//     同一個原廠編號掛在好幾頁時庫存是共用的（v920 算原廠編號庫存取最大值）：清單照頁加總，只在滑鼠提示寫「也掛在另外 N 頁」。
+//   品名：主檔不存品名 ⇒ 本通路任一月報表同 dispId 的列名 → 兩館任一報表同原廠編號 → PChome、MOMO 主檔同原廠編號 → 沒有。
+//   上月營收＝前一個月報表裡掛在這頁的列營收合計；最近有賣＝往回找報表裡這頁 qty>0 的最近一個月。
+/* ═══ CUP-ZERO-PURE-BEGIN：酷澎零動銷純函式，node 測試用標記抽取（依賴 CUP-PM-PURE 的 cupProductsListed／cupSellThroughCalc），不碰 DOM／Store／localStorage ═══ */
+const CUP_ZERO_OPEN={ '露營館':'2026-10-25' };   // 開賣日（那個月上方加黃字）；新增酷澎通路有開賣日就加
+function _czIds(s){ return String(s||'').split('/').map(x=>x.trim()).filter(Boolean); }
+// 品名索引。own＝本通路報表 rows 陣列（舊到新）、all＝兩館報表 rows 陣列（舊到新）、other＝{ 原廠編號: 品名 }（PChome、MOMO 主檔）
+function _czNameIndex(own, all, other){
+  const byDisp={}, byCode={};
+  (own||[]).forEach(rows=>(rows||[]).forEach(r=>{ if(!r||!r.name) return; _czIds(r.dispId).forEach(d=>{ byDisp[d]=r.name; }); }));
+  (all||[]).forEach(rows=>(rows||[]).forEach(r=>{ if(!r||!r.name||!r.code) return; byCode[String(r.code)]=r.name; }));
+  return { byDisp, byCode, byOther:other||{} };
+}
+// o＝{ doc:主檔, rows:這個月報表列, prevRows:上個月報表列｜null, hist:[{ym, rows}]（新到舊、只含選定月份以前）, names:_czNameIndex }
+function _czBuild(o){
+  const doc=o.doc||{items:[]}, L=cupProductsListed(doc), st=cupSellThroughCalc(o.rows||[], L.listed);
+  const has=(obj,k)=>Object.prototype.hasOwnProperty.call(obj,k);
+  const sold=new Set(); (o.rows||[]).forEach(r=>{ if(r&&Number(r.qty)>0) _czIds(r.dispId).forEach(d=>sold.add(d)); });
+  const latest=L.latest, byPid={}, codePages={};
+  (doc.items||[]).forEach(p=>{ if(!p||!p.pid||!latest||p.lastSeen!==latest) return;
+    (byPid[p.pid]=byPid[p.pid]||[]).push(p);
+    if(p.code) (codePages[p.code]=codePages[p.code]||new Set()).add(p.pid); });
+  const names=o.names||{byDisp:{},byCode:{},byOther:{}};
+  const revOf=(rows,pid)=>{ if(!rows) return null; let v=0, shared=false; rows.forEach(r=>{ if(!r) return; const ids=_czIds(r.dispId); if(ids.indexOf(pid)<0) return; v+=Number(r.rev)||0; if(ids.length>1) shared=true; }); return {v,shared}; };
+  const groups={have:[],zero:[],unknown:[]}; let multiPage=0;
+  [...L.listed].filter(pid=>!sold.has(pid)).forEach(pid=>{
+    const opts=(byPid[pid]||[]).slice().sort((a,b)=>String(a.sku)<String(b.sku)?-1:String(a.sku)>String(b.sku)?1:0);
+    const vals=opts.map(x=>x.stock).filter(v=>v!=null&&v!==''&&!isNaN(+v)).map(Number);
+    const stock=vals.length?vals.reduce((t,v)=>t+v,0):null;
+    const g=vals.length&&stock>0?'have':(vals.length&&vals.length===opts.length?'zero':'unknown');
+    const codes=[...new Set(opts.map(x=>String(x.code||'')).filter(Boolean))].sort();
+    const shared=codes.map(c=>({code:c,others:(codePages[c]?codePages[c].size:1)-1})).filter(x=>x.others>0);
+    if(shared.length) multiPage++;
+    let name='', nameSrc='';
+    if(names.byDisp[pid]){ name=names.byDisp[pid]; nameSrc='report'; }
+    else { const c1=codes.find(c=>has(names.byCode,c)); if(c1){ name=names.byCode[c1]; nameSrc='reportCode'; }
+      else { const c2=codes.find(c=>has(names.byOther,c)&&names.byOther[c]); if(c2){ name=names.byOther[c2]; nameSrc='other'; } } }
+    const pr=o.prevRows?revOf(o.prevRows,pid):null;
+    const last=(o.hist||[]).find(h=>(h.rows||[]).some(r=>r&&Number(r.qty)>0&&_czIds(r.dispId).indexOf(pid)>=0));
+    groups[g].push({ pid, name, nameSrc, codes, optN:opts.length, stock, partial:vals.length>0&&vals.length<opts.length, shared,
+      rev:pr?pr.v:null, revShared:!!(pr&&pr.shared), lastSold:last?last.ym:'' });
+  });
+  const byRev=(a,b)=>((b.rev==null?-1:b.rev)-(a.rev==null?-1:a.rev))||String(a.name).localeCompare(String(b.name),'zh-Hant')||(a.pid<b.pid?-1:a.pid>b.pid?1:0);
+  groups.have.sort((a,b)=>(b.stock-a.stock)||byRev(a,b));
+  groups.zero.sort(byRev); groups.unknown.sort(byRev);
+  return { groups, num:st.num, den:st.den, listedN:L.listed.size, soldNotListed:st.soldNotListed, latest,
+    unsold:groups.have.length+groups.zero.length+groups.unknown.length, multiPage };
+}
+// 開賣那個月的黃字（'2026-10-25' 開賣、選 2026-10 ⇒ { date:'2026/10/25', days:7 }）；不是開賣月回 null
+function _czOpenNote(shop, ym){
+  const d=CUP_ZERO_OPEN[shop]; if(!d||d.slice(0,7)!==ym) return null;
+  const y=+d.slice(0,4), m=+d.slice(5,7), day=+d.slice(8,10), dim=new Date(Date.UTC(y,m,0)).getUTCDate();
+  return { date:d.replace(/-/g,'/'), days:dim-day+1 };
+}
+/* ═══ CUP-ZERO-PURE-END ═══ */
+const _CZ_SHOPS=['麻吉','露營館'];
+const _CZ_GROUPS=[
+  {key:'have',label:'① 有庫存',sub:'優先推，依庫存多到少排'},
+  {key:'zero',label:'② 沒庫存',sub:'補貨或下架'},
+  {key:'unknown',label:'③ 庫存不明',sub:'主檔有選項沒有庫存數字'},
+];
+const _czView={shop:'',ym:'',data:null,state:'',err:''};
+let _czBound=false, _czRetryT=0;
+function _czShopLabel(shop){ return '商城-'+cupShopDisplay(shop); }
+// 開窗前先叫懶載入（同健檢 __healthCoupangSt）：coupang_reports、coupang_products 都在 __loadCoupangSubs
+function _czEnsureSubs(){ try{ if(typeof window.__loadCoupangSubs==='function'){ if(!_cupRepSubAt) _cupRepSubAt=Date.now(); window.__loadCoupangSubs(); } }catch(e){} }
+function _czBind(){
+  if(_czBound||typeof window.addEventListener!=='function') return;
+  _czBound=true;
+  const re=()=>{ const ov=document.getElementById('cz-modal-overlay'); if(ov&&ov.classList.contains('open')) _czLoad(); };
+  ['coupangReportReady','coupangProductsCloudReady'].forEach(ev=>window.addEventListener(ev,()=>setTimeout(re,0)));
+}
+// 月份下拉：有報表的月份、到上個月（台灣時間）為止，新到舊
+function _czMonths(shop){ const last=_usMonthList()[0]; return cupAvailableMonths(shop).filter(m=>m<=last).reverse(); }
+function openCoupangZeroModal(shop){
+  if(_CZ_SHOPS.indexOf(shop)<0) return;
+  const ov=document.getElementById('cz-modal-overlay'); if(!ov) return;
+  _czBind(); _czEnsureSubs();
+  _czView.shop=shop; _czView.ym=_usMonthList()[0];   // 預設上個月
+  ov.classList.add('open');
+  _czLoad();
+}
+function closeCoupangZeroModal(){ document.getElementById('cz-modal-overlay')?.classList.remove('open'); }
+function coupangZeroSetMonth(ym){ if(!/^\d{4}-\d{2}$/.test(ym||'')) return; _czView.ym=ym; _czLoad(); }
+// 品名的其他來源：PChome 主檔（料號＝原廠編號）→ MOMO 五家主檔（origin）；先到先用
+function _czOtherNames(){
+  const out={};
+  try{ (pchomeLoadProducts()||[]).forEach(p=>{ const c=String((p&&p.料號)||'').trim(); if(c&&p.商品名&&!out[c]) out[c]=String(p.商品名); }); }catch(e){}
+  try{ _MZ_SHOPS.forEach(s=>(momoLoadProducts(s)||[]).forEach(p=>{ const c=String((p&&p.origin)||'').trim(); if(c&&p.name&&!out[c]) out[c]=String(p.name); })); }catch(e){}
+  return out;
+}
+function _czLoad(){
+  const shop=_czView.shop, ym=_czView.ym;
+  _czView.data=null; _czView.err=''; _czView.state='';
+  try{
+    const d=cupLoadProducts(shop), c=_cupProdCloud[shop];
+    if(!d||_cupProdBad[shop]) _czView.state=(!_cupProdBad[shop]&&!(c&&c.complete))?'prodLoading':'prodNone';
+    else if(!_cupReportsReady()){
+      _czView.state='repLoading';
+      clearTimeout(_czRetryT); _czRetryT=setTimeout(()=>{ const ov=document.getElementById('cz-modal-overlay'); if(ov&&ov.classList.contains('open')) _czLoad(); },16000);   // 訂閱開了 15 秒都沒有報表 ⇒ _cupReportsReady 當成到齊
+    }else{
+      const rep=cupLoadReport(shop,ym);
+      if(!rep||!Array.isArray(rep.rows)) _czView.state='noReport';
+      else{
+        const months=cupAvailableMonths(shop), prevYm=cupPrevMonth(ym), prev=prevYm?cupLoadReport(shop,prevYm):null;
+        const rowsOf=(s,m)=>{ const r=cupLoadReport(s,m); return (r&&Array.isArray(r.rows))?r.rows:null; };
+        const own=months.map(m=>rowsOf(shop,m)).filter(Boolean);
+        const all=[]; _CZ_SHOPS.forEach(s=>cupAvailableMonths(s).forEach(m=>{ const r=rowsOf(s,m); if(r) all.push(r); }));
+        const hist=months.filter(m=>m<ym).reverse().map(m=>({ym:m,rows:rowsOf(shop,m)||[]}));
+        const res=_czBuild({ doc:d, rows:rep.rows, prevRows:(prev&&Array.isArray(prev.rows))?prev.rows:null, hist, names:_czNameIndex(own, all, _czOtherNames()) });
+        _czView.data={ shop, ym, res, prevYm:(prev&&Array.isArray(prev.rows))?prevYm:'', prevMonthNo:prevYm?+prevYm.slice(5,7):0, firstYm:months[0]||'' };
+      }
+    }
+  }catch(e){ console.error('[酷澎零動銷] 計算失敗',shop,ym,e); _czView.err=String(e&&e.message||e); }
+  _czRender();
+}
+function _czDay(t){ return String(t||'').slice(0,10).replace(/-/g,'/')||'—'; }
+function _czRender(){
+  const body=document.getElementById('cz-modal-body'), title=document.getElementById('cz-modal-title');
+  if(!body) return;
+  const shop=_czView.shop, ym=_czView.ym, e=escapeHtmlLike, mm=Number(ym.slice(5,7)), lbl=_czShopLabel(shop);
+  if(title) title.textContent=_usYmLabel(ym)+' 零動銷商品（在架但沒賣出）｜'+lbl;
+  const ms=_czMonths(shop), d=_czView.data;
+  const opts=(ms.indexOf(ym)<0?[ym].concat(ms):ms).map(m=>`<option value="${m}"${m===ym?' selected':''}>${_usYmLabel(m)} 整月${ms.indexOf(m)<0?'（沒有報表）':''}</option>`).join('');
+  const bar=`<div class="us-bar"><label class="us-month">月份 <select onchange="coupangZeroSetMonth(this.value)">${opts}</select></label>`+
+    `<button class="col-pick-btn us-export" onclick="coupangZeroExportExcel()"${d?'':' disabled'}>⬇ 匯出 Excel</button></div>`;
+  if(!d){
+    const msg=_czView.err?'計算失敗：'+e(_czView.err)
+      :_czView.state==='prodLoading'?'商品主檔載入中…讀到後會自動顯示。'
+      :_czView.state==='prodNone'?'待商品同步：還沒有 '+e(lbl)+' 的商品主檔，到「商品同步」分頁上傳 price_inventory 並按「☁ 同步雲端」後才列得出來。'
+      :_czView.state==='repLoading'?'讀取酷澎訂單報表…讀到後會自動顯示。'
+      :_czView.state==='noReport'?e(_usYmLabel(ym))+' 還沒有酷澎訂單報表，列不出零動銷。'
+      :'讀取中…';
+    body.innerHTML=bar+`<div class="us-empty">${msg}</div>`;
+    return;
+  }
+  const r=d.res, g=r.groups, day=_czDay(r.latest);
+  const tip=_zeroTip('coupang',{prevMonthNo:d.prevMonthNo,date:'酷澎商品主檔 '+day,listDate:day,firstYm:d.firstYm?_usYmLabel(d.firstYm):''});
+  const head=`<div class="us-sum"><b>${mm}月動銷率 ${_usPct(r.num,r.den)}（${r.num}/${r.den}）</b>`+
+    `<span class="us-sum-w">→ ① 全部賣出 1 件可到 <b>${_usPct(r.num+g.have.length,r.den)}</b></span></div>`+
+    `<div class="us-note">庫存：酷澎商品主檔，截至 ${e(day)} <span class="us-info" title="${e(tip)}">ⓘ</span></div>`;
+  const warns=[];
+  const on=_czOpenNote(shop,ym); if(on) warns.push(cupShopDisplay(shop)+' '+on.date+' 開賣，這個月只有 '+on.days+' 天。');
+  if(!d.prevYm) warns.push('沒有 '+(d.prevMonthNo||'上')+' 月的酷澎報表，「上月營收」一律顯示 —。');
+  const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
+  const num=x=>x==null?'<span class="us-na">—</span>':Math.round(x).toLocaleString();
+  const srcTxt={report:'品名來自這個通路的酷澎報表',reportCode:'品名來自酷澎報表（同原廠編號）',other:'品名來自 PChome／MOMO 主檔（同原廠編號）'};
+  const nameTip=x=>(x.name||'（沒有品名）')+'\n酷澎編號：'+x.pid+(x.codes.length?'\n原廠編號：'+x.codes.join('、'):'')+'\n選項數：'+x.optN+(x.nameSrc?'\n'+srcTxt[x.nameSrc]:'');
+  const stockTip=x=>{
+    const L=[x.stock==null?'主檔沒有這頁選項的庫存數字':'這頁 '+x.optN+' 個選項的庫存加總'+(x.partial?'（部分選項沒有數字）':'')];
+    x.shared.forEach(s=>L.push(s.code+' 也掛在另外 '+s.others+' 頁，庫存共用'));
+    L.push('酷澎商品主檔，截至 '+day);
+    return L.join('\n');
+  };
+  const nameCell=x=>x.name?e(x.name):(x.codes.length?e(x.codes.join('、')):'')+'<span class="us-na">（沒有品名）</span>';
+  const row=x=>`<tr><td class="tl us-name" title="${e(nameTip(x))}"><div class="us-name-txt">${nameCell(x)}</div></td>`+
+    `<td class="tl">${e(x.pid)}</td>`+
+    `<td title="${e(stockTip(x))}">${num(x.stock)}${x.partial?'<div class="us-sub">部分選項沒有數字</div>':''}${x.shared.length?'<div class="us-sub">庫存跟其他頁共用</div>':''}</td>`+
+    `<td${x.revShared?' title="這頁在報表裡跟其他頁合在同一列，營收是那幾頁合計"':''}>${num(x.rev)}</td>`+
+    `<td>${x.lastSold?_usYmLabel(x.lastSold):'<span class="us-na">—</span>'}</td></tr>`;
+  const pmm=d.prevMonthNo;
+  const th=`<tr><th class="tl">商品名稱</th><th class="tl">酷澎編號</th><th>庫存</th><th title="${d.prevYm?pmm+' 月這個通路的營收':'沒有上個月的報表'}">上月營收</th><th>最近有賣</th></tr>`;
+  const grps=_CZ_GROUPS.map(G=>{
+    const list=g[G.key];
+    return `<details class="us-grp us-grp-${G.key}"${G.key==='have'?' open':''}><summary class="us-grp-hd">${G.label}（${list.length}）<span class="us-grp-sub">${e(G.sub)}</span></summary>`+
+      (list.length?`<div class="us-scroll"><table class="us-table"><thead>${th}</thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<div class="us-empty us-empty-sm">沒有</div>`)+
+      `</details>`;
+  }).join('');
+  body.innerHTML=bar+head+warnHtml+grps;
+}
+// 匯出不精簡：原廠編號、選項數、庫存說明都在這裡
+function coupangZeroExportExcel(){
+  const d=_czView.data; if(!d) return;
+  const day=_czDay(d.res.latest);
+  const aoa=[['分組','商品名稱','酷澎編號(pid)','原廠編號','選項數','庫存','庫存說明','上月營收','最近有賣']];
+  _CZ_GROUPS.forEach(G=>d.res.groups[G.key].forEach(x=>aoa.push([G.label, x.name||'（沒有品名）', x.pid, x.codes.join('、'), x.optN, x.stock==null?'':x.stock,
+    (x.stock==null?'主檔沒有庫存數字':x.optN+' 個選項加總'+(x.partial?'（部分選項沒有數字）':''))+x.shared.map(s=>'；'+s.code+' 也掛在另外 '+s.others+' 頁，庫存共用').join('')+'（酷澎商品主檔，截至 '+day+'）',
+    x.rev==null?'':Math.round(x.rev), x.lastSold?_usYmLabel(x.lastSold):''])));
+  _zeroWriteXlsx(aoa,'零動銷_酷澎'+String(cupShopDisplay(d.shop)).replace(/[\\/:*?"<>|]/g,'')+'_'+d.ym,d.ym+' 零動銷',[4,5,7],
+    [{wch:12},{wch:40},{wch:18},{wch:16},{wch:8},{wch:10},{wch:44},{wch:12},{wch:10}]);
+}
+// 驗收用（只讀，名稱不以 __cloud 開頭）：__cupZeroSnap('2026-10') → 兩館的清單筆數、卡片分母－分子、三組
+function __cupZeroSnap(ym){
+  ym=ym||_usMonthList()[0];
+  const out={};
+  _CZ_SHOPS.forEach(shop=>{
+    const d=cupLoadProducts(shop), rep=cupLoadReport(shop,ym);
+    if(!d){ out[shop]={state:'主檔還沒載入'}; return; }
+    if(!rep||!Array.isArray(rep.rows)){ out[shop]={state:'這個月沒有報表'}; return; }
+    const r=_czBuild({doc:d,rows:rep.rows,prevRows:null,hist:[],names:{byDisp:{},byCode:{},byOther:{}}});
+    const card=cupSellThroughCalc(rep.rows, cupProductsListed(d).listed);
+    out[shop]={清單筆數:r.unsold,卡片分母減分子:card.den-card.num,有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,
+      跨頁共用:r.multiPage,動銷率:card.num+'/'+card.den,主檔截至:_czDay(r.latest)};
   });
   console.table(out);
   return out;
@@ -35001,7 +35218,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,kpiAnomAck,__kpiAnomalyReport,kpiAckToggle,kpiAckOnlyToggle,__kpiAckReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,openCoupangZeroModal,closeCoupangZeroModal,coupangZeroSetMonth,coupangZeroExportExcel,__cupZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCupPiMasterFile,cupApplyProductsMaster,cupCancelProductsMaster,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
