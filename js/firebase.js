@@ -15,6 +15,13 @@ try {
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const docRef = doc(db, 'app', 'main');
+  // ══════ 開站加速第二包（2026-11-26）：開站就送出的 23 份訂閱改成延後 ══════
+  //   app/profit、PChome×5、博客來、FriDay、growth×4、optlog×11 原地用 __bootDefer 包起來（內容一字不改），
+  //   等 app/main 第一批快照（app.js 發 mainFirstSnapshot）、__setupCloud 失敗（cloudSetupFailed）或保險 20 秒，取先到的，只跑一次。
+  //   啟動與到齊判斷在本檔結尾 cloudStoreReady 之前（__bootSubsStart／__bootSubsReady／__bootSubsWhenReady，都不以 __cloud 開頭）。
+  const __bootDeferred = [];   // { name, start }，依原本的訂閱順序
+  const __bootDefer = (name, start) => { __bootDeferred.push({ name, start }); };
+  const __bootPart = { profit: () => false, growth: () => true, optlog: () => true };   // 各區塊建好後換成真的到齊判斷
 
   // ============== 直接用 REST API 刪除帶 . 的字面欄位 ==============
   // Firebase SDK 的 updateDoc 即使搭 FieldPath 也不一定能正確刪除頂層含 . 的欄位
@@ -617,13 +624,16 @@ try {
       return profitDocStatsCache ? JSON.parse(JSON.stringify(profitDocStatsCache)) : null;
     };
 
-    // 輕量：app/profit 立刻訂閱（小檔案，不會卡住）
-    onSnapshot(profitDocRef, snap => {
+    // app/profit 訂閱：開站加速第二包起延後到 app/main 第一批快照之後（__bootDefer，內容不變）
+    __bootDefer('app/profit', () => onSnapshot(profitDocRef, snap => {
       profitParts.current = snap.exists() ? (snap.data() || {}) : {};
       if (snap.exists() || !(snap.metadata && snap.metadata.fromCache)) profitParts.gotFirst = true;   // 沒開 persistence：離線的快取快照是空的，不算收到（優化紀錄 __optlogReady 用）
       mergeAndNotify();
       _pdSchedule();
-    }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
+    }, err => { console.error('[profit subscribe] 訂閱失敗：', err); }));
+    // 唯讀觀測點（不以 __cloud 開頭）：app/profit 收到第一批真快照了沒。profit.js 整欄覆蓋的設定（_profitDocBlocked）與延後訂閱的到齊判斷都看它。
+    window.__profitDocReady = () => !!profitParts.gotFirst;
+    __bootPart.profit = window.__profitDocReady;
 
     // 商品調整文件的快照入口（訂閱在本檔下方 __cloudGrowth 建好之後；物件要用到 KPI_DELETE，不能放在這裡）。
     //   data＝文件內容（不存在＝null）。
@@ -683,6 +693,9 @@ try {
       if (prev === 'new' && p.state !== 'new') mergeAndNotify();   // 回搬：把舊欄位放回顯示
       optlogNotify(shop);
     };
+    // 開站加速第二包：延後訂閱的到齊判斷（收到第一批快照＝不再是 loading；訂閱失敗也算「到了」，不讓等待卡住）
+    __bootPart.growth = (s) => !!growthParts[s] && (growthParts[s].state !== 'loading' || !!growthParts[s].error);
+    __bootPart.optlog = (s) => !!optlogParts[s] && (optlogParts[s].state !== 'loading' || !!optlogParts[s].error);
     window.__optlogSubError = (shop, err) => {
       const p = optlogParts[shop];
       if (p) p.error = String((err && err.message) || err);
@@ -1903,11 +1916,12 @@ try {
   //   profit.js 載入時從緩存 drain（見 profit.js `__pchomeOrdersCloudLatest`），保證換機/清快取後初次讀回不漏。
   //   沒定義套用函式（optlog/history 表單未上線）＝只緩存、不套用，infra 先就位。
   try {
-    window.__cloudSubscribeCached(window.__cloudPchomeOrders, '__pchomeOrdersCloudLatest', '__pchomeApplyCloudOrders');   // 樣板見 app.js __cloudSubscribeCached
-    window.__cloudSubscribeCached(window.__cloudPchomeOptlog, '__pchomeOptlogCloudLatest', '__pchomeApplyCloudOptlog');
-    window.__cloudSubscribeCached(window.__cloudPchomeHistory, '__pchomeHistoryCloudLatest', '__pchomeApplyCloudHistory');
-    window.__cloudSubscribeCached(window.__cloudPchomeProducts, '__pchomeProductsCloudLatest', '__pchomeApplyCloudProducts');
-    window.__cloudSubscribeCached(window.__cloudPchomeRecon, '__pchomeReconCloudLatest', '__pchomeApplyCloudRecon');
+    // 開站加速第二包：5 份都延後（內容不變；啟動時逐一 try/catch，失敗訊息帶文件名）
+    __bootDefer('app/pchome_orders', () => window.__cloudSubscribeCached(window.__cloudPchomeOrders, '__pchomeOrdersCloudLatest', '__pchomeApplyCloudOrders'));   // 樣板見 app.js __cloudSubscribeCached
+    __bootDefer('app/pchome_optlog', () => window.__cloudSubscribeCached(window.__cloudPchomeOptlog, '__pchomeOptlogCloudLatest', '__pchomeApplyCloudOptlog'));
+    __bootDefer('app/pchome_history', () => window.__cloudSubscribeCached(window.__cloudPchomeHistory, '__pchomeHistoryCloudLatest', '__pchomeApplyCloudHistory'));
+    __bootDefer('app/pchome_products', () => window.__cloudSubscribeCached(window.__cloudPchomeProducts, '__pchomeProductsCloudLatest', '__pchomeApplyCloudProducts'));
+    __bootDefer('app/pchome_recon', () => window.__cloudSubscribeCached(window.__cloudPchomeRecon, '__pchomeReconCloudLatest', '__pchomeApplyCloudRecon'));
   } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
 
   // ============== 博客來對帳資料 app/books_recon（2026-11-04；KPI 博客來「從報表帶入」用，之後淨利表博客來沿用） ==============
@@ -1925,8 +1939,8 @@ try {
     writePaths: (pairs) => kpiWriteTo(booksReconRef, pairs).then(() => ({ ok: true })),
   };
   try {
-    window.__cloudSubscribeCached(window.__cloudBooksRecon, '__booksReconCloudLatest', '__booksApplyCloudRecon',
-      e => console.error('[books_recon] 訂閱失敗：', e));
+    __bootDefer('app/books_recon', () => window.__cloudSubscribeCached(window.__cloudBooksRecon, '__booksReconCloudLatest', '__booksApplyCloudRecon',
+      e => console.error('[books_recon] 訂閱失敗：', e)));   // 開站加速第二包：延後（內容不變）
   } catch (e) { console.error('[books_recon] 訂閱失敗：', e); }
 
   // ============== FriDay 主站對帳資料 app/friday_recon（2026-11-04；KPI FriDay「從報表帶入」用，入口與架構照 app/books_recon） ==============
@@ -1942,8 +1956,8 @@ try {
     writePaths: (pairs) => kpiWriteTo(fridayReconRef, pairs).then(() => ({ ok: true })),
   };
   try {
-    window.__cloudSubscribeCached(window.__cloudFridayRecon, '__fridayReconCloudLatest', '__fridayApplyCloudRecon',
-      e => console.error('[friday_recon] 訂閱失敗：', e));
+    __bootDefer('app/friday_recon', () => window.__cloudSubscribeCached(window.__cloudFridayRecon, '__fridayReconCloudLatest', '__fridayApplyCloudRecon',
+      e => console.error('[friday_recon] 訂閱失敗：', e)));   // 開站加速第二包：延後（內容不變）
   } catch (e) { console.error('[friday_recon] 訂閱失敗：', e); }
 
   // ============== 商品調整 app/growth_{通路}（#436 第 ③ 塊；從 app/profit 的 ec_notes|{通路}_growth 搬出） ==============
@@ -1966,12 +1980,12 @@ try {
       snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
     writePaths: (shop, pairs) => kpiUpdate(growthRef(shop), pairs).then(() => ({ ok: true })),
   };
-  GROWTH_SHOPS.forEach(shop => {
+  GROWTH_SHOPS.forEach(shop => __bootDefer('app/growth_' + shop, () => {   // 開站加速第二包：延後（內容不變）
     try {
       window.__cloudGrowth.subscribe(shop, (data, meta) => { if (window.__growthApplySnap) window.__growthApplySnap(shop, data, meta); },
         e => { if (window.__growthSubError) window.__growthSubError(shop, e); });
     } catch (e) { console.error('[商品調整] 訂閱失敗：', shop, e); }
-  });
+  }));
   // ============== MOMO 優化紀錄 app/optlog_{店}（#436 第 ④ 塊；從 app/profit 的 ec_momo_optlog|{店}、ec_momo_optlog_del|{店} 搬出） ==============
   //   結構：{ items:{ 品號:[紀錄] }, tomb:{ 紀錄身分:{at,by} }, migratedAt:數字, migratedBy }。
   //   文件只由搬家腳本建立；沒有 migratedAt 就不算搬完，讀寫都照舊走 app/profit（切換判斷見上方 __optlogRoute）。
@@ -1991,12 +2005,12 @@ try {
       snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
     writePaths: (shop, pairs) => kpiUpdate(optlogRef(shop), pairs).then(() => ({ ok: true })),
   };
-  OPTLOG_SHOPS.forEach(shop => {
+  OPTLOG_SHOPS.forEach(shop => __bootDefer('app/optlog_' + shop, () => {   // 開站加速第二包：延後（內容不變）
     try {
       window.__cloudOptlog.subscribe(shop, (data, meta) => { if (window.__optlogApplySnap) window.__optlogApplySnap(shop, data, meta); },
         e => { if (window.__optlogSubError) window.__optlogSubError(shop, e); });
     } catch (e) { console.error('[優化紀錄] 訂閱失敗：', shop, e); }
-  });
+  }));
   // 本機測試：把某家換成「已搬」的假文件（只在 localhost、資料只在記憶體，不碰雲端）。
   //   __optlogMock('乙配')＝用目前的紀錄當新文件；__optlogMock('乙配', { residueSku:'品號' })＝假裝舊欄位那個品號多一筆新文件沒有的紀錄（舊分頁寫的）；
   //   __optlogMock('乙配', 'doc')＝看假文件內容；__optlogMock('乙配', false)＝收掉（重新整理才會回到真實狀態）。
@@ -2086,6 +2100,69 @@ try {
       return d;
     };
   })();
+
+  // ══════ 開站加速第二包：延後的開站訂閱（啟動、到齊判斷、慢速模擬）══════
+  //   都是唯讀觀測點或只啟動訂閱，名字都不以 __cloud 開頭（不被防寫防護包、不影響 35／55）。
+  //   🔴 本檔只能有一行用 Event 建構子發事件（就是下面 cloudStoreReady 那行；ec-offline-on 靠「剛好一行」找防護碼貼入點），要發事件一律用 CustomEvent。
+  const __bootSubs = { started: false, reason: null, at: null, ranAt: null };
+  const __BOOT_SLOW_KEY = 'ec.__bootSubsSlowMock';
+  const __bootIsLocal = () => { try { return location.hostname === 'localhost' || location.hostname === '127.0.0.1'; } catch (e) { return false; } };
+  const __BOOT_LATEST = {
+    'app/pchome_orders': '__pchomeOrdersCloudLatest', 'app/pchome_optlog': '__pchomeOptlogCloudLatest', 'app/pchome_history': '__pchomeHistoryCloudLatest',
+    'app/pchome_products': '__pchomeProductsCloudLatest', 'app/pchome_recon': '__pchomeReconCloudLatest',
+    'app/books_recon': '__booksReconCloudLatest', 'app/friday_recon': '__fridayReconCloudLatest',
+  };
+  // 每一份「到了」：app/profit＝收到真快照（gotFirst）；growth／optlog＝不再是 loading（或訂閱失敗）；其他＝__cloudSubscribeCached 收到第一份（同 profit.js drain 的判準）
+  const __bootArrived = (name) => {
+    if (name === 'app/profit') return __bootPart.profit();
+    if (name.indexOf('app/growth_') === 0) return __bootPart.growth(name.slice('app/growth_'.length));
+    if (name.indexOf('app/optlog_') === 0) return __bootPart.optlog(name.slice('app/optlog_'.length));
+    const v = __BOOT_LATEST[name];
+    return v ? window[v] !== undefined : true;
+  };
+  const __bootRun = () => {
+    __bootSubs.ranAt = Date.now();
+    __bootDeferred.forEach(d => { try { d.start(); } catch (e) { console.error('[boot] 延後的訂閱啟動失敗：' + d.name, e); } });
+  };
+  // 啟動（只跑一次）：mainFirstSnapshot／cloudSetupFailed／保險 20 秒，取先到的。回 true＝這次真的啟動。
+  window.__bootSubsStart = (reason) => {
+    if (__bootSubs.started) return false;
+    __bootSubs.started = true; __bootSubs.reason = reason || 'manual'; __bootSubs.at = Date.now();
+    let slow = 0;
+    try { if (__bootIsLocal()) slow = Number(sessionStorage.getItem(__BOOT_SLOW_KEY)) || 0; } catch (e) {}
+    console.info('[boot] 延後的開站訂閱開始（' + __bootSubs.reason + '）：' + __bootDeferred.length + ' 份' + (slow > 0 ? '｜慢速模擬再等 ' + slow + ' 秒' : ''));
+    if (slow > 0) setTimeout(__bootRun, slow * 1000); else __bootRun();
+    return true;
+  };
+  window.__bootSubsReady = () => {
+    const names = __bootDeferred.map(d => d.name);
+    const pending = (__bootSubs.started && __bootSubs.ranAt) ? names.filter(n => !__bootArrived(n)) : names;
+    return { started: __bootSubs.started, reason: __bootSubs.reason, at: __bootSubs.at, ranAt: __bootSubs.ranAt, total: names.length, done: !!__bootSubs.ranAt && pending.length === 0, pending };
+  };
+  // 等到齊（最多 capMs）。不會 reject：回 { done, timedOut, pending }。
+  window.__bootSubsWhenReady = (capMs) => new Promise(resolve => {
+    const t0 = Date.now(), cap = Math.max(0, Number(capMs) || 0);
+    const tick = () => {
+      const r = window.__bootSubsReady();
+      if (r.done) { resolve({ done: true, timedOut: false, pending: [] }); return; }
+      if (Date.now() - t0 >= cap) { resolve({ done: false, timedOut: true, pending: r.pending }); return; }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+  // 本機測試：__bootSubsSlowMock(秒)＝觸發之後再多等 N 秒才真的訂閱；false＝清掉。只在 localhost，存 sessionStorage，重新整理才生效。
+  window.__bootSubsSlowMock = (v) => {
+    if (!__bootIsLocal()) { console.warn('__bootSubsSlowMock 只在 localhost 可用'); return; }
+    try {
+      if (v === false || v == null) sessionStorage.removeItem(__BOOT_SLOW_KEY);
+      else if (typeof v === 'number' && v > 0) sessionStorage.setItem(__BOOT_SLOW_KEY, String(v));
+      else { console.warn('__bootSubsSlowMock：參數要是秒數或 false'); return; }
+    } catch (e) { console.warn('__bootSubsSlowMock 存不進 sessionStorage', e); return; }
+    console.log('[boot mock] 目前設定：' + (sessionStorage.getItem(__BOOT_SLOW_KEY) || '（無）') + '｜重新整理後生效');
+  };
+  window.addEventListener('mainFirstSnapshot', () => window.__bootSubsStart('mainFirstSnapshot'), { once: true });
+  window.addEventListener('cloudSetupFailed', () => window.__bootSubsStart('cloudSetupFailed'), { once: true });
+  setTimeout(() => window.__bootSubsStart('timeout20s'), 20000);
 
   window.dispatchEvent(new Event('cloudStoreReady'));
 
