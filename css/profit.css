@@ -2257,6 +2257,21 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .us-sub{font-size:11px;color:var(--warn);}
 .us-table th.us-th-case{text-transform:none;}   /* 全站 th 預設全大寫；「Wing 商品 ID」照 Wing 後台的寫法顯示 */
 .us-id-sub{font-size:11px;color:var(--text-muted);}   /* 酷澎零動銷：Wing 商品 ID 下方的頁 ID（2026-11-25） */
+/* 酷澎零動銷「優化紀錄」欄（2026-11-26 第 3 塊）：格子沿用 PChome 淨利表的 .pch-ol-*、.cup-pg-note-inp，這裡只補欄寬與「共 N 筆」清單 */
+.us-table th.cz-ol-th{text-transform:none;}
+.us-table td.cz-ol-td{width:260px;min-width:260px;max-width:260px;white-space:normal;padding-top:4px;padding-bottom:4px;}
+.cz-ol-td .pch-ol-main.cz-ol-nosid{cursor:default;font-size:11px;white-space:normal;}
+.cz-ol-unsynced:empty{display:none;}
+.cz-ol-pop{position:sticky;top:0;z-index:6;margin:6px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:45vh;overflow:auto;font-size:12px;}
+.cz-ol-pop-hd{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.cz-ol-pop-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);}
+.cz-ol-pop-row{display:flex;align-items:flex-start;gap:6px;padding:5px 0;border-top:1px solid var(--border);}
+.cz-ol-pop-dt{flex-shrink:0;width:112px;color:var(--text-muted);font-variant-numeric:tabular-nums;}
+.cz-ol-pop-note{flex:1;min-width:0;word-break:break-word;}
+.cz-ol-pop-by{flex-shrink:0;color:var(--text-muted);}
+.cz-ol-tag{flex-shrink:0;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:var(--text-muted);font-size:10px;font-weight:600;white-space:nowrap;}
+.cz-ol-del{flex-shrink:0;color:var(--danger);cursor:pointer;font-weight:700;}
+.cz-ol-pop-ft{margin-top:4px;font-size:11px;color:var(--text-muted);}
 .us-sub-m{margin-left:2px;font-size:11px;color:var(--text-muted);}   /* MOMO：×20% 後是 0、公司倉還有貨 */
 .us-na{color:var(--text-faint);}
 .us-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}

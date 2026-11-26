@@ -1,5 +1,6 @@
 // 酷澎第 3 塊「零動銷彈窗加優化紀錄」（2026-11-26）測試：node scripts/coupang-zero-optlog.test.cjs
-//   從 js/profit.js 抽 CUP-ZOL-PURE（錨點、新紀錄形狀、這個 Wing 商品的紀錄、格子 HTML），
+//   從 js/profit.js 抽 CUP-ZOL-PURE（錨點、新紀錄形狀、這個 Wing 商品的紀錄、格子 HTML），另外檢查接線（寫入只走 momoSaveOptlog、唯讀擋、
+//   app.js 白名單、沒有 sid 欄的紀錄在工作日誌明細／商品彈窗跟改版前逐字相同）。
 //   CUP_BACKUP_JSON=<v3 備份檔> node scripts/coupang-zero-optlog.test.cjs   ← 另外用真實主檔／報表看 2026-06～10 每列都有錨點、'p:' 列數
 //   資料預設全是合成的假資料；不碰瀏覽器、不碰雲端。
 'use strict';
@@ -74,6 +75,66 @@ const before=JSON.stringify(map);
   const v1=T.cupZolCellView([r('a1','H249-01',{sid:SID})],deps.nameOf), v2=T.cupZolCellView([r('a2','H249-01')],deps.nameOf);
   ok(v1.title.includes('Wing 商品 ID '+SID)&&v1.title.includes('Inna')&&v2.title.includes('原廠編號 H249-01'),'滑鼠提示寫 Wing 商品 ID 或原廠編號');
   ok(!/pchomeOptlog/.test(between(src,'/* ═══ CUP-ZOL-PURE-BEGIN','/* ═══ CUP-ZOL-PURE-END ═══ */')),'沒有呼叫 PChome 那組'); }
+
+// ── 接線 ──
+const RE=new Function('return '+app.match(/const __RO_WRITE_RE = (\/.*\/);/)[1])();
+['cupZeroOptlogCellEdit','cupZeroOptlogCellSave','cupZeroOptlogDelete'].forEach(h=>{ ok(RE.test(h+'(this)'),h+'：唯讀會擋'); ok(new RegExp('\\nfunction '+h+'\\(').test(src),h+'：有這個函式'); });
+['cupZeroOptlogCellCancel()',"cupZeroOptlogCellDraft('note',this.value)",'event.stopPropagation();cupZeroOptlogListOpen(this)','cupZeroOptlogListClose()','openCoupangZeroModal(\'麻吉\')','closeCoupangZeroModal()','coupangZeroExportExcel()']
+  .forEach(h=>ok(!RE.test(h),'不擋：'+h));
+{ const add=fnSrc(src,'cupZeroOptlogAdd'), del=fnSrc(src,'cupZeroOptlogDelete');
+  ok(/^\nfunction cupZeroOptlogAdd\([^)]*\)\{\n\s*if\(_czOlReadOnly\(\)\)/.test(add),'cupZeroOptlogAdd 第一行擋唯讀');
+  ok(/^\nfunction cupZeroOptlogDelete\([^)]*\)\{\n\s*if\(_czOlReadOnly\(\)\)/.test(del),'cupZeroOptlogDelete 第一行擋唯讀');
+  ok(add.includes('momoSaveOptlog(shop,map)')&&!/localStorage|_markPending|__cloud|setField|writePaths/.test(add),'新增只走 momoSaveOptlog（沒有另寫寫入路徑）');
+  ok(add.includes("unit.indexOf('p:')===0"),"'p:' 單位不給記");
+  ok(del.includes('momoDeleteOptlog(shop, sku, tid)')&&!/localStorage|_markPending|__cloud|setField|writePaths/.test(del),'刪除只走 momoDeleteOptlog（墓碑）');
+  ok(/if\(_CZ_SHOPS\.indexOf\(shop\)>=0\) cupZeroOptlogCellsRefreshAll\(shop\)/.test(fnSrc(src,'_optlogApply')),'雲端優化紀錄更新時重畫格子');
+  ok(/^\nfunction closeCoupangZeroModal\(\)\{\n\s*if\(_czOlBlockLeave\(\)\) return;/.test(fnSrc(src,'closeCoupangZeroModal')),'關窗先檢查沒存的字');
+  ok(/^\nfunction coupangZeroSetMonth\(ym\)\{\n[^\n]*\n\s*if\(_czOlBlockLeave\(\)\)/.test(fnSrc(src,'coupangZeroSetMonth')),'切月份先檢查沒存的字');
+  ok(!fnSrc(src,'coupangZeroExportExcel').includes('優化紀錄'),'匯出 Excel 不加優化紀錄欄');
+  ok(!/__cloud/.test(between(src,'/* ═══ CUP-ZOL-PURE-BEGIN','/* ═══ CUP-ZOL-PURE-END ═══ */')),'純函式不碰雲端'); }
+
+// ── 沒有 sid 欄的紀錄：工作日誌明細、商品彈窗優化紀錄區跟改版前（3d3fe0e）逐字相同 ──
+{ let old=null; try{ old=cp.execSync('git show 3d3fe0e:js/profit.js',{cwd:ROOT,encoding:'utf8',maxBuffer:64*1024*1024}).replace(/\r\n/g,'\n'); }catch(e){}
+  if(!old) console.log('（找不到 3d3fe0e，略過逐字比對）');
+  else{
+    const mkEnv=(s)=>{
+      const doc={ els:{}, getElementById(id){ return this.els[id]||null; }, createElement(){ const o={style:{},id:'',innerHTML:'',set onclick(f){},appendChild(){}}; return o; }, body:{ appendChild(o){ doc.els[o.id]=o; } } };
+      const store={ map:{}, reports:{ '麻吉':{ '2026-10':{rows:[{code:'F421-11',name:'燕麥杯'},{code:'H249-02',name:'醫藥包'}]} }, '露營館':{} } };
+      const code=[
+        'const document=D.doc, window={}, Store={get:()=>[]};',
+        'const MOMO_OPTLOG_TYPES='+JSON.stringify(TYPES)+'; const MOMO_OPTLOG_DP_SEP="·"; const CUP_OPTLOG_DP_SHOPS=["麻吉","露營館"];',
+        'let _momoOptlogEdit=null;',
+        'function momoLoadOptlog(shop){ return D.store.map[shop]||{}; }',
+        'function momoOptlogUserToName(by){ return by==="inna"?"Inna":by; }',
+        'function cupAvailableMonths(shop){ return Object.keys(D.store.reports[shop]||{}); }',
+        'function cupLoadReport(shop,m){ return (D.store.reports[shop]||{})[m]||null; }',
+        'function cupShopDisplay(s){ return s==="麻吉"?"好麻吉":"玩樂"; }',
+        'function _optlogDpReady(){ return true; }',
+        'function cupLoadProducts(){ return {items:[]}; } function _czNameIndex(){ return {byDisp:{},byCode:{},byOther:{}}; } function _czOtherNames(){ return {}; }',
+        "const _momoEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');",
+        'function momoOptlogTombId(e){ return String(e.id); }',
+        fnSrc(s,'momoRenderOptlogSection'), fnSrc(s,'cupOpenDpDetail'), (s.includes('\nfunction _cupDpSidName(')?fnSrc(s,'_cupDpNameIdx')+fnSrc(s,'_cupDpSidName'):''),
+        'return { momoRenderOptlogSection, cupOpenDpDetail };' ].join('\n');
+      const D={doc,store}; const F=new Function('D',code)(D); return {D,F};
+    };
+    const recs={ '麻吉':{ 'F421-11':[ {id:'o1',date:'2026-11-26',time:'10:00',shop:'麻吉',sku:'F421-11',by:'inna',type:'調價',note:'降價 <b>'},
+                                        {id:'o2',date:'2026-11-26',time:'11:00',shop:'麻吉',sku:'F421-11',by:'inna',type:'其他',note:'加廣告',editedAt:1,editedBy:'inna'} ],
+                         'NONAME-1':[ {id:'o3',date:'2026-11-26',time:'12:00',shop:'麻吉',sku:'NONAME-1',by:'inna',type:'調價',note:'x'} ] },
+                 '甲配':{ '123':[ {id:'m1',date:'2026-11-26',time:'09:00',shop:'甲配',sku:'123',by:'inna',type:'調價',note:'MOMO'} ] } };
+    const run=(s)=>{ const {D,F}=mkEnv(s); D.store.map=JSON.parse(JSON.stringify(recs)); const out={};
+      [['麻吉','F421-11'],['麻吉','NONAME-1'],['甲配','123']].forEach(([shop,sku])=>{ D.doc.els['momo-optlog-sec']={innerHTML:''}; F.momoRenderOptlogSection(shop,sku); out['sec|'+shop+'|'+sku]=D.doc.els['momo-optlog-sec'].innerHTML; });
+      [['Inna','2026-11-26','麻吉·調價'],['Inna','2026-11-26','麻吉·其他']].forEach(([p,d,c])=>{ delete D.doc.els['momo-dp-detail-ov']; F.cupOpenDpDetail(p,d,c); out['dp|'+c]=D.doc.els['momo-dp-detail-ov'].innerHTML; });
+      return out; };
+    const a=run(old), b=run(src);
+    Object.keys(a).forEach(k=>ok(a[k]===b[k]&&a[k].length>50,'沒有 sid 欄：'+k+' 跟改版前逐字相同'));
+    // 有 sid 欄的：商品彈窗、工作日誌明細標「Wing 商品 ID」
+    const {D,F}=mkEnv(src); D.store.map={ '麻吉':{ 'H249-01':[ {id:'s1',date:'2026-11-26',time:'14:05',shop:'麻吉',sku:'H249-01',by:'inna',type:'調價',note:'售價 590 → 529',sid:SID} ] } };
+    D.doc.els['momo-optlog-sec']={innerHTML:''}; F.momoRenderOptlogSection('麻吉','H249-01');
+    ok(D.doc.els['momo-optlog-sec'].innerHTML.includes('Wing 商品 ID '+SID),'商品彈窗：有 sid 的紀錄標 Wing 商品 ID');
+    F.cupOpenDpDetail('Inna','2026-11-26','麻吉·調價');
+    ok(D.doc.els['momo-dp-detail-ov'].innerHTML.includes('Wing 商品 ID '+SID)&&!D.doc.els['momo-dp-detail-ov'].innerHTML.includes('整頁'),'工作日誌明細：標 Wing 商品 ID（不是整頁）');
+  }
+}
 
 // ── 真實備份 ──
 const BK=process.env.CUP_BACKUP_JSON;
