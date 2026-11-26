@@ -211,7 +211,16 @@ ESM 有個致命陷阱必須牢記：
      蝦皮零動銷（`_usLoad`、`__shopeeUnsoldSnap`）先等母表；健檢 `__healthProductSnapshot` 蝦皮在那家 loading 時回 `pending`（不進 20 秒快取），事件到了 `_hlPendingFlush` 重排。
    - 本機測試：`__insightSlowMock(秒數|'fail'|false)`（只在 localhost，存 sessionStorage，**重新整理才生效**）。node 測試 `scripts/insight-ready-gate.test.cjs`（含 vm 模擬空快照）。
    - ⚠ 離線測試站的假 SDK 不會合併監聽目標，「只下載一次」只能在正式站用 DevTools Network（Listen channel）確認。
-   - 第二包（還沒做）：firebase.js 開站就訂閱的 23 份文件（app/profit、PChome×5、growth×4、optlog×11、博客來、FriDay，約 4.5 MB）延後到 app/main 到了才開始。
+5. **開站加速第二包（2026-11-26，firebase.js）**：開站就訂閱的 23 份文件（app/profit、PChome×5、博客來、FriDay、growth×4、optlog×11，約 4.5 MB）
+   原地用 `__bootDefer(名稱, () => …)` 包起來（訂閱內容一字不改），等三條觸發取先到的、只跑一次：app.js 第一批 app/main 快照發的 `mainFirstSnapshot`、
+   `__setupCloud` 失敗發的 `cloudSetupFailed`、保險 20 秒。🔴 **新增開站訂閱要嘛放進 `__bootDefer`，要嘛確定它很小、登入就需要**（`scripts/boot-subs-defer.test.cjs` 會數 23 份）。
+   - 唯讀觀測點（不以 `__cloud` 開頭，防護碼仍是 35／55）：`__bootSubsReady()`（`{started, reason, ranAt, done, pending}`）、`__bootSubsWhenReady(ms)`（不 reject）、
+     `__profitDocReady()`（＝app/profit 收到真快照）。本機測試 `__bootSubsSlowMock(秒|false)`（只在 localhost，重新整理才生效）。
+   - **`__ensureProfit` 多等一件事**：profit.js 照舊馬上 import，但 `__profitReady` 要等 23 份到齊（最多 `PROFIT_BOOT_SUBS_WAIT_MS`＝15 秒，逾時照常放行、Console 列出還沒到的）。
+     所以淨利表、KPI、PChome、工作日誌、健檢在資料到之前維持既有的「…載入中」佔位，profit.js 看到的狀態跟改版前一樣。
+   - **W1～W4 擋板**（profit.js `_profitDocBlocked`）：app/profit 還沒收到真快照時，整欄覆蓋、基底取自記憶體／本機的設定一律不存——`_cloudWrite`（分析／成長／測試規則）、
+     `saveTagDefs`、評分表三支（`saveScore*All`）、`saveSplits`（回 `{profitNotReady:true}`）。⚠ 離線時這幾種設定改不了（刻意的）。
+   - 🔴 firebase.js 只能有一行用 Event 建構子（cloudStoreReady），`ec-offline-on` 靠它找防護碼貼入點；新事件一律用 CustomEvent。
 
 ## 資料與後端
 
