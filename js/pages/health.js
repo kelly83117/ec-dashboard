@@ -1887,6 +1887,8 @@ function _hlPendingFlush() {
   _hlPendingTimer = setTimeout(() => { _hlProd.pending = {}; if (App.route === 'health') App.render(); }, 300);
 }
 if (typeof window.addEventListener === 'function') window.addEventListener('profitDataReady', _hlPendingFlush);
+// 開站加速塊 4：洞察表某家到了（或讀取失敗）→ 等待中的蝦皮商品層快照重新排隊（profit.js 在洞察表還在載入時回 pending）
+if (typeof window.addEventListener === 'function') ['insightShopReady', 'insightShopFailed'].forEach(ev => window.addEventListener(ev, _hlPendingFlush));
 // 「↻ 重新計算」：已載入平台的快照全部重算（雲端資料可能更新了）；載入狀態不動、不重新訂閱；逾時的回到 idle（桌機會自動再載一次）
 function _hlProdReset() {
   _hlSpReset();

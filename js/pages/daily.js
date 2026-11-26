@@ -498,7 +498,7 @@ Object.assign(App, {
       <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px 16px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
           <div style="min-width:0">
-            <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">每日工作進度 · ${escapeHtml(dateDisplay)}${isToday ? '<span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);padding:2px 8px;border-radius:999px">今天</span>' : ''}</h3>
+            <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">每日工作進度 · ${escapeHtml(dateDisplay)}${isToday ? '<span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);padding:2px 8px;border-radius:999px">今天</span>' : ''}</h3>${_dpInsBootNote()}
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${isEditable ? `<button id="dp-sync-cloud" title="把進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
@@ -3076,6 +3076,31 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
+// 開站加速塊 4：洞察表某家第一次到（app.js 背景載入）→ 工作日誌的洞察表次數（_insWhoOn／getInsIndex）要重算，正在工作日誌頁就重畫一次。
+//   每家只來一次；300ms 收斂（4 家常常前後腳到）。正在打新增待辦（有字或游標在框裡）就延後 2 秒再看，不打斷輸入。
+let _dpInsReadyTimer = null;
+function _dpInsReadyRender() {
+  if (!(window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function')) return;
+  const typing = Array.from(document.querySelectorAll('.dp-todo-add-input')).some(el => String(el.value || '').trim() !== '' || el === document.activeElement);
+  if (typing) { _dpInsReadyTimer = setTimeout(_dpInsReadyRender, 2000); return; }
+  window.App.render();
+}
+['insightShopReady', 'insightShopFailed'].forEach(ev => window.addEventListener(ev, () => {
+  clearTimeout(_dpInsReadyTimer);
+  _dpInsReadyTimer = setTimeout(_dpInsReadyRender, 300);
+}));
+// 工作日誌頁首的灰字：洞察表還沒到 / 讀取失敗時提醒「洞察表次數」暫時不準；都到了（或沒用雲端）＝空字串，畫面跟改版前一樣
+function _dpInsBootNote() {
+  const st = window.__insightShopState;
+  if (!st) return '';
+  const keys = Object.keys(st);
+  const bad = keys.filter(s => st[s] === 'failed');
+  const wait = keys.filter(s => st[s] !== 'failed' && st[s] !== 'ready');
+  const css = 'margin-top:4px;font-size:11px;color:var(--text-muted)';
+  if (bad.length) return `<div class="dp-ins-boot-note" style="${css}">洞察表資料讀取失敗（${escapeHtml(bad.join('、'))}），洞察表次數可能偏少，請重新整理</div>`;
+  if (wait.length) return `<div class="dp-ins-boot-note" style="${css}">洞察表資料載入中，洞察表次數稍後更新</div>`;
+  return '';
+}
 // 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code, by}] }（by＝紀錄上的操作者，塊 3-C 月曆歸屬用）。來源 = ADJ_ALL_SHOPS 各通路的
 // ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
 // date 空的跳過。純唯讀。

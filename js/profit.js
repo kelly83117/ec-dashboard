@@ -34546,6 +34546,12 @@ async function _usLoad(){
   _usRender({months,pm,loading:'讀取報表（庫存、營收）…'});
   const {reps,failed}=await _usLoadReports(ym);
   if(seq!==_usView.seq)return;
+  // 開站加速塊 4：洞察表母表還沒到（開站背景載入）→ 等它到；讀取失敗照樣算（下面 masterEmpty 的警告會註明讀取失敗）
+  if(typeof window.__insightWhenReady==='function'&&!(window.__insightShopReady&&window.__insightShopReady(shop))){
+    _usRender({months,pm,loading:'讀取洞察表母表…'});
+    await window.__insightWhenReady(shop);
+    if(seq!==_usView.seq)return;
+  }
   const byCode=((Store.get('ec.insight_'+shop+'_master')||{}).byCode)||{};
   const prevMonth=_stPrevYm(ym).replace('-','/');
   const pr=_usPrevRev(reps,shop,prevMonth);
@@ -34591,7 +34597,7 @@ function _usRender(v){
     `<div class="us-note">庫存＝莫筆克公司倉（全公司共用），不是蝦皮後台的數量 <span class="us-info" title="${e(tip)}">ⓘ</span></div>`;
   const warns=[];
   if(d.failed.length)warns.push(`以下報表讀取失敗：${d.failed.join('、')}。「庫存不明」不代表沒有庫存，請稍後重開。`);
-  if(d.masterEmpty)warns.push(`讀不到 ${shop} 的洞察表母表，商品 ID 對不到品號（全部列在③）。`);
+  if(d.masterEmpty)warns.push(`${window.__insightShopState&&window.__insightShopState[shop]==='failed'?'（洞察表資料讀取失敗）':''}讀不到 ${shop} 的洞察表母表，商品 ID 對不到品號（全部列在③）。`);
   if(!d.prevRev)warns.push(`${shop} 沒有 ${pmm} 月的報表，「${pmm} 月營收」一律顯示 —。`);
   if(d.histFailed.length)warns.push(`${d.histFailed.map(_usYmLabel).join('、')} 的整月商品表現讀取失敗，「最近有賣」可能不準。`);
   const warnHtml=warns.map(w=>`<div class="us-warn">⚠ ${e(w)}</div>`).join('');
@@ -34630,6 +34636,8 @@ async function __shopeeUnsoldSnap(ym){
   for(const shop of _US_SHOPS){
     const p=await _usPerfGet(shop,ym);
     if(p.state!=='ok'){out[shop]={state:p.state};continue;}
+    if(typeof window.__insightWhenReady==='function')await window.__insightWhenReady(shop);   // 開站加速塊 4：等洞察表母表到
+
     const r=_usBuild({perf:p,byCode:((Store.get('ec.insight_'+shop+'_master')||{}).byCode)||{},stock,prevRev:null,hist:[]});
     out[shop]={正常沒賣:r.unsold,對到品號:r.mapped,查得到庫存:r.known,有庫存:r.groups.have.length,沒庫存:r.groups.zero.length,庫存不明:r.groups.unknown.length,動銷率:r.num+'/'+r.den};
   }
@@ -36007,6 +36015,8 @@ window.__healthLoadProducts=async function(platform,opts){
 //   回 { platform, shop, month, ... } ；讀不到回 { …, error }。各平台形狀見 js/pages/health.js 的 _hlProdNormalize。
 //   「已調整」日期每個通路快取 20 秒（蝦皮要讀淨利表備註＋洞察表調整紀錄，資料大；同一輪 3～13 個月不用重讀）。
 const _healthAdjCache={};
+// 開站加速塊 4（保險）：洞察表某家第一次到 → 丟掉那家蝦皮的「已調整」快取（正常情況 pending 已經擋住，不會有快取）
+window.addEventListener('insightShopReady',e=>{ try{ delete _healthAdjCache['shopee|'+(e&&e.detail&&e.detail.shop)]; }catch(_){} });
 window.__healthProductSnapshot=function(platform,shop,month){
   const out={platform,shop,month,error:null};
   // 🔴 窗口外還沒讀的月份：回 pending（呼叫端不能快取），並觸發讀取。算成「沒資料」會讓通路分數掉下去。讀取失敗回 error，一樣不是沒資料。
@@ -36027,6 +36037,9 @@ window.__healthProductSnapshot=function(platform,shop,month){
   try{
     if(!/^\d{4}-\d{2}$/.test(month||''))throw new Error('bad month');
     if(platform==='shopee'){
+      // 開站加速塊 4：這家洞察表還在背景載入 → 回 pending（health.js 不快取、畫面維持載入中，insightShopReady 到了重排）；
+      //   放在 _healthAdjCache 之前就 return，所以 20 秒快取不會記到少了洞察表的日期。讀取失敗（failed）照樣算。
+      if(window.__insightShopState&&window.__insightShopState[shop]==='loading'){ out.pending=true; return out; }
       const ym=month.replace('-','/');
       out.halves=[];
       ['full','first','second'].forEach(h=>{
