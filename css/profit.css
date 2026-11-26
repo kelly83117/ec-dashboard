@@ -2428,3 +2428,17 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 /* 整頁優化紀錄（塊 3）：合併商品頁外層記的那一筆，在規格列、商品彈窗前面標「整頁」。 */
 :root{--pch-ol-page-bg:var(--warn-soft);--pch-ol-page-fg:var(--warn);}
 .pch-ol-page{flex-shrink:0;margin-right:4px;padding:0 5px;border-radius:4px;background:var(--pch-ol-page-bg);color:var(--pch-ol-page-fg);font-size:10px;font-weight:700;white-space:nowrap;}
+
+/* 手機（≤768px，沿用全站手機斷點）：KPI 月結表上方大數字卡維持兩張一排，金額縮字級、放不下就換行，不再出現「…」。
+   電腦版（>768px）完全不受影響。字級用 :root 變數（定義在 css/main.css 的 :root）。 */
+@media (max-width:768px){
+  .km-v{font-size:var(--km-v-fs-mobile);white-space:normal;overflow-wrap:anywhere;text-overflow:clip;}
+  .km-card-main .km-v{font-size:var(--km-v-fs-mobile-main);}
+  /* 營收成本結構／營收組成：minmax(380px,1fr) 比手機可用寬度大，右邊百分比欄會被切掉 → 手機改單欄全寬 */
+  .km-two{grid-template-columns:var(--km-two-cols-mobile);}
+  /* 營收成本結構瀑布圖：長條最小寬 80px 太寬，手機縮小長條與欄距，讓右邊百分比、金額欄放得下 */
+  .km-wf{grid-template-columns:var(--km-wf-cols-mobile);column-gap:var(--km-wf-colgap-mobile);}
+  /* 營收組成：圓餅圖與清單左右並排放不下 → 圓餅在上、清單在下 */
+  .km-mix{flex-direction:column;align-items:stretch;}
+  .km-mix-pie{align-self:center;}
+}

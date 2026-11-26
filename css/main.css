@@ -10,6 +10,11 @@
     --primary-soft: #eef2ff;
     --hl-amt-bg: var(--bg);   /* 通路健檢卡片金額列的淺底（只引用 --bg，不改底色） */
     --primary-dark: #4338ca;
+    --km-v-fs-mobile: 18px;        /* KPI 月結表大數字卡：手機（≤768px）金額字級 */
+    --km-v-fs-mobile-main: 20px;   /* 同上，第一張「全通路純利」主卡 */
+    --km-two-cols-mobile: minmax(0, 1fr);   /* KPI 月結表兩欄面板（營收成本結構／營收組成）：手機單欄全寬 */
+    --km-wf-cols-mobile: max-content minmax(24px, 1fr) max-content max-content;   /* 營收成本結構瀑布圖：手機欄寬 */
+    --km-wf-colgap-mobile: 6px;   /* 同上，手機欄距 */
     --border: #e5e7eb;
     --text: #111827;
     --text-muted: #6b7280;
@@ -3140,3 +3145,10 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-st-note { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
 /* 通路健檢逐月表：MOMO 動銷率列下面的「以商品頁算」對照小字 */
 .hl-mt-page { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+
+/* 手機（≤768px）：工作日誌「每日工作進度」左右兩欄改成上下排（月曆在上、右欄在下），每欄全寬。
+   兩欄的 grid 是 daily.js 的 inline style（電腦版 HTML 一字不改），所以用 :has() 從月曆的「‹」鈕往上找到那一層，
+   覆蓋 inline 只能用 !important。電腦版（>768px）完全不受影響。 */
+@media (max-width: 768px) {
+  #main-content div:has(> div > div > #dp-cal-prev-month) { grid-template-columns: minmax(0, 1fr) !important; }
+}
