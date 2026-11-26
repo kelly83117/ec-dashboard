@@ -957,6 +957,17 @@ const App = {
     const password = document.getElementById('login-password').value;
     const ulow = username.toLowerCase();
 
+    // 手機登入 B：雲端資料還沒到（第一批快照還沒來）就不比對。這時 ec.users 讀的是 localStorage，
+    //   雲端模式從不寫它，通常是空的或很舊 → 會誤報「帳號不存在／密碼錯誤」。改成排隊，第一批快照到了
+    //   自動用當下欄位的帳密再跑一次 login()（見 subscribe 內 __loginQueued）。雲端讀取失敗 → 請他重新整理。
+    //   firebase.js 根本沒跑起來（沒有 __cloudStore）時不擋，照舊比對本機清單。
+    if (window.__cloudStore && !window.__firstMainSnapshotDone) {
+      if (window.__setupCloudFailed) { this.showAuthError('連不上雲端，請重新整理後再試'); return; }
+      window.__loginQueued = true;
+      this.showAuthError('資料載入中，請稍候…載入完成會自動幫你登入');
+      return;
+    }
+
     // 後門：admin / admin123 — 僅在 admin 完全不存在時建立預設帳號用（第一次 setup 或災難救援）
     //   舊行為會強制把 admin 密碼重設回 admin123，等於 admin 改的新密碼白改。已移除。
     //   現在：
@@ -3491,7 +3502,14 @@ async function __setupCloud() {
       // 手機登入 A：上面的 8 秒逾時已經跳出登入頁（__bootSlowSession），雲端第一批快照現在才到 → 自動登回去。
       //   使用者正在打字（帳號或密碼欄有字、游標在欄位裡，含 iOS 自動填入）就不切畫面，讓他自己按登入。
       //   只跑一次（先清旗標）；已經有人登入就不跑。不 return：登入成功就照「fallback 先開站、雲端後到」的既有路徑往下走。
-      if (isFirstSnapshot && window.App && !App.currentUser && window.__bootSlowSession) {
+      // 手機登入 B：雲端沒到之前按過登入（排隊）→ 先處理排隊的登入，A 就不跑（不會進站兩次）。
+      if (isFirstSnapshot && window.App && !App.currentUser && window.__loginQueued) {
+        window.__loginQueued = false;
+        window.__bootSlowSession = null;
+        // 先清掉「資料載入中」，不然登入成功後它留在隱藏的登入頁，下次登出會再看到；比對失敗時 login() 會換成新的錯誤
+        try { const errEl = document.getElementById('login-error'); if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); } } catch (e) {}
+        try { App.login(); } catch (e) { console.warn('[login queued] 失敗', e); }
+      } else if (isFirstSnapshot && window.App && !App.currentUser && window.__bootSlowSession) {
         window.__bootSlowSession = null;
         try {
           const sess = Store.get(Store.KEYS.session);
@@ -3600,6 +3618,12 @@ async function __setupCloud() {
     } catch (e) { console.warn('[insight subscribe per-shop]', e); }
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
+    // 手機登入 B：之後按登入改顯示「連不上雲端」；已經在排隊（畫面停在「資料載入中」）的，清掉排隊、換成同一句
+    window.__setupCloudFailed = true;
+    if (window.__loginQueued) {
+      window.__loginQueued = false;
+      try { if (window.App && typeof App.showAuthError === 'function') App.showAuthError('連不上雲端，請重新整理後再試'); } catch (e2) {}
+    }
   }
   __bootApp();
   // #269 第 4 塊：舊版洞察表待同步只備份不補（條件不齊會自己略過；已登入的情況在這裡跑，否則等 enterApp）
