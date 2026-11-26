@@ -1136,7 +1136,7 @@ Object.assign(App, {
         const file = e.target.files?.[0];
         if (!file) return;
         // 擋板（第二道）：母表合併要讀 4 家的舊母表 → 4 家都要載入完成
-        try { _insReadyGate(INSIGHT_SHOPS); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); masterInput.value = ''; return; }
+        if (_insReadyBlocked(INSIGHT_SHOPS, masterInput)) return;
         const ok = await confirmUpload('商品清單（母表）— 三個賣場共用', file, masterInput);
         if (!ok) return;
         showUploadingOverlay('insight-master-upload');
@@ -1199,7 +1199,7 @@ Object.assign(App, {
         if (!file) return;
         const cardLabel = `${currentShop} · ${slotLabel}`;
         // 擋板（第二道）：每週銷售要讀舊的 weeks 往後推 → 目前通路要載入完成
-        try { _insReadyGate([currentShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); input.value = ''; return; }
+        if (_insReadyBlocked([currentShop], input)) return;
         const ok = await confirmUpload(cardLabel, file, input);
         if (!ok) return;
         showUploadingOverlay(inputId);
@@ -1256,7 +1256,7 @@ Object.assign(App, {
       perfInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        try { _insReadyGate([currentShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); perfInput.value = ''; return; }   // 擋板（第二道）
+        if (_insReadyBlocked([currentShop], perfInput)) return;   // 擋板（第二道）
         const ok = await confirmUpload(`${currentShop} · 商品表現（蝦皮）`, file, perfInput);
         if (!ok) return;
         showUploadingOverlay('insight-perf-upload');
@@ -1315,7 +1315,7 @@ Object.assign(App, {
         const labels = { master: '商品母表', sales: '上週銷售', salesPrev: '上上週銷售', salesPrevPrev: '上上上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
         // 擋板（第二道）：清除計畫要讀目前的 weeks → 目前通路要載入完成，不然會用空的 weeks 算計畫、整欄覆蓋
-        try { _insReadyGate([curShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); return; }
+        if (_insReadyBlocked([curShop])) return;
 
         // 二次確認：避免誤觸 ✕ 弄掉重要資料
         const confirmed = await new Promise((resolve) => {
@@ -1337,7 +1337,7 @@ Object.assign(App, {
           });
         });
         if (!confirmed) return;
-        try { _insReadyGate([curShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); return; }   // 🛡 確認窗開著時再確認一次
+        if (_insReadyBlocked([curShop])) return;   // 🛡 確認窗開著時再確認一次
 
         // #300：改走 Store.set(key, 計畫值)。雲端模式下 Store.set 對 ec.insight_* 經 __cloudInsightByShop.forKey 路由，
         //   寫進 app/insight_{通路}（原本寫 app/main / app/insight，v759 起讀取端忽略那兩份 → 等於沒刪、重整又回來）。
@@ -2772,8 +2772,17 @@ function _insReadyMsg(state, shops) {
   return null;
 }
 /* ═══ INS-READY-PURE-END ═══ */
-// 第二道擋板（第三道是 app.js 的 Store.set 閘門）：擋下就 throw（err.insReady=true），呼叫端的 catch 用 _insUploadErrMsg 顯示原句。
-//   🔴 新增會寫 ec.insight_*_{master|weeks|perf} 的入口要接這支（scripts/insight-ready-gate.test.cjs 會數）。
+// 第二道擋板（第三道是 app.js 的 Store.set 閘門）。🔴 新增會寫 ec.insight_*_{master|weeks|perf} 的入口兩支都要接
+//   （scripts/insight-ready-gate.test.cjs 會數）：
+//   _insReadyBlocked：選檔／按 ✕ 之後、確認窗之前；擋下就 toast 原句、清掉 input，回 true（呼叫端 return）。
+//   _insReadyGate：寫入前的 try 裡；擋下就 throw（err.insReady=true），呼叫端的 catch 用 _insUploadErrMsg 顯示原句。
+function _insReadyBlocked(shops, input) {
+  const msg = _insReadyMsg(window.__insightShopState || null, shops);
+  if (!msg) return false;
+  showToast(msg, 'error');
+  if (input) { try { input.value = ''; } catch {} }
+  return true;
+}
 function _insReadyGate(shops) {
   const msg = _insReadyMsg(window.__insightShopState || null, shops);
   if (!msg) return;
