@@ -189,6 +189,29 @@ ESM 有個致命陷阱必須牢記：
      `cloudStoreReady` → 觸發 `app.js` 的 `__setupCloud()` 啟動雲端。
 3. 改動啟動相關程式時，務必保住「事件驅動 + fallback」這個結構，不要假設
    雲端一定先就緒，也不要假設 App 一定先 render 完。
+4. **開站加速第一包（2026-11-26，`__setupCloud`）**：登入與首頁只等 app/main，洞察表改到背景載入。
+   - **app/main 只下載一次**：訂閱先開、再 getDoc（共用監聽目標）。setup 完成前的快照只暫存最新一份，setup 完成後在
+     `setTimeout(0)` 才交給處理函式 `__mainSnapHandler`（本體沒改），維持「第一批快照在 `__bootApp` 之後才處理」——
+     seedData／ensureAdmin、權限重算、自動登入都靠這個順序，🔴 不要改成同步處理。
+     🔴 **沒有 `ec.users` 的快照（文件不存在、離線從空快取來）一律略過、不取代 `Store._mem`**（暫存那層與 `__mainDeliver` 各擋一次；
+     只有 `Store._mem` 本來就沒有帳號＝雲端真的空的新專案才照常交出）。首次遷移（雲端空就上傳本機）仍只看 getDoc 的結果。
+     setup 失敗時先開的訂閱會關掉、暫存丟掉（＝改前「失敗就沒有訂閱」）。
+   - **洞察表背景載入**：app/main 設好 `Store._mem` 之後，每家 `subscribeShop` 再 `getDocForShop`（共用監聽），到了逐家寫進**當下的** `Store._mem`。
+     狀態（都是唯讀觀測點、不以 `__cloud` 開頭）：`window.__insightShopState`＝`null`（沒用雲端：fallback／setup 失敗，洞察表照舊讀本機）
+     或 `{ 通路: 'loading'|'ready'|'failed' }`（只會 loading→ready、loading→failed、failed→ready）；`__insightShopReady(通路)`；
+     `__insightWhenReady(通路)`（Promise，`'ready'|'failed'|'off'`）；事件 `insightShopReady`／`insightShopFailed`（`detail.shop`，每家第一次才發）。
+     ready＝getDoc 成功（文件不存在也算）或訂閱給了含 `ec.insight_{通路}_` key 的資料；failed＝getDoc 丟錯（某一家讀取失敗不再只是 warn、那家變空的還能上傳）。
+     **`__insightCloudReady` 改成 4 家都 ready 才是 true**（舊版待同步備份、一鍵釋出空間 (c) 都看它）。
+   - **三道擋板**（洞察表還沒 ready ⇒ 一律不寫）：① 洞察表頁只畫「洞察表資料載入中…（{通路}）」／「{通路} 洞察表資料讀取失敗」（marketing.js `_insLoadingHtml`，沒有上傳卡）；
+     ② 上傳入口 `_insReadyBlocked`（確認窗前）＋`_insReadyGate`（寫入前）：母表檢查 4 家，每週銷售、商品表現、✕ 清除、整月商品表現檢查目前通路；
+     ③ app.js `Store.set` 包裝層閘門（`origSet` 之前，記憶體與雲端都不寫，Console 直接 `Store.set` 也擋）。
+     🔴 新增會寫 `ec.insight_*_{master|weeks|perf}` 的入口要接 ② 兩支（`scripts/insight-ready-gate.test.cjs` 會數）；
+     新增會讀洞察表的地方，要嘛容許晚到（下次重畫就對），要嘛先 `await __insightWhenReady(通路)`。
+   - **晚到時**：工作日誌（`office-d1`）每家第一次到就重畫一次（300ms 收斂、正在打新增待辦就延後），還沒到時頁首灰字；
+     蝦皮零動銷（`_usLoad`、`__shopeeUnsoldSnap`）先等母表；健檢 `__healthProductSnapshot` 蝦皮在那家 loading 時回 `pending`（不進 20 秒快取），事件到了 `_hlPendingFlush` 重排。
+   - 本機測試：`__insightSlowMock(秒數|'fail'|false)`（只在 localhost，存 sessionStorage，**重新整理才生效**）。node 測試 `scripts/insight-ready-gate.test.cjs`（含 vm 模擬空快照）。
+   - ⚠ 離線測試站的假 SDK 不會合併監聽目標，「只下載一次」只能在正式站用 DevTools Network（Listen channel）確認。
+   - 第二包（還沒做）：firebase.js 開站就訂閱的 23 份文件（app/profit、PChome×5、growth×4、optlog×11、博客來、FriDay，約 4.5 MB）延後到 app/main 到了才開始。
 
 ## 資料與後端
 
@@ -264,7 +287,7 @@ ESM 有個致命陷阱必須牢記：
     - 部署這版後要請大家重新整理：舊分頁按「從對帳單帶入」會用舊口徑覆蓋，而且不會留 V2 快照。
 - `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
   `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
-  **洞察表正式資料只在這四份 doc。** `app/main`、`app/insight` 裡若有 `ec.insight_*` 欄位，一律在讀取端忽略
+  **洞察表正式資料只在這四份 doc。** 開站不等這四份（背景載入、還沒到時擋寫入），見「啟動流程」第 4 點。`app/main`、`app/insight` 裡若有 `ec.insight_*` 欄位，一律在讀取端忽略
   （app.js `_dropInsightKeys`：開站合併與 app/main 訂閱都先濾掉，訂閱再從 `Store._mem` 補回通路版），不會被讀進來、
   開站也不會去刪它們。只濾 `ec.insight_`（含底線）開頭；`ec.insightMigrated` 這類沒有底線的 key 照常讀。
   調整紀錄（`_notes`，形狀 `{ 品號: { text, adjustments:[{date,text,by?,editedBy?,editedAt?,opId?}] } }`）
