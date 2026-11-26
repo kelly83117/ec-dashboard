@@ -32,6 +32,12 @@ Object.assign(App, {
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
 
+    // 開站加速塊 1 擋板（第一道）：這家洞察表還沒載入完成 / 讀取失敗 → 只畫「載入中」「讀取失敗」，不畫上傳卡、表格（資料到了 app.js 會重畫）
+    const __insBootSt = window.__insightShopState;
+    if (__insBootSt && Object.prototype.hasOwnProperty.call(__insBootSt, currentShop) && __insBootSt[currentShop] !== 'ready') {
+      return _insLoadingHtml(currentShop, INSIGHT_SHOPS, __insBootSt[currentShop]);
+    }
+
     // ============== 欄位顯示控制 ==============
     // 不可隱藏：band、#、商品編號/名稱/ID
     const INSIGHT_COLS = [
@@ -933,6 +939,8 @@ Object.assign(App, {
     const say = (text, kind) => _insPmSetMsg(shop, text, kind);
     if (this.isReadOnly()) { say('檢視帳號為唯讀，不能上傳', 'err'); showToast('檢視帳號為唯讀，不能上傳', 'error'); return; }
     if (_insPm.busy) { showToast('上一份還在存，請稍候', 'error'); return; }
+    // 擋板（第二道）：母表重疊率要用這家的洞察表母表 → 要載入完成（不然會誤報「母表重疊率低」）
+    { const rm = _insReadyMsg(window.__insightShopState || null, [shop]); if (rm) { say(rm, 'err'); showToast(rm, 'error'); return; } }
     const be = window.__cloudShopeePerf;
     if (!be) { say('雲端還沒連上，請重新整理後再試', 'err'); return; }
     const period = this.insPerfMonthPeriodFromName(file && file.name);
@@ -1127,6 +1135,8 @@ Object.assign(App, {
       masterInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        // 擋板（第二道）：母表合併要讀 4 家的舊母表 → 4 家都要載入完成
+        try { _insReadyGate(INSIGHT_SHOPS); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); masterInput.value = ''; return; }
         const ok = await confirmUpload('商品清單（母表）— 三個賣場共用', file, masterInput);
         if (!ok) return;
         showUploadingOverlay('insight-master-upload');
@@ -1162,6 +1172,7 @@ Object.assign(App, {
             totalNew += newCount;
             totalUpdated += updatedCount;
           });
+          _insReadyGate(INSIGHT_SHOPS);   // 🛡 洞察表要載入完成（上面 prevMaster 才是真的舊母表）
           _insDocCapGuardAll(writes);   // 🛡 超過 95% ⇒ throw（下面 catch 顯示原句），一個通路都不寫
           writes.forEach(w => Store.set(w.key, w.value));
           const diffMsg = (totalNew > 0 || totalUpdated > 0)
@@ -1187,6 +1198,8 @@ Object.assign(App, {
         const file = e.target.files?.[0];
         if (!file) return;
         const cardLabel = `${currentShop} · ${slotLabel}`;
+        // 擋板（第二道）：每週銷售要讀舊的 weeks 往後推 → 目前通路要載入完成
+        try { _insReadyGate([currentShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); input.value = ''; return; }
         const ok = await confirmUpload(cardLabel, file, input);
         if (!ok) return;
         showUploadingOverlay(inputId);
@@ -1218,6 +1231,7 @@ Object.assign(App, {
           if (weeks.length > 4) weeks.length = 4;
           // 舊版上傳留下的每列 cost 一起拿掉（一次上傳就清掉 4 週；不改到記憶體裡原本那幾週的物件）
           const slimWeeks = _insWeeksStripCost(weeks);
+          _insReadyGate([currentShop]);   // 🛡 洞察表要載入完成（上面讀的 weeks 才是真的舊資料）
           _insDocCapGuard(currentShop, sKey('weeks'), slimWeeks);   // 🛡 單檔上限預檢：超過就 throw、不寫
           Store.set(sKey('weeks'), slimWeeks);
           const shiftMsg = shifted ? '（上上週/上上上週已自動往後推）' : '';
@@ -1242,6 +1256,7 @@ Object.assign(App, {
       perfInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        try { _insReadyGate([currentShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); perfInput.value = ''; return; }   // 擋板（第二道）
         const ok = await confirmUpload(`${currentShop} · 商品表現（蝦皮）`, file, perfInput);
         if (!ok) return;
         showUploadingOverlay('insight-perf-upload');
@@ -1252,6 +1267,7 @@ Object.assign(App, {
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
           };
+          _insReadyGate([currentShop]);   // 🛡 洞察表要載入完成
           _insDocCapGuard(currentShop, sKey('perf'), perfValue);   // 🛡 單檔上限預檢：超過就 throw、不寫
           Store.set(sKey('perf'), perfValue);
           showToast(`「${currentShop} · 商品表現」已上傳`, 'success');
@@ -1298,6 +1314,8 @@ Object.assign(App, {
         const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'salesPrevPrev' | 'perf'
         const labels = { master: '商品母表', sales: '上週銷售', salesPrev: '上上週銷售', salesPrevPrev: '上上上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
+        // 擋板（第二道）：清除計畫要讀目前的 weeks → 目前通路要載入完成，不然會用空的 weeks 算計畫、整欄覆蓋
+        try { _insReadyGate([curShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); return; }
 
         // 二次確認：避免誤觸 ✕ 弄掉重要資料
         const confirmed = await new Promise((resolve) => {
@@ -1319,6 +1337,7 @@ Object.assign(App, {
           });
         });
         if (!confirmed) return;
+        try { _insReadyGate([curShop]); } catch (err) { showToast(_insUploadErrMsg(err), 'error'); return; }   // 🛡 確認窗開著時再確認一次
 
         // #300：改走 Store.set(key, 計畫值)。雲端模式下 Store.set 對 ec.insight_* 經 __cloudInsightByShop.forKey 路由，
         //   寫進 app/insight_{通路}（原本寫 app/main / app/insight，v759 起讀取端忽略那兩份 → 等於沒刪、重整又回來）。
@@ -2737,9 +2756,48 @@ function insDocCapCheckAll(checks, measure, blockRatio) {
 // 上傳流程 catch 的提示：預檢擋下的（err.insCap）直接顯示原句，其他照舊冠「解析失敗：」。
 function _insUploadErrMsg(err) {
   const msg = (err && err.message) || String(err);
-  return (err && err.insCap) ? msg : ('解析失敗：' + msg);
+  return (err && (err.insCap || err.insReady)) ? msg : ('解析失敗：' + msg);
 }
 /* ═══ INS-DOC-CAP-PURE-END ═══ */
+/* ═══ INS-READY-PURE-BEGIN ═══ */
+// 開站加速塊 1：洞察表還沒載入完成（或讀取失敗）時，上傳／清除一律擋下的原句。
+//   state：window.__insightShopState（null＝沒用雲端，一律放行）；shops：要檢查的通路。回 null＝放行。failed 優先於 loading。
+function _insReadyMsg(state, shops) {
+  if (!state) return null;
+  const has = (s) => Object.prototype.hasOwnProperty.call(state, s);
+  const bad = shops.filter(s => has(s) && state[s] === 'failed');
+  const wait = shops.filter(s => has(s) && state[s] !== 'failed' && state[s] !== 'ready');
+  if (bad.length) return `洞察表資料讀取失敗（${bad.join('、')}），這次沒有上傳，雲端資料沒有變。請重新整理後再試。`;
+  if (wait.length) return `洞察表資料還在載入（${wait.join('、')}），這次沒有上傳，雲端資料沒有變。請等畫面出現資料後再試。`;
+  return null;
+}
+/* ═══ INS-READY-PURE-END ═══ */
+// 第二道擋板（第三道是 app.js 的 Store.set 閘門）：擋下就 throw（err.insReady=true），呼叫端的 catch 用 _insUploadErrMsg 顯示原句。
+//   🔴 新增會寫 ec.insight_*_{master|weeks|perf} 的入口要接這支（scripts/insight-ready-gate.test.cjs 會數）。
+function _insReadyGate(shops) {
+  const msg = _insReadyMsg(window.__insightShopState || null, shops);
+  if (!msg) return;
+  const e = new Error(msg); e.insReady = true; throw e;
+}
+// 洞察表頁「載入中」「讀取失敗」畫面（第一道擋板）：標題列與通路切換鈕同正常頁（bindInsightTab 照常綁），沒有上傳、表格、匯出。
+function _insLoadingHtml(currentShop, shops, state) {
+  const failed = state === 'failed';
+  const pills = shops.filter(s => s !== currentShop).map(s => `
+              <button class="pill" data-insight-shop="${escapeHtml(s)}" style="padding:4px 12px;font-size:12px;border:1px solid var(--border);background:white;color:var(--text-muted);font-weight:600;border-radius:99px;cursor:pointer">${escapeHtml(s)}</button>`).join('');
+  const big = failed ? `${escapeHtml(currentShop)} 洞察表資料讀取失敗` : `洞察表資料載入中…（${escapeHtml(currentShop)}）`;
+  const small = failed ? '這不代表沒有資料，雲端資料沒有變。請重新整理後再試；這段時間不能上傳或清除檔案。' : '資料到了會自動顯示。這段時間不能上傳或清除檔案。';
+  return `
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+          <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · ${escapeHtml(currentShop)}</h3>${pills}
+        </div>
+        <div class="ins-boot-state" data-ins-state="${failed ? 'failed' : 'loading'}" style="padding:48px 18px;text-align:center">
+          <div style="font-size:15px;font-weight:600;color:${failed ? '#b91c1c' : 'var(--text)'}">${big}</div>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">${small}</div>
+          ${failed ? '<button type="button" onclick="location.reload()" style="margin-top:14px;padding:6px 16px;font-size:12px;border:1px solid var(--border);background:white;border-radius:6px;cursor:pointer">重新整理</button>' : ''}
+        </div>
+      </div>`;
+}
 // 三個上傳入口在 Store.set 之前一律先過這支：超過上限就 throw（中文訊息、err.insCap=true），呼叫端不寫、不跳「已上傳」、不重畫。
 //   量測函式不存在或還沒收到雲端快照 ⇒ 放行並在 console 留一行（同 profit.js _momoDocCapGuard）。唯讀觀測：window.__insLastDocCap。
 function _insDocCapGuardAll(checks) {
