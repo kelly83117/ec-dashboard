@@ -1992,7 +1992,9 @@ function _inGrowthPeriod(a,month,half){
 window._growthPeriodOf=_growthPeriodOf;
 window._inGrowthPeriod=_inGrowthPeriod;
 // ══════ 商品調整關鍵字篩選（2026-11-26，Kelly；蝦皮四家＋測試通路）══════
-//   比對範圍＝這個品號【全部期間】的商品調整（ec_notes|{通路}_growth 的 adjustments，Gini 定案），不含洞察表紀錄、不含廣告調整。
+//   比對範圍＝這個品號【這一期寫的】商品調整（ec_notes|{通路}_growth 的 adjustments），不含洞察表紀錄、不含廣告調整。
+//     2026-11-26 Kelly 回饋「不要顯示以前寫的，只要當次有寫的」：原本比全部期間，改成 growthKwScope——
+//     看上半月／下半月＝只比該半月（跟格子大字同一套 _inGrowthPeriod）；看整月＝該月整月＋上半月＋下半月；其他月份一律不比。
 //   比對：兩邊都 NFKC（全形英數字／空白轉半形）＋小寫＋空白收成一個；關鍵字用空白分開＝AND（每個字都要出現，可以在不同紀錄裡）。
 //   純函式（不讀 Store／DOM），node 測試 scripts/growth-keyword-filter.test.cjs。
 // GROWTH-KW-PURE-BEGIN
@@ -2020,6 +2022,13 @@ function growthKwHint(adjs,tokens,inCur,labelOf){
   const lines=hits.slice(0,3).map(a=>{ const ch=Array.from(String(a.text==null?'':a.text).trim()); return `關鍵字在 ${labelOf(a)}「${ch.slice(0,20).join('')}${ch.length>20?'…':''}」`; });
   if(hits.length>3)lines.push(`…另有 ${hits.length-3} 筆`);
   return lines.join('\n');
+}
+// 只留「這一期」的紀錄（規則見上面）。periodOf＝_growthPeriodOf、inPeriod＝_inGrowthPeriod，由呼叫端傳進來（純函式不讀全域）。
+//   整月：期間算得出來而且是同一個月（整月／上半月／下半月都算）；期間算不出來（日期壞掉）的一律不算。
+function growthKwScope(adjs,month,half,periodOf,inPeriod){
+  const list=(adjs||[]).filter(a=>a&&typeof a==='object');
+  if(half==='full')return list.filter(a=>{ const p=periodOf(a); return !!p&&p.slice(0,7)===month; });
+  return list.filter(a=>inPeriod(a,month,half));
 }
 // GROWTH-KW-PURE-END
 // 搜尋框範圍＝「商品調整」而且有字（筆數、上月同期比較、提示都用這一支判斷）。範圍＝「商品」一律 false＝改版前的行為。
@@ -4836,7 +4845,7 @@ function shopHTML(shop){return`
   <div id="sv-profit-${shop}">
     <div class="toolbar" id="tb-${shop}" style="position:relative">
       <span id="period-tag-${shop}" style="display:none"></span>
-      <span class="sch-wrap" id="sch-wrap-${shop}"><select class="sch-scope" id="sch-scope-${shop}" onchange="setSearchScope('${shop}',this.value)" title="搜尋範圍：商品＝編號／名稱／ID；商品調整＝商品調整欄寫過的文字（全部期間），不搜商品名稱" aria-label="搜尋範圍"><option value="prod">商品</option><option value="growth">商品調整</option></select><input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="searchInput('${shop}',this,event)"><button type="button" class="sch-clear" onclick="searchClear('${shop}')" title="清除搜尋文字（範圍不變）" aria-label="清除搜尋文字">✕</button></span>
+      <span class="sch-wrap" id="sch-wrap-${shop}"><select class="sch-scope" id="sch-scope-${shop}" onchange="setSearchScope('${shop}',this.value)" title="搜尋範圍：商品＝編號／名稱／ID；商品調整＝這一期寫的商品調整（看整月＝整月＋上下半月），不搜商品名稱" aria-label="搜尋範圍"><option value="prod">商品</option><option value="growth">商品調整</option></select><input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="searchInput('${shop}',this,event)"><button type="button" class="sch-clear" onclick="searchClear('${shop}')" title="清除搜尋文字（範圍不變）" aria-label="清除搜尋文字">✕</button></span>
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="batch-sel-info" id="batchsel-${shop}"></span>
       <span class="batch-sel-acts" id="batchacts-${shop}"><button class="bsel-act" onclick="openBatchTagPanel('${shop}','add')">＋ 加標籤</button><button class="bsel-act bsel-act-rm" onclick="openBatchTagPanel('${shop}','remove')">－ 移除標籤</button></span>
@@ -7882,11 +7891,11 @@ function applyFilters(shop,opts){
   if(!s._built||!s._built.length)return;
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
-  // 搜尋範圍（2026-11-26）：「商品」＝改版前那一行，一字未動；「商品調整」＝比這個品號全部期間的商品調整（規則見 GROWTH-KW-PURE）。
+  // 搜尋範圍（2026-11-26）：「商品」＝改版前那一行，一字未動；「商品調整」＝比這個品號這一期寫的商品調整（規則見 GROWTH-KW-PURE 的 growthKwScope）。
   //   getNotes 在 filter 外面取一次（整份深拷貝，理由同 renderTable 的 growthNotesAll）。
   if(s.searchScope==='growth'){
     const gkw=growthKwTokens(s.search);
-    if(gkw.length){ const gAll=getNotes(shop+'_growth')||{}; list=list.filter(r=>growthKwMatch(growthKwAdjs(gAll[r.code]),gkw)); }
+    if(gkw.length){ const gAll=getNotes(shop+'_growth')||{}; list=list.filter(r=>growthKwMatch(growthKwScope(growthKwAdjs(gAll[r.code]),s.curMonth,s.curHalf,_growthPeriodOf,_inGrowthPeriod),gkw)); }
   }
   else if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   // tagFilters 是扁平字串陣列、多個來源共用，手動標籤（第三排）一律帶 'prod|' 前綴 ——
@@ -7997,7 +8006,7 @@ function setSearch(shop,val){
 //   範圍＝「商品調整」：打字停 200ms 才篩；注音／倉頡組字中（isComposing）不篩，組字結束（compositionend）再篩；有字時整個框用強調色、出現 ✕。
 //   兩種範圍共用 state[shop].search（文字）＋ state[shop].searchScope（'prod'｜'growth'），切範圍時文字保留、用新範圍重篩。
 //   只改畫面與 ec_filterstate（本機），不寫雲端；都是檢視，不可加進 app.js __RO_WRITE_RE（唯讀帳號也要能用）。
-const _SCH_PH={prod:'🔍 搜尋 編號 / 名稱 / ID…',growth:'📝 商品調整含…（全部期間）'};
+const _SCH_PH={prod:'🔍 搜尋 編號 / 名稱 / ID…',growth:'📝 商品調整含…（這一期寫的）'};
 const _schTimer={};
 function _searchSyncUI(shop){
   const s=state[shop]; if(!s)return;
@@ -10522,7 +10531,8 @@ function renderTable(shop,list,opts){
   const crossRead=_crossPeriodIndexFor(shop);
   // 搜尋範圍＝商品調整：篩出來的列，關鍵字不在本期格子裡 ⇒ 格子的滑鼠提示最上面多一行「關鍵字在 {期間}「…」」。沒有關鍵字時回 undefined（buildNoteCell 輸出不變）。
   const _gkwTok=_growthKwOn(s)?growthKwTokens(s.search):[];
-  const _gkwHint=code=>_gkwTok.length?growthKwHint(growthKwAdjs(growthNotesAll[code]),_gkwTok,a=>_inGrowthPeriod(a,s.curMonth,s.curHalf),_growthPeriodLabel):undefined;
+  //   只在這一期的紀錄裡找（同 applyFilters）⇒ 看上半月／下半月時符合的一定在格子裡、不會有提示；只有看整月時，上下半月寫的不在格子大字裡，才標出是哪個半月寫的。
+  const _gkwHint=code=>_gkwTok.length?growthKwHint(growthKwScope(growthKwAdjs(growthNotesAll[code]),s.curMonth,s.curHalf,_growthPeriodOf,_inGrowthPeriod),_gkwTok,a=>_inGrowthPeriod(a,s.curMonth,s.curHalf),_growthPeriodLabel):undefined;
   let rowIdx=0;
   list.forEach(r=>{
     const pc=r.pureProfit>=0?'td-pos':'td-neg';
