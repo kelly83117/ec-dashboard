@@ -3158,7 +3158,73 @@ function _dropInsightKeys(obj) {
   return out;
 }
 
+// ══════ 開站加速第一包（2026-11-26）：洞察表背景載入的狀態（唯讀觀測點，都不以 __cloud 開頭） ══════
+//   __insightShopState：null＝雲端還沒接上 / 這個分頁沒用雲端（5 秒 fallback、__setupCloud 失敗）→ 洞察表一律照舊。
+//     雲端接上後＝{ 通路: 'loading'|'ready'|'failed' }；只會 loading→ready、loading→failed、failed→ready，不會退回。
+//   ready：getDocForShop 成功（文件不存在也算，伺服器確認沒有），或 subscribeShop 給了含 `ec.insight_{通路}_` key 的資料。
+//   failed：getDocForShop 丟錯而且那家還不是 ready。
+//   事件：insightShopReady（每家第一次 ready 發一次，detail {shop, source}）、insightShopFailed（detail {shop, error}）。
+//   __insightCloudReady：4 家都 ready 才是 true（原本是「__setupCloud 合併完」；有一家讀取失敗也照樣 true）。
+window.__insightShopState = null;
+window.__insightShopReady = function (shop) {
+  const st = window.__insightShopState;
+  if (!st || !Object.prototype.hasOwnProperty.call(st, shop)) return true;
+  return st[shop] === 'ready';
+};
+window.__insightWhenReady = function (shop) {
+  const st = window.__insightShopState;
+  if (!st || !Object.prototype.hasOwnProperty.call(st, shop)) return Promise.resolve('off');
+  if (st[shop] !== 'loading') return Promise.resolve(st[shop]);
+  return new Promise(resolve => {
+    const done = (e) => {
+      if (!e || !e.detail || e.detail.shop !== shop) return;
+      window.removeEventListener('insightShopReady', done); window.removeEventListener('insightShopFailed', done);
+      resolve(window.__insightShopState && window.__insightShopState[shop] === 'ready' ? 'ready' : 'failed');
+    };
+    window.addEventListener('insightShopReady', done); window.addEventListener('insightShopFailed', done);
+  });
+};
+// app/main 快照有沒有帳號：沒有（文件不存在、離線時從空快取來的）就不能拿去取代 Store._mem（會變成登不進去）
+function __mainSnapHasUsers(d) {
+  return !!(d && typeof d === 'object' && Array.isArray(d[Store.KEYS.users]) && d[Store.KEYS.users].length > 0);
+}
+// 本機測試：洞察表慢速／失敗模擬（只在 localhost／127.0.0.1；設定存 sessionStorage，重新整理才生效）
+//   __insightSlowMock(20)＝每家 getDoc 結果與訂閱回呼延後 20 秒；__insightSlowMock('fail')＝getDoc 一律丟錯、訂閱回呼吞掉；__insightSlowMock(false)＝清掉。
+const __INS_SLOW_KEY = 'ec.__insightSlowMock';
+const __insIsLocalhost = () => { try { return location.hostname === 'localhost' || location.hostname === '127.0.0.1'; } catch { return false; } };
+window.__insightSlowMock = function (v) {
+  if (!__insIsLocalhost()) { console.warn('__insightSlowMock 只在 localhost 可用'); return; }
+  try {
+    if (v === false || v == null) sessionStorage.removeItem(__INS_SLOW_KEY);
+    else if (v === 'fail' || (typeof v === 'number' && v > 0)) sessionStorage.setItem(__INS_SLOW_KEY, String(v));
+    else { console.warn('__insightSlowMock：參數要是秒數、\'fail\' 或 false'); return; }
+  } catch (e) { console.warn('__insightSlowMock 存不進 sessionStorage', e); return; }
+  console.log('%c[洞察表 mock] 目前設定：' + (sessionStorage.getItem(__INS_SLOW_KEY) || '（無）') + '｜重新整理後生效', 'color:#2563eb;font-weight:700');
+};
+function __insightSlowMockCfg() {
+  let v = null;
+  try { if (__insIsLocalhost()) v = sessionStorage.getItem(__INS_SLOW_KEY); } catch {}
+  if (!v) return { on: false, wrapGet: (s, fn) => fn(), wrapSub: (s, cb) => cb };
+  if (v === 'fail') {
+    console.warn('%c[洞察表 mock] fail：getDoc 一律丟錯、訂閱回呼吞掉', 'color:#dc2626;font-weight:700');
+    return { on: true, wrapGet: () => Promise.reject(new Error('[mock] 洞察表讀取失敗')), wrapSub: () => () => {} };
+  }
+  const ms = Math.max(0, Number(v) || 0) * 1000, t0 = Date.now();
+  console.warn('%c[洞察表 mock] 慢速：延後 ' + (ms / 1000) + ' 秒', 'color:#d97706;font-weight:700');
+  const until = () => Math.max(0, t0 + ms - Date.now());
+  return {
+    on: true,
+    wrapGet: (s, fn) => fn().then(v2 => new Promise(r => setTimeout(() => r(v2), until())), e => new Promise((r, j) => setTimeout(() => j(e), until()))),
+    wrapSub: (s, cb) => (d) => { setTimeout(() => cb(d), until()); },
+  };
+}
+
 async function __setupCloud() {
+  // 開站加速塊 2：app/main 的訂閱先開、再 getDoc → 共用監聽目標，只下載一次。
+  //   setup 完成前收到的快照只暫存最新一份；🔴 沒有 ec.users 的快照（文件不存在、離線從空快取來）一律略過、等下一份，
+  //   絕不拿它取代 Store._mem。setup 完成後在 setTimeout(0) 才交給處理函式（維持「第一批快照在 __bootApp 之後才處理」）。
+  //   失敗（catch）時關掉這個訂閱、丟掉暫存＝跟改前「失敗就沒有訂閱」一樣。
+  const __mainBuf = { has: false, latest: undefined, emptyLatest: undefined, handler: null, dead: false, unsub: null };
   try {
     const cs = window.__cloudStore;
     if (!cs) throw new Error('cloudStore not available');
@@ -3170,9 +3236,21 @@ async function __setupCloud() {
     const __settle = (f) => { let p; try { p = Promise.resolve(f()); } catch (e) { p = Promise.reject(e); } return p.then(v => ({ v }), e => ({ e })); };
     const __take = async (p) => { const r = await p; if ('e' in r) throw r.e; return r.v; };
     const __byShop = window.__cloudInsightByShop;
+    try {
+      __mainBuf.unsub = cs.subscribe((data) => {
+        if (__mainBuf.dead) return;
+        if (__mainBuf.handler) { __mainBuf.handler(data); return; }
+        if (!__mainSnapHasUsers(data)) {
+          console.warn('[boot] app/main 訂閱給了一份沒有 ec.users 的快照（文件不存在或從快取來），略過、等下一份');
+          __mainBuf.emptyLatest = data;
+          return;
+        }
+        __mainBuf.latest = data; __mainBuf.has = true;
+      });
+    } catch (e) { console.warn('[boot] app/main 訂閱先開失敗，改回 setup 後再訂閱', e); __mainBuf.unsub = null; }
     const pMain = __settle(() => cs.getDoc());
     const pInsight = window.__cloudInsight ? __settle(() => window.__cloudInsight.getDoc()) : null;
-    const pShops = (__byShop && Array.isArray(__byShop.shops)) ? __byShop.shops.map(s => __settle(() => __byShop.getDocForShop(s))) : null;
+    // 開站加速塊 1：4 份洞察表不在這裡讀，改到下面 app/main 訂閱之後背景載入（不擋登入、不跟 app/main 搶頻寬）
     const snap = await __take(pMain);
     let cloudData = snap.exists() ? (snap.data() || {}) : {};
 
@@ -3219,27 +3297,15 @@ async function __setupCloud() {
     } catch (e) { console.warn('[insight] app/insight 讀取失敗', e); }
     Object.assign(cloudData, _dropInsightKeys(insightData));
 
-    // per-shop docs：洞察表資料唯一來源
-    const insightPerShopData = {};
-    try {
-      if (pShops) {
-        // #274：讀取已在開頭同時送出；這裡仍照 shops 順序取用、合併（後面的店蓋前面），跟回來的先後無關
-        for (const [i, s] of __byShop.shops.entries()) {
-          try {
-            const snap = await __take(pShops[i]);
-            if (snap.exists && snap.exists()) {
-              const d = snap.data() || {};
-              Object.assign(insightPerShopData, d);
-            }
-          } catch (e) { console.warn('[insight] app/insight_' + s + ' 讀取失敗', e); }
-        }
-      }
-    } catch (e) { console.warn('[insight per-shop] 例外', e); }
-    Object.assign(cloudData, insightPerShopData);
+    // per-shop docs（洞察表資料唯一來源）：開站加速塊 1 起不在這裡等，改到下面「洞察表背景載入」逐家寫進當下的 Store._mem。
+    //   各家的 key 不重疊（ec.insight_{通路}_…），合併先後不影響結果。
 
     Store._mem = cloudData;
     Store._useMem = true;
-    window.__insightCloudReady = true;   // #269：雲端資料已就緒（舊版待同步的備份要等到這之後才跑，見 __insightLegacyMigrate）
+    // 塊 1：從這裡開始 4 家都是 loading；擋板（Store.set 閘門、洞察表頁、上傳函式）以此為準。
+    //   __insightCloudReady 改由背景載入在 4 家都 ready 時才設 true（舊版待同步的備份、一鍵釋出空間 (c) 都看它）。
+    window.__insightShopState = {};
+    ((__byShop && Array.isArray(__byShop.shops)) ? __byShop.shops : []).forEach(s => { window.__insightShopState[s] = 'loading'; });
 
     // 蓋掉 Store.get/set/remove：
     //   - session 一律走 localStorage（避免跨裝置共用登入狀態）
@@ -3254,6 +3320,18 @@ async function __setupCloud() {
     Store.set = function(key, value) {
       if (__isLocalOnly(key)) { __localSet(key, value); return; }  // view 的 kpi/margin 也在此就地轉本機
       if (__isReadOnly()) { __roDenied(); return; }                // 唯讀角色：非本機 key 一律擋
+      // 開站加速塊 1 擋板（第三道，最後一道）：洞察表那家還沒 ready ⇒ 不寫記憶體、不寫雲端。
+      //   涵蓋 Console 直接呼叫 Store.set、上傳函式漏接、以後新增的入口。__insightShopState 是 null（沒用雲端）時不擋。
+      if (typeof key === 'string' && key.startsWith('ec.insight_')) {
+        const im = /^ec\.insight_(.+?)_(master|weeks|notes|perf)$/.exec(key);
+        const ist = window.__insightShopState;
+        if (ist && im && Object.prototype.hasOwnProperty.call(ist, im[1]) && ist[im[1]] !== 'ready') {
+          console.error('[洞察表] ' + im[1] + ' 資料還沒載入完成（' + ist[im[1]] + '），拒絕寫入', key);
+          console.trace('[洞察表] 呼叫來源');
+          try { showToast(im[1] + ' 洞察表資料還沒載入完成，這次沒有存，雲端資料沒有變', 'error', 8000); } catch {}
+          return;
+        }
+      }
       // ⚠ 資料保護：擋掉可疑的「users → 1~2 個」寫入
       //   避免任何路徑（seedData bug、Firestore cache race、別的 code）
       //   把多個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 手動流程（單筆刪除）。
@@ -3395,7 +3473,8 @@ async function __setupCloud() {
     // 訂閱：其他人改了資料，這台會即時更新畫面
     // 但如果使用者正在 input 裡打字、或有尚未確認儲存的更動，跳過重繪避免覆蓋
     let __firstCloudSnapshot = true;
-    cs.subscribe((data) => {
+    // 開站加速塊 2：本體一字未改，只從 cs.subscribe((data) => {…}) 抽成具名函式；接法見本函式後面的 __mainDeliver。
+    const __mainSnapHandler = (data) => {
       // 塊3-D：app/main 的 ec.insight_* 殘留一律忽略 → 下面「保留 ec.insight_*」迴圈會全數從 Store._mem（per-shop 版）補回
       const next = _dropInsightKeys(data);
       delete next[Store.KEYS.session];  // 不接受雲端的 session
@@ -3579,7 +3658,27 @@ async function __setupCloud() {
       const justSavedLocally = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
       // 雲端推播：只在「當前 route 顯示 app/main 資料」時才重繪，避免使用者在淨利表/MOMO 等別頁時被整頁重建踢走（見 CLOUD_RENDER_ROUTES）
       if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.renderFromCloud('main');
-    });
+    };
+    // 🔴 絕不拿沒有帳號的快照（文件不存在、離線從空快取來）取代已經有帳號的 Store._mem：略過、等下一份。
+    //   Store._mem 本來就沒有帳號（雲端真的是空的新專案）時照常交出，不然第一批快照永遠到不了。
+    const __mainDeliver = (data) => {
+      if (!__mainSnapHasUsers(data) && __mainSnapHasUsers(Store._mem)) {
+        console.warn('[cloud] app/main 快照沒有 ec.users（文件不存在或從快取來），略過、不取代 Store._mem，等下一份');
+        return;
+      }
+      __mainSnapHandler(data);
+    };
+    if (__mainBuf.unsub) {
+      // 塊 2：暫存的快照在 setTimeout(0) 才處理（在本函式結尾的 __bootApp() 之後），處理前收到的仍進暫存（只留最新）
+      setTimeout(() => {
+        if (__mainBuf.dead) return;
+        __mainBuf.handler = __mainDeliver;
+        if (__mainBuf.has) { const d = __mainBuf.latest; __mainBuf.has = false; __mainBuf.latest = undefined; __mainDeliver(d); }
+        else if (__mainBuf.emptyLatest !== undefined && !__mainSnapHasUsers(Store._mem)) { const d = __mainBuf.emptyLatest; __mainBuf.emptyLatest = undefined; __mainDeliver(d); }
+      }, 0);
+    } else {
+      cs.subscribe(__mainDeliver);   // 先開失敗的保險：跟改前一樣，setup 之後才訂閱
+    }
 
     // 訂閱洞察表 doc（v167 重整）：
     //   - app/insight subscribe 整段停用。v154 起 ec.insight_* 資料權威源已經是
@@ -3599,27 +3698,73 @@ async function __setupCloud() {
         // #269 第 5 塊：洞察表調整彈窗開著、而且是這個通路 → 彈窗跟著雲端更新（js/pages/marketing.js）
         try { if (typeof window.__insightNotesCloudUpdated === 'function') window.__insightNotesCloudUpdated(shop); }
         catch (e) { console.warn('[insight subscribe per-shop] 彈窗更新失敗', e); }
-        if (window.App && App.currentUser && typeof App.render === 'function') {
-          const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-          // #269：只重繪【目前看的通路】。存一筆寫一筆之後每存一筆就推來一次 snapshot，看好麻吉時不必因為玩樂的寫入整頁重建；
-          //   資料一樣全部合併進 Store._mem，切過去時就是最新的。目前通路的判定比照 marketing.js（不在名單 → 玩樂）。
-          const shops = (window.__cloudInsightByShop && window.__cloudInsightByShop.shops) || [];
-          const f = App.filter && App.filter.insightShop;
-          const curShop = shops.indexOf(f) >= 0 ? f : '玩樂';
-          if (!inputInProgress && (!shop || shop === curShop)) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
-        }
+        __insRenderIfCurrent(shop);
       } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
     };
-    try {
-      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
-        window.__cloudInsightByShop.shops.forEach(s => {
-          try { window.__cloudInsightByShop.subscribeShop(s, (idata) => perShopMergeHandler(idata, s)); }
-          catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
-        });
+    // 從 perShopMergeHandler 抽出來的重畫條件（逐字同原本）：有登入、沒在打字、是目前看的通路 → 只在洞察表頁重畫
+    function __insRenderIfCurrent(shop) {
+      if (window.App && App.currentUser && typeof App.render === 'function') {
+        const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
+        // #269：只重繪【目前看的通路】。存一筆寫一筆之後每存一筆就推來一次 snapshot，看好麻吉時不必因為玩樂的寫入整頁重建；
+        //   資料一樣全部合併進 Store._mem，切過去時就是最新的。目前通路的判定比照 marketing.js（不在名單 → 玩樂）。
+        const shops = (window.__cloudInsightByShop && window.__cloudInsightByShop.shops) || [];
+        const f = App.filter && App.filter.insightShop;
+        const curShop = shops.indexOf(f) >= 0 ? f : '玩樂';
+        if (!inputInProgress && (!shop || shop === curShop)) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
       }
-    } catch (e) { console.warn('[insight subscribe per-shop]', e); }
+    }
+    // ══════ 開站加速塊 1＋2：洞察表背景載入 ══════
+    //   每家先 subscribeShop、再 getDocForShop（共用監聽目標，各下載一次）。ready／failed 規則見 __insightShopState 的註解。
+    //   一律寫【當下的】Store._mem（app/main 快照會換掉整個物件，不能先存參照）。
+    try {
+      const __insSt = window.__insightShopState;
+      const __insShops = (__byShop && Array.isArray(__byShop.shops)) ? __byShop.shops : [];
+      const __insAllReady = () => {
+        if (window.__insightCloudReady || !Object.keys(__insSt).every(k => __insSt[k] === 'ready')) return;
+        window.__insightCloudReady = true;   // #269：舊版待同步的備份要等到這之後才跑
+        try { if (typeof window.__insightLegacyMigrate === 'function') window.__insightLegacyMigrate(); } catch (e) { console.warn('[insight legacy]', e); }
+      };
+      const __insMarkReady = (s, source) => {
+        if (__insSt[s] === 'ready') return;
+        __insSt[s] = 'ready';
+        try { window.dispatchEvent(new CustomEvent('insightShopReady', { detail: { shop: s, source } })); } catch {}
+        __insAllReady();
+      };
+      const __insSlow = __insightSlowMockCfg();
+      __insShops.forEach(s => {
+        try {
+          __byShop.subscribeShop(s, __insSlow.wrapSub(s, (idata) => {
+            // 先標 ready 再合併：perShopMergeHandler 合併完會重畫，那時要已經是 ready 才畫得出資料（事件的接收端都是非同步才讀資料）
+            if (__insSt[s] !== 'ready' && idata && Object.keys(idata).some(k => k.indexOf('ec.insight_' + s + '_') === 0)) __insMarkReady(s, 'subscribe');
+            perShopMergeHandler(idata, s);
+          }));
+        } catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
+        let pGet;
+        try { pGet = __insSlow.wrapGet(s, () => __byShop.getDocForShop(s)); } catch (e) { pGet = Promise.reject(e); }
+        Promise.resolve(pGet).then(isnap => {
+          if (__insSt[s] === 'ready') return;   // 訂閱已經先給了資料：不拿 getDoc 的結果蓋
+          if (isnap && isnap.exists && isnap.exists()) {
+            const d = isnap.data() || {};
+            Object.keys(d).forEach(k => { if (Store._mem) Store._mem[k] = d[k]; });
+          }
+          __insMarkReady(s, 'getDoc');
+          try { __insRenderIfCurrent(s); } catch {}
+        }, e => {
+          console.warn('[insight] app/insight_' + s + ' 讀取失敗', e);
+          if (__insSt[s] === 'ready') return;
+          __insSt[s] = 'failed';
+          try { window.dispatchEvent(new CustomEvent('insightShopFailed', { detail: { shop: s, error: String((e && e.message) || e) } })); } catch {}
+          try { __insRenderIfCurrent(s); } catch {}
+        });
+      });
+      __insAllReady();   // 沒有任何列管通路時（理論上不會）直接就緒
+    } catch (e) { console.warn('[insight per-shop] 背景載入例外', e); }
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
+    // 開站加速塊 2：先開的 app/main 訂閱關掉、暫存丟掉（改前「失敗就沒有訂閱」）；洞察表回到「沒用雲端」＝照舊讀本機
+    __mainBuf.dead = true;
+    try { if (typeof __mainBuf.unsub === 'function') __mainBuf.unsub(); } catch (e3) {}
+    window.__insightShopState = null;
     // 手機登入 B：之後按登入改顯示「連不上雲端」；已經在排隊（畫面停在「資料載入中」）的，清掉排隊、換成同一句
     window.__setupCloudFailed = true;
     if (window.__loginQueued) {
