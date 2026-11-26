@@ -433,6 +433,12 @@ ESM 有個致命陷阱必須牢記：
     數字來自 `cupOvShopData(通路, 月)`（＝個別通路頁五張卡同一套 `cupEnrichRows`→`cupKpi`＋動銷率）；分析卡 `cupShopAnalysis` 是規則 1～5（門檻共用 `MOMO_ANALYSIS_CFG`，純函式在 `CUP-OV-PURE-BEGIN/END`）：規則 3 的上月淨利率是用目前成本回算（成本沒有歷史版本），規則 4 斷貨只在該通路最新一個有報表的月份產出（庫存是清單當下的數字）。
     重畫：`coupangReportReady`／`momoCostByOriginReady`／`coupangProductsCloudReady` 與成本表接上雲端時（`cupOvRedrawIfActive`）；成本表或報表沒到齊顯示載入中，不把「缺成本」當結果。趨勢圖涵蓋的月份有舊格式報表（`_cupRowsOld`）時頁首黃字提醒。
     新增酷澎通路要改 `CUP_OVERLAP_SHOPS`、`CUP_OV_COLOR`／`CUP_OV_DOTCLS` 與 css 的 `--cup-*`。Console 只讀 `__cupOvSnap('YYYY-MM')`；node 測試 `scripts/coupang-overview.test.cjs`。
+  - **零動銷彈窗「優化紀錄」欄**（2026-11-26，Inna；酷澎第 3 塊）：一列＝一個 Wing 商品（sid），點格子就地新增（Enter／✓），「共 N 筆」開清單可刪除（不能編輯，要改到淨利表商品彈窗）。
+    一個 sid 只記一筆：掛在這個 sid **最小的原廠編號**（`cupZolAnchor`）、紀錄最後多一個 **`sid` 欄**（不叫 page；PChome 的 `page` 是商編，兩套無關）。主檔沒有 sid 的列（`'p:'+頁`）不給記。
+    存檔只走 `cupZeroOptlogAdd` → `momoSaveOptlog`、刪除只走 `momoDeleteOptlog`（墓碑）；推送照舊只走酷澎分頁「☁ 同步雲端」，彈窗只有一行「還沒同步」提示。沒有新的儲存 key、雲端物件或寫入方法（本機防寫 35／55 不變）。
+    這個 sid 的紀錄＝`sid` 相同的（掛在哪都算）＋這個 sid 各原廠編號底下沒有 sid 欄的（`cupZolUnitList`）。工作日誌一筆算 1 次；明細與淨利表商品彈窗標「Wing 商品 ID {sid}」，沒有 sid 欄的紀錄跟改版前逐字相同。
+    🔴 會打斷輸入的三處都要顧：彈窗整個重畫（草稿在 `_czOl.edit`）、雲端優化紀錄更新（`_optlogApply` → `cupZeroOptlogCellsRefreshAll`，有焦點的格子不動）、關窗／切月份（`_czOlBlockLeave`＋capture 守衛 `_czOlOutsideClick`）。
+    純函式在 profit.js `CUP-ZOL-PURE-BEGIN/END`（複製 PChome 那組，PChome 不動），node 測試 `scripts/coupang-zero-optlog.test.cjs`；匯出 Excel 不含這欄。Console 只讀 `__cupZeroOptlogSnap('YYYY-MM')`。
 - PChome 淨利表表格的「優化紀錄」欄（2026-11-19，心雨；轉單／寄倉、帳務月／日曆月都有，`PCHOME_PROFIT_COLS` 的 `optlog`，`nosort`、不進匯出）：一行顯示最近一筆（`pchomeOptlogLatest`：date＋time 最大）＋「共 N 筆」，點格子就地輸入、Enter 新增一筆。
   🔴 存檔只走 `pchomeAddOptlog`（收尾同 `pchomeAddOptlogModal`），沒有新的儲存 key 或雲端物件；存完只重畫那一格（`pchomeOptlogCellRefresh`）。外觀沿用酷澎調整欄的 `.cup-pg-note-inp`，但這裡每按一次 Enter 是新增一筆，不是覆蓋文字。
   輸入狀態有 ✓（同一支 `pchomeOptlogCellSave`）／✕ 小鈕。沒存就離開：輸入框有字時點別格或格子外面 ⇒ 留在原格、警示色＋「尚未儲存…」提示、那一下點擊不生效（`_pchomeOlOutsideClick`，document capture），不丟也不自動存；空的就直接收起來。
