@@ -37,13 +37,23 @@ window.__cloudDrainLatest = function (latestName, applyName) {
     if (typeof window[latestName] !== 'undefined' && typeof window[applyName] === 'function') window[applyName](window[latestName]);
   } catch (e) { console.error('[drain] ' + applyName + ' 補套失敗', e); }
 };
+var PROFIT_BOOT_SUBS_WAIT_MS = 15000;   // 開站加速第二包：進淨利表等頁時最多等延後訂閱到齊幾毫秒
 window.__profitLoaded = null;    // 載入 promise（第一次 __ensureProfit 呼叫時建立；≠已載完）
 window.__profitReady = false;    // 🔴 true = profit.js 模組【已執行完、window 匯出/__profitTabHtml 都掛好】。判「已載」一律看這個，不要看 __profitLoaded（那只代表 promise 已建、可能還沒 resolve）
 window.__ensureProfit = function () {
   if (window.__profitLoaded) return window.__profitLoaded;
   var ver = '';
   try { ver = (document.querySelector('meta[name="app-version"]') || {}).content || ''; } catch (e) {}
+  // 開站加速第二包：profit.js 照舊馬上 import（守衛、drain 早點掛好），但 __profitReady 要等 firebase.js 延後的 23 份開站訂閱到齊
+  //   （最多 15 秒，逾時就照今天的行為放行）。等待期間各頁維持既有的「淨利表載入中…」佔位，profit.js 的畫面跟今天一樣是在資料到了之後才畫。
+  var subsP = (typeof window.__bootSubsWhenReady === 'function') ? window.__bootSubsWhenReady(PROFIT_BOOT_SUBS_WAIT_MS) : Promise.resolve(null);
   window.__profitLoaded = import('./profit.js?v=' + ver)
+    .then(function (m) {
+      return subsP.then(function (r) {
+        if (r && r.timedOut) console.warn('[boot] 延後的開站訂閱 ' + (PROFIT_BOOT_SUBS_WAIT_MS / 1000) + ' 秒還沒到齊，照常開啟（還沒到的：' + r.pending.join('、') + '）');
+        return m;
+      });
+    })
     .then(function (m) { window.__profitReady = true; return m; })   // resolve 後才算 ready
     .catch(function (e) { window.__profitLoaded = null; console.error('[profit] 動態載入失敗（可重試）', e); throw e; });
   return window.__profitLoaded;
@@ -3566,6 +3576,8 @@ async function __setupCloud() {
       // 標記主 doc 首批 snapshot 已回來 → seedData / ensureAdmin 才敢寫入
       //   （沒這旗標時，空 users 陣列會誤觸「補預設 admin 蓋掉雲端」的災難）
       window.__firstMainSnapshotDone = true;
+      // 開站加速第二包：通知 firebase.js 開始延後的開站訂閱（只有第一次有作用；空快照早在 __mainDeliver 擋掉，這裡一定是真資料）
+      if (isFirstSnapshot) { try { window.dispatchEvent(new CustomEvent('mainFirstSnapshot')); } catch (e) {} }
       // 開站競態修復（fix/relogin-boot-race）：boot 分支3 若因 users 未載而留住 view-boot、
       //   記了 __bootPendingSession（未 showLogin），這裡首批 users 到位後重試還原。
       //   此時 _useMem 已 true、_mem 有 users，Store.get(users) 讀得到雲端真值。
@@ -3765,6 +3777,8 @@ async function __setupCloud() {
     __mainBuf.dead = true;
     try { if (typeof __mainBuf.unsub === 'function') __mainBuf.unsub(); } catch (e3) {}
     window.__insightShopState = null;
+    // 開站加速第二包：雲端沒接上 → 延後的開站訂閱照今天一樣馬上開始（離線 fallback 也要有資料可讀）
+    try { window.dispatchEvent(new CustomEvent('cloudSetupFailed')); } catch (e4) {}
     // 手機登入 B：之後按登入改顯示「連不上雲端」；已經在排隊（畫面停在「資料載入中」）的，清掉排隊、換成同一句
     window.__setupCloudFailed = true;
     if (window.__loginQueued) {
