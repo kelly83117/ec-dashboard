@@ -34927,6 +34927,81 @@ function _czOpenNote(shop, ym){
   return { date:d.replace(/-/g,'/'), days:dim-day+1 };
 }
 /* ═══ CUP-ZERO-PURE-END ═══ */
+/* ═══ CUP-ZOL-PURE-BEGIN：酷澎零動銷「優化紀錄」欄（2026-11-26 第 3 塊）純函式；node 測試 scripts/coupang-zero-optlog.test.cjs。不碰 DOM／Store／localStorage ═══
+   一個 Wing 商品（sid）只記一筆：掛在這個 sid 底下「最小的原廠編號」、紀錄最後多一個 sid 欄（＝Wing 商品 ID）。
+   🔴 沒有 sid 欄的紀錄（淨利表商品彈窗記的）產生、顯示、同步、墓碑、工作日誌都跟改版前一樣。PChome 的整頁紀錄（page 欄）是另一套，這裡不碰。
+   格子外觀、行為照 PChome 淨利表優化紀錄欄（PCH-OLCELL-PURE），但是複製一份、handler 名字換成 cupZeroOptlog*，PChome 那組不動。 */
+// 錨點：最小的原廠編號（字串比較）；沒有原廠編號回 ''（呼叫端不准存）
+function cupZolAnchor(codes){
+  const L=(codes||[]).map(c=>String(c==null?'':c).trim()).filter(Boolean).sort((a,b)=>a<b?-1:(a>b?1:0));
+  return L.length?L[0]:'';
+}
+// 新增一筆的物件：key 順序跟 momoAddOptlog 一樣（id, date, time, shop, sku, by, type, note），最後多一個 sid
+function cupZolMakeEntry(shop, sku, entry, by, date, time, id, sid){
+  return { id:id, date:date, time:time, shop:shop, sku:sku, by:by, type:(entry&&entry.type)||'其他', note:(entry&&entry.note)||'', sid:String(sid) };
+}
+// 整份優化紀錄 map（{原廠編號:[紀錄]}）建一次索引：bySid＝有 sid 欄的（不管掛在哪個原廠編號），byCode＝沒有 sid 欄的。不改動傳進來的資料。
+function cupZolIndex(map){
+  const M=(map&&typeof map==='object'&&!Array.isArray(map))?map:{}, bySid={}, byCode={};
+  Object.keys(M).forEach(code=>{ const arr=M[code]; if(!Array.isArray(arr)) return;
+    arr.forEach(e=>{ if(!e||typeof e!=='object') return;
+      if(e.sid!=null&&String(e.sid)!=='') (bySid[String(e.sid)]=bySid[String(e.sid)]||[]).push(e);
+      else (byCode[code]=byCode[code]||[]).push(e); }); });
+  return { bySid, byCode };
+}
+// 這個 Wing 商品的紀錄：sid===這個 sid 的（掛在哪都算）＋這個 sid 各原廠編號底下沒有 sid 欄的；標了別的 sid 的不算；同 id 只一筆（沒有 id 用整筆內容當 key）
+function cupZolUnitListIdx(idx, codes, sid){
+  const seen={}, out=[], I=idx||{bySid:{},byCode:{}};
+  const add=e=>{ const k=(e.id!=null)?'i:'+String(e.id):'j:'+JSON.stringify(e); if(seen[k]) return; seen[k]=1; out.push(e); };
+  (I.bySid[String(sid)]||[]).forEach(add);
+  [...new Set((codes||[]).map(c=>String(c==null?'':c)).filter(Boolean))].forEach(c=>(I.byCode[c]||[]).forEach(add));
+  return out;
+}
+function cupZolUnitList(map, codes, sid){ return cupZolUnitListIdx(cupZolIndex(map), codes, sid); }
+// 最近一筆：date＋time 最大，同時間取後面的（同 PChome 優化紀錄欄的規則）
+function cupZolLatest(list){
+  let best=null, bk='';
+  (Array.isArray(list)?list:[]).forEach(e=>{ if(!e||typeof e!=='object') return; const k=String(e.date||'')+' '+String(e.time||''); if(best===null||k>=bk){ best=e; bk=k; } });
+  return best;
+}
+function cupZolNote(v){ return String(v==null?'':v).trim(); }   // 空白＝''＝不存
+function cupZolLeave(v){ return cupZolNote(v)?'stay':'close'; }  // 有還沒存的字 ⇒ 'stay'；空的 ⇒ 'close'
+const CUP_ZOL_UNSAVED_MSG='尚未儲存：按 Enter 儲存，或按 Esc 放棄';
+// 格子要顯示的文字。回 null＝沒有紀錄。nameOf：username → 顯示名稱。
+function cupZolCellView(list, nameOf){
+  const arr=(Array.isArray(list)?list:[]).filter(e=>e&&typeof e==='object');
+  const e=cupZolLatest(arr); if(!e) return null;
+  const d=String(e.date||''), by=e.by?String((nameOf?nameOf(e.by):'')||e.by):'';
+  const type=String(e.type||'其他'), note=String(e.note||'');
+  const tag=(e.sid!=null&&String(e.sid)!=='')?'Wing 商品 ID '+String(e.sid):('原廠編號 '+String(e.sku||''));
+  return { n:arr.length, type, note, title:'【'+type+'】'+note+'\n'+[d+(e.time?' '+e.time:''), by].filter(Boolean).join(' · ')+'\n'+tag };
+}
+// 格子內層 HTML。edit＝null（檢視）或 {type,note,warn}（輸入中）。deps＝{esc, types, nameOf, loading, noSid}。
+//   handler 一律寫成完整字面字串（scripts/ro-ui-whitelist.test.cjs 靠字面比對）。「共 N 筆」不包在掛了 cupZeroOptlogCellEdit 的元素裡（唯讀擋板往上找 6 層）。
+function cupZolCellInnerHTML(list, edit, deps){
+  const esc=deps.esc;
+  if(deps.noSid) return '<div class="pch-ol-row"><div class="pch-ol-main pch-ol-empty cz-ol-nosid" title="主檔查不到這一列的 Wing 商品 ID（以商品頁計），沒辦法替整個 Wing 商品記；商品有出現在淨利表時，可以到商品彈窗照原廠編號記">主檔沒有 Wing 商品 ID，這一列不能記</div></div>';
+  const EDIT='onclick="event.stopPropagation();cupZeroOptlogCellEdit(this)"';
+  if(edit){
+    const types=deps.types||[], cur=(types.indexOf(edit.type)>=0)?edit.type:(types[0]||'其他');
+    return '<div class="pch-ol-row" onclick="event.stopPropagation()">'
+      +'<select class="pch-ol-sel" aria-label="紀錄類型" onchange="cupZeroOptlogCellDraft(\'type\',this.value)">'
+        +types.map(t=>'<option value="'+esc(t)+'"'+(t===cur?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select>'
+      +'<input class="cup-pg-note-inp pch-ol-inp'+(edit.warn?' pch-ol-warn':'')+'" type="text" value="'+esc(edit.note||'')+'" placeholder="整個 Wing 商品記一筆，按 Enter 或 ✓ 儲存" oninput="cupZeroOptlogCellDraft(\'note\',this.value)"'
+        +' onkeydown="if(event.key===\'Enter\'&&!event.isComposing)cupZeroOptlogCellSave(this);else if(event.key===\'Escape\')cupZeroOptlogCellCancel()">'
+      +'<button type="button" class="pch-ol-btn pch-ol-ok" title="儲存（Enter）" aria-label="儲存" onclick="cupZeroOptlogCellSave(this)">✓</button>'
+      +'<button type="button" class="pch-ol-btn" title="取消（Esc）" aria-label="取消" onclick="cupZeroOptlogCellCancel()">✕</button>'
+      +(edit.warn?'<div class="pch-ol-hint">'+CUP_ZOL_UNSAVED_MSG+'</div>':'')+'</div>';
+  }
+  const v=cupZolCellView(list, deps.nameOf);
+  if(!v){
+    if(deps.loading) return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="雲端的優化紀錄還沒讀到；現在記的會先存在這台電腦，同步時合併">優化紀錄載入中…</div></div>';
+    return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main pch-ol-empty" '+EDIT+' title="點一下替整個 Wing 商品新增一筆優化紀錄（只記一筆）">輸入優化紀錄…</div></div>';
+  }
+  return '<div class="pch-ol-row"><div class="cup-pg-note-inp pch-ol-main" '+EDIT+' title="'+esc(v.title+'\n點一下再新增一筆')+'"><span class="pch-ol-type">'+esc(v.type)+'</span><span class="pch-ol-note">'+esc(v.note)+'</span></div>'
+    +'<a class="pch-ol-n" onclick="event.stopPropagation();cupZeroOptlogListOpen(this)" title="看這個 Wing 商品的全部優化紀錄">共 '+v.n+' 筆</a></div>';
+}
+/* ═══ CUP-ZOL-PURE-END ═══ */
 const _CZ_SHOPS=['麻吉','露營館'];
 const _CZ_GROUPS=[
   {key:'have',label:'① 有庫存',sub:'優先推，依庫存多到少排'},
