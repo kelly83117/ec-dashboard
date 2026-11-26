@@ -4202,6 +4202,7 @@ function _splitDraftToMap(prev,draft){
 //     推送端（syncToCloud 的泛用 field 分支）會先問 Store._mem、讀不到才 fallback 到
 //     localStorage.getItem —— 所以【實際走的是 fallback 那一支】，這是預期行為不是漏接。
 function saveSplits(shop,map){
+  if(_profitDocBlocked('ec_split|'+shop)) return {ok:false,err:null,key:null,profitNotReady:true};   // 開站加速第二包 W4：整期覆蓋，基底要是雲端版（提示已由 _profitDocBlocked 顯示）
   // 通路守衛（資料層共同出口）。判準與 shopHTML / openSplitModal 兩處【同源】—— 同一個 SPLIT_SHOPS。
   //   🔴 這一道【必須放在這裡，不是放在 saveSplitDraft】：本函式才是共同出口 ——
   //     localStorage、Store._profitMem、_pendingSyncKeys、_shopJustSaved 四件事全部發生在這裡，
@@ -4458,6 +4459,7 @@ function saveSplitDraft(){
     }
   }catch(e){ console.error('[saveSplitDraft] 欄位名檢核失敗，保守起見不儲存：',e); return; }
   const res=saveSplits(shop,map);
+  if(res&&res.profitNotReady) return;   // 開站加速第二包：app/profit 還沒載入完成，沒有存（_profitDocBlocked 已跳提示），草稿留在視窗
   updateSplitBtn(shop);
   renderSplitResults();
   // ── 失敗有【兩種方向完全不同】的原因，文案必須分開 ──
@@ -6393,7 +6395,18 @@ function _cloudRead(k){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{}
   try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;}
 }
+// 開站加速第二包（W1～W4）：app/profit 還沒收到第一批真快照時，整欄覆蓋、基底取自記憶體／本機的設定一律不存。
+//   這時 _cloudRead 讀到的是本機舊版或預設值，存了會在同步時把雲端整欄蓋掉（__profitShouldSkipCloudOverwrite 還會保住這個待推值）。
+//   接在 _cloudWrite（分析／成長／測試規則 9 個呼叫點）、saveTagDefs、評分表三支、saveSplits 的最開頭（scripts/boot-subs-defer.test.cjs 會數）。
+//   ⚠ 離線（雲端讀不到）時這幾種設定改不了：今天離線改了會先存本機、同步時蓋雲端，擋下比較安全。沒有 firebase.js（__profitDocReady 不存在）照舊。
+function _profitDocBlocked(label){
+  if(typeof window.__profitDocReady!=='function'||window.__profitDocReady()) return false;
+  console.error('[淨利表] app/profit 雲端資料還沒載入完成，拒絕存檔：'+label);
+  try{ if(typeof showToast==='function') showToast('淨利表雲端設定還在載入，這次沒有存，雲端資料沒有變。請稍候再試。','error',6000); }catch(_){}
+  return true;
+}
 function _cloudWrite(k,v){
+  if(_profitDocBlocked(k)) return false;
   window._shopJustSaved=Date.now();
   try{localStorage.setItem(k,JSON.stringify(v));}catch{}
   _cloudWriteSafe(k, v, k);
@@ -9260,6 +9273,7 @@ function removeTagDef(i){
 //     removeTagDef 的兩層保護讓「全刪光」很難發生，故不改 getTagDefs。
 async function saveTagDefs(list){
   const k='ec_tag_defs';
+  if(_profitDocBlocked(k)) return false;   // 開站加速第二包 W2：整包取代，基底要是雲端版
   const writeLocal=(v)=>{
     try{localStorage.setItem(k,JSON.stringify(v));}catch{}
     try{
@@ -16791,6 +16805,7 @@ function getScoreTargetsAll(){
   }catch{return {};}
 }
 function saveScoreTargetsAll(all){
+  if(_profitDocBlocked('_score_targets_v1')) return false;   // 開站加速第二包 W3
   try{localStorage.setItem('ec_score_targets_v1',JSON.stringify(all));}catch{}
   try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_targets_v1=all;}}catch{}
   if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
@@ -16821,6 +16836,7 @@ function getScoreMonthlyAll(){
   }catch{return {};}
 }
 function saveScoreMonthlyAll(all){
+  if(_profitDocBlocked('_score_monthly_v1')) return false;   // 開站加速第二包 W3
   try{localStorage.setItem('ec_score_monthly_v1',JSON.stringify(all));}catch{}
   try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_monthly_v1=all;}}catch{}
   if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
@@ -16840,6 +16856,7 @@ function getScoreBonusAll(){
   }catch{return {};}
 }
 function saveScoreBonusAll(all){
+  if(_profitDocBlocked('_score_bonus_v1')) return false;   // 開站加速第二包 W3
   try{localStorage.setItem('ec_score_bonus_v1',JSON.stringify(all));}catch{}
   try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_bonus_v1=all;}}catch{}
   if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
