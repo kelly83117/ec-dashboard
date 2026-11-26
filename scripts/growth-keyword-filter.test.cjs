@@ -15,7 +15,7 @@ const eq = (a, b, name) => ok(JSON.stringify(a) === JSON.stringify(b), name, '�
 const src = fs.readFileSync(path.join(ROOT, 'js/profit.js'), 'utf8').replace(/\r\n/g, '\n');
 const a = src.indexOf('// GROWTH-KW-PURE-BEGIN'), b = src.indexOf('// GROWTH-KW-PURE-END');
 if (a < 0 || b < a) throw new Error('找不到 GROWTH-KW-PURE 區塊');
-const P = new Function(src.slice(a, b) + '\nreturn { growthKwNorm, growthKwTokens, growthKwAdjs, growthKwMatch, growthKwHint };')();
+const P = new Function(src.slice(a, b) + '\nreturn { growthKwNorm, growthKwTokens, growthKwAdjs, growthKwMatch, growthKwHint, growthKwScope };')();
 // 期間判斷用正式的那兩支（同一個檔案，純函式）
 const g1 = src.indexOf('function _growthPeriodOf('), g2 = src.indexOf('window._growthPeriodOf=');
 const G = new Function(src.slice(g1, g2) + '\nreturn { _growthPeriodOf, _inGrowthPeriod };')();
@@ -58,22 +58,36 @@ eq(P.growthKwAdjs({ adjustments: [{ text: 'a' }, null, 'x', { text: 'b' }] }), [
 eq(P.growthKwAdjs({ text: 'x' }), [], '沒有 adjustments → []');
 ok(P.growthKwMatch(P.growthKwAdjs('本期清倉品'), T('清倉品')), '舊版字串備註也找得到');
 
-// ── 全部期間：期間判斷 ＋ 比對 ──
+// ── 期間判斷 ＋ 比對 ──
 const adjs = [
   { date: '2026/09/03', text: '清倉品，主圖之後再換', period: '2026/09|first' },
   { date: '2026/10/05', text: '調價 -10', period: '2026/10|first' },
   { date: '2026/10/20', text: '換主圖', period: '2026/10|second' },
   { date: '2026/10/31', text: '整月：補貨', period: '2026/10|full' },
   { date: '2026/08/20', text: '舊資料沒有 period，清倉品' },      // 推算成 2026/08|first
+  { date: '2026/1x/zz', text: '壞日期' },                         // 期間算不出來
 ];
 const inCur = (m, h) => x => G._inGrowthPeriod(x, m, h);
 const label = o => o.period ? o.period.replace('|first', ' 上半月').replace('|second', ' 下半月').replace('|full', ' 整月') : (o.date || '未記日期');
-ok(P.growthKwMatch(adjs, T('清倉品')), '全部期間：其他期間的清倉品也找得到');
-ok(P.growthKwMatch(adjs, T('換主圖 調價')), '全部期間：上半月＋下半月兩筆合起來 AND 成立');
-// 整月看的時候，上下半月寫的都不在本期格子裡（_inGrowthPeriod 的既有規則），但篩選照樣找得到
+// ── 只比這一期（2026-11-26 Kelly：不要以前寫的，只要當次有寫的）──
+//   上半月／下半月＝只比該半月（＝格子大字，_inGrowthPeriod）；整月＝該月整月＋上半月＋下半月；其他月份不比。
+const S = (m, h) => P.growthKwScope(adjs, m, h, G._growthPeriodOf, G._inGrowthPeriod);
+const MS = (m, h, q) => P.growthKwMatch(S(m, h), T(q));
+eq(S('2026/10', 'first').map(x => x.text), ['調價 -10', '整月：補貨'], '上半月：該半月＋存成整月的（同格子大字）');
+eq(S('2026/10', 'second').map(x => x.text), ['換主圖', '整月：補貨'], '下半月：該半月＋存成整月的（同格子大字）');
+eq(S('2026/10', 'full').map(x => x.text), ['調價 -10', '換主圖', '整月：補貨'], '整月：當月整月＋上半月＋下半月三種');
+ok(MS('2026/10', 'first', '調價') && !MS('2026/10', 'first', '換主圖'), '上半月只找到上半月寫的（找不到下半月的）');
+ok(MS('2026/10', 'second', '換主圖') && !MS('2026/10', 'second', '調價'), '下半月只找到下半月寫的（找不到上半月的）');
+ok(MS('2026/10', 'full', '調價') && MS('2026/10', 'full', '換主圖') && MS('2026/10', 'full', '補貨'), '整月找到當月三種');
+ok(MS('2026/10', 'full', '換主圖 調價'), '整月：上半月＋下半月兩筆合起來 AND 成立');
+ok(!MS('2026/10', 'full', '清倉品') && !MS('2026/10', 'first', '清倉品') && !MS('2026/10', 'second', '清倉品'), '其他月份（9 月、8 月）寫的清倉品找不到');
+ok(MS('2026/09', 'first', '清倉品') && MS('2026/09', 'full', '清倉品') && !MS('2026/09', 'second', '清倉品'), '9 月上半月寫的：9 月上半月、9 月整月找得到，9 月下半月找不到');
+ok(MS('2026/08', 'first', '清倉品'), '沒有 period 的舊資料照日期推算期間（2026/08/20 → 8 月上半月）');
+ok(!MS('2026/10', 'full', '壞日期'), '期間算不出來（日期壞掉）的紀錄不比');
+eq(P.growthKwScope([{ text: '壞日期', date: 'x' }, null, 'x'], '2026/10', 'full', G._growthPeriodOf, G._inGrowthPeriod), [], '期間算不出來、null、字串都不留');
+ok(!MS('2026/11', 'first', '補貨'), '別的月份看不到 10 月存成整月的紀錄');
+// 整月看的時候，上下半月寫的不在格子大字裡（_inGrowthPeriod 的既有規則），但篩選找得到 → 靠提示標出是哪個半月
 ok(!adjs.filter(inCur('2026/10', 'full')).some(x => x.text === '換主圖'), '前提：整月格子裡看不到下半月寫的「換主圖」');
-ok(P.growthKwMatch(adjs, T('換主圖')), '整月時下半月寫的找得到');
-ok(P.growthKwMatch(adjs, T('調價')), '整月時上半月寫的找得到');
 
 // ── 提示文字 ──
 eq(P.growthKwHint(adjs, T(''), inCur('2026/10', 'second'), label), '', '沒有關鍵字 → 沒有提示');
@@ -89,6 +103,12 @@ eq(P.growthKwHint(adjs, T('不存在'), inCur('2026/10', 'first'), label), '', '
 { const many = [1, 2, 3, 4, 5].map(i => ({ text: '清倉品' + i, period: '2026/0' + i + '|first' }));
   const h = P.growthKwHint(many, T('清倉品'), () => false, label).split('\n');
   eq(h.length, 4, '最多列 3 筆＋1 行「另有」'); eq(h[3], '…另有 2 筆', '另有 N 筆'); }
+// 實際用法：提示只在這一期的紀錄裡找（renderTable 先過 growthKwScope）
+eq(P.growthKwHint(S('2026/10', 'full'), T('換主圖'), inCur('2026/10', 'full'), label), '關鍵字在 2026/10 下半月「換主圖」', '整月：標出是下半月寫的');
+eq(P.growthKwHint(S('2026/10', 'full'), T('調價'), inCur('2026/10', 'full'), label), '關鍵字在 2026/10 上半月「調價 -10」', '整月：標出是上半月寫的');
+eq(P.growthKwHint(S('2026/10', 'full'), T('補貨'), inCur('2026/10', 'full'), label), '', '整月：存成整月的在格子裡 → 沒有提示');
+eq(P.growthKwHint(S('2026/10', 'first'), T('調價'), inCur('2026/10', 'first'), label), '', '半月：符合的一定在格子裡 → 沒有提示');
+eq(P.growthKwHint(S('2026/10', 'first'), T('清倉品'), inCur('2026/10', 'first'), label), '', '其他月份的紀錄不會出現在提示裡');
 { const emo = [{ text: '😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀', period: '2026/01|first' }];
   ok(P.growthKwHint(emo, T('😀'), () => false, label).endsWith('😀…」'), '前 20 字照字元算（emoji 不切半）'); }
 
@@ -98,7 +118,9 @@ const has = (hay, needle) => hay.indexOf(needle) >= 0;
 const AF = fn('applyFilters');
 // 範圍＝商品：改版前那一行搜尋要原封不動（只多了前面的 else）
 ok(has(AF, "else if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));"), '範圍＝商品：原本的搜尋那一行一字未動');
-ok(has(AF, "if(s.searchScope==='growth'){") && has(AF, 'const gkw=growthKwTokens(s.search);') && has(AF, 'growthKwMatch(growthKwAdjs(gAll[r.code]),gkw)'), '範圍＝商品調整：比商品調整');
+ok(has(AF, "if(s.searchScope==='growth'){") && has(AF, 'const gkw=growthKwTokens(s.search);') && has(AF, 'growthKwMatch(growthKwScope(growthKwAdjs(gAll[r.code]),s.curMonth,s.curHalf,_growthPeriodOf,_inGrowthPeriod),gkw)'), '範圍＝商品調整：只比這一期的商品調整');
+ok(has(src, 'growthKwHint(growthKwScope(growthKwAdjs(growthNotesAll[code]),s.curMonth,s.curHalf,_growthPeriodOf,_inGrowthPeriod)'), '提示也只在這一期的紀錄裡找');
+ok(!/全部期間）/.test(src), '畫面文字不再寫「全部期間」');
 ok(AF.indexOf('growthKwMatch') < AF.indexOf('s._filtered=list'), '篩選在 _filtered 之前（筆數、五格、匯出、批次選取都跟著）');
 ok(has(fn('_saveFilterState'), "searchScope:s.searchScope==='growth'?'growth':'prod'"), '_saveFilterState 存 searchScope');
 ok(has(fn('_loadFilterState'), "searchScope:o.searchScope==='growth'?'growth':'prod'"), '_loadFilterState 讀 searchScope（不認得的一律商品）');
