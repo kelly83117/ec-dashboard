@@ -790,6 +790,7 @@ const App = {
         //   8 秒 hard timeout 保底：雲端太久沒回（含純離線）才顯示登入頁 + 連線較慢提示，不無限轉圈。
         window.__bootPendingSession = session;
         window.__bootPendingTimer = setTimeout(() => {
+          window.__bootSlowSession = session;   // 手機登入 A：逾時才沒還原 → 雲端第一批快照到了再自動登回去（見 subscribe 內 __bootSlowSession）
           window.__bootPendingSession = null;
           window.__bootPendingTimer = null;
           this.showLogin({ slow: true });
@@ -3486,6 +3487,24 @@ async function __setupCloud() {
         if (pu) { try { App.enterApp(pu); } catch (e) { console.warn('[relogin retry] enterApp 失敗', e); } }
         else { try { App.showLogin(); } catch (e) {} }   // 雲端回了、真沒此帳號 → 正常登入頁
         return;   // 首批已由重試處理完（enterApp 內含 render）；不再往下走 dirty/重繪
+      }
+      // 手機登入 A：上面的 8 秒逾時已經跳出登入頁（__bootSlowSession），雲端第一批快照現在才到 → 自動登回去。
+      //   使用者正在打字（帳號或密碼欄有字、游標在欄位裡，含 iOS 自動填入）就不切畫面，讓他自己按登入。
+      //   只跑一次（先清旗標）；已經有人登入就不跑。不 return：登入成功就照「fallback 先開站、雲端後到」的既有路徑往下走。
+      if (isFirstSnapshot && window.App && !App.currentUser && window.__bootSlowSession) {
+        window.__bootSlowSession = null;
+        try {
+          const sess = Store.get(Store.KEYS.session);
+          const su = sess && (Store.get(Store.KEYS.users, []) || []).find(u => u.username === sess.username);
+          const uEl = document.getElementById('login-username'), pEl = document.getElementById('login-password');
+          const act = document.activeElement;
+          const typing = !!((uEl && String(uEl.value || '').trim() !== '') || (pEl && String(pEl.value || '') !== '')
+            || (act && (act === uEl || act === pEl)));
+          if (su && !typing) {
+            try { const errEl = document.getElementById('login-error'); if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); } } catch (e) {}
+            App.enterApp(su);
+          }
+        } catch (e) { console.warn('[relogin slow] 自動登回失敗', e); }
       }
       if (!(window.App && App.currentUser && typeof App.render === 'function')) {
         // App 還沒準備好，等準備好再補一次 render（由 enterApp 那邊處理）
