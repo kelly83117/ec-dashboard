@@ -974,7 +974,9 @@ const App = {
     //     1. admin 不存在 → 建立、發 session、登入
     //     2. admin 存在但密碼還是預設 admin123 → 允許登入（相容第一次 setup 沒改過的情境）
     //     3. admin 已改過密碼 → 走下面正常 login 路徑（admin123 對不上 hash → 拒絕）
-    if (ulow === 'admin' && password === 'admin123') {
+    //   手機登入 C：只有雲端第一批快照到了才走（同 ensureAdmin／seedData 的就緒條件）。雲端沒到時本機清單通常是空的，
+    //   會被當成「admin 不存在」走 Case 1，任何人輸入 admin／admin123 就能用管理員進站。沒就緒就走下面一般比對。
+    if (ulow === 'admin' && password === 'admin123' && !!(window.__cloudStore && window.__firstMainSnapshotDone)) {
       const users = Store.get(Store.KEYS.users, []);
       let admin = users.find(u => u.username.toLowerCase() === 'admin');
       if (!admin) {
