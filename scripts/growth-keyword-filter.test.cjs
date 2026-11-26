@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// 蝦皮淨利表「商品調整含…」關鍵字篩選（2026-11-26）的 node 測試（只讀，不寫檔、不連網路）。
+// 蝦皮淨利表搜尋框「範圍＝商品調整」的關鍵字篩選（2026-11-26）的 node 測試（只讀，不寫檔、不連網路）。
 //
 //   node scripts/growth-keyword-filter.test.cjs
 //
 // 測 js/profit.js 的 GROWTH-KW-PURE 區塊（正規化、拆字、比對、提示文字），
-// 以及跟 _inGrowthPeriod 一起用時「整月看得到上下半月寫的紀錄」；再用原始碼檢查接線（applyFilters、存讀、lmFiltOn、唯讀白名單）。
+// 以及跟 _inGrowthPeriod 一起用時「整月看得到上下半月寫的紀錄」；再用原始碼檢查接線（搜尋範圍下拉、applyFilters、存讀、lmFiltOn、唯讀白名單）。
 'use strict';
 const fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -92,25 +92,40 @@ eq(P.growthKwHint(adjs, T('不存在'), inCur('2026/10', 'first'), label), '', '
 { const emo = [{ text: '😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀', period: '2026/01|first' }];
   ok(P.growthKwHint(emo, T('😀'), () => false, label).endsWith('😀…」'), '前 20 字照字元算（emoji 不切半）'); }
 
-// ── 接線（原始碼檢查）──
+// ── 接線（原始碼檢查；2026-11-26 第二版：合併成一個搜尋框＋範圍下拉）──
 const fn = name => { const i = src.indexOf('function ' + name + '('); if (i < 0) return ''; const j = src.indexOf('\nfunction ', i + 10); return src.slice(i, j < 0 ? i + 6000 : j); };
-ok(/growthKwTokens\(s\.growthQ\)/.test(fn('applyFilters')) && /growthKwMatch\(growthKwAdjs\(gAll\[r\.code\]\),gkw\)/.test(fn('applyFilters')), 'applyFilters 有接關鍵字篩選');
-ok(fn('applyFilters').indexOf('growthKwMatch') < fn('applyFilters').indexOf('s._filtered=list'), '篩選在 _filtered 之前（筆數、五格、匯出、批次選取都跟著）');
-ok(/growthQ:s\.growthQ\|\|''/.test(fn('_saveFilterState')), '_saveFilterState 存 growthQ');
-ok(/growthQ:typeof o\.growthQ==='string'/.test(fn('_loadFilterState')), '_loadFilterState 讀 growthQ（型別檢查）');
-ok(/_growthKwOn\(s\)/.test(fn('_lastMonthSameTotals')), 'lmFiltOn 算進商品調整關鍵字');
-ok(/_growthKwSyncUI\(shop\)/.test(fn('loadIntoUI')), 'loadIntoUI 回填關鍵字框（切月份保留）');
-ok(/state\[shop\]\.growthQ=_fs\.growthQ/.test(src) && /_growthKwSyncUI\(shop\);\s*\/\/ 商品調整關鍵字框同上/.test(src), 'initShopUI 還原並回填');
-ok(/search:'',growthQ:''\}/.test(src), 'state 初始化有 growthQ');
-ok(/setSearch,growthKwInput,growthKwClear,/.test(src), 'growthKwInput／growthKwClear 掛上 window');
-ok(/oninput="growthKwInput\('\$\{shop\}',this,event\)">/.test(src), '輸入框有 oninput');
-ok(!/oncompositionend=/.test(src), '沒有 inline oncompositionend（不是 HTML 會認的屬性，寫了不會觸發）');
-ok(/document\.addEventListener\('compositionend',e=>\{[\s\S]{0,200}gkw-input[\s\S]{0,120}growthKwInput\(el\.id\.slice\(4\),el\)/.test(src), '組字結束由 document 的 compositionend 監聽觸發');
-ok(/if\(ev&&ev\.isComposing\)return;/.test(fn('growthKwInput')) && /},200\);/.test(fn('growthKwInput')), '組字中不篩、200ms 延遲');
+const has = (hay, needle) => hay.indexOf(needle) >= 0;
+const AF = fn('applyFilters');
+// 範圍＝商品：改版前那一行搜尋要原封不動（只多了前面的 else）
+ok(has(AF, "else if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));"), '範圍＝商品：原本的搜尋那一行一字未動');
+ok(has(AF, "if(s.searchScope==='growth'){") && has(AF, 'const gkw=growthKwTokens(s.search);') && has(AF, 'growthKwMatch(growthKwAdjs(gAll[r.code]),gkw)'), '範圍＝商品調整：比商品調整');
+ok(AF.indexOf('growthKwMatch') < AF.indexOf('s._filtered=list'), '篩選在 _filtered 之前（筆數、五格、匯出、批次選取都跟著）');
+ok(has(fn('_saveFilterState'), "searchScope:s.searchScope==='growth'?'growth':'prod'"), '_saveFilterState 存 searchScope');
+ok(has(fn('_loadFilterState'), "searchScope:o.searchScope==='growth'?'growth':'prod'"), '_loadFilterState 讀 searchScope（不認得的一律商品）');
+ok(has(src, "s.searchScope==='growth'&&growthKwTokens(s.search).length"), '_growthKwOn：範圍＝商品調整而且有字');
+ok(has(fn('_lastMonthSameTotals'), 'lmFiltOn=!!(s.search||_growthKwOn(s)'), 'lmFiltOn 沿用 s.search');
+ok(has(fn('loadIntoUI'), '_searchSyncUI(shop)'), 'loadIntoUI 回填範圍（切月份保留）');
+ok(has(src, 'state[shop].searchScope=_fs.searchScope'), 'initShopUI 還原範圍');
+ok(has(src, "search:'',searchScope:'prod'}"), 'state 初始化範圍＝商品');
+ok(!/growthQ|gkw-wrap|gkw-input|growthKwInput|growthKwClear/.test(src), '第一版的獨立關鍵字框已拿掉');
+ok(has(src, 'setSearch,searchInput,setSearchScope,searchClear,'), 'searchInput／setSearchScope／searchClear 掛上 window');
+ok(has(src, '<select class="sch-scope" id="sch-scope-${shop}" onchange="setSearchScope(\'${shop}\',this.value)"') && has(src, '<option value="prod">商品</option><option value="growth">商品調整</option></select>'), '範圍下拉：商品（預設、第一個）／商品調整');
+ok(has(src, 'oninput="searchInput(\'${shop}\',this,event)"'), '搜尋框 oninput 改走 searchInput');
+const SI = fn('searchInput');
+ok(has(SI, "if(!s||s.searchScope!=='growth'){ setSearch(shop,el.value); return; }"), '範圍＝商品：直接 setSearch（同改版前，不延遲）');
+ok(has(SI, 'if(ev&&ev.isComposing)return;') && has(SI, '},200);'), '範圍＝商品調整：組字中不篩、200ms 延遲');
+ok(!has(src, 'oncompositionend='), '沒有 inline oncompositionend（不是 HTML 會認的屬性）');
+{ const i = src.indexOf("document.addEventListener('compositionend'"); const blk = src.slice(i, i + 400);
+  ok(i > 0 && has(blk, "searchScope!=='growth')return;") && has(blk, 'searchInput(shop,el)'), '組字結束由 document 監聽觸發，只在範圍＝商品調整時'); }
+ok(has(fn('setSearchScope'), 'if(el)s.search=el.value;') && has(fn('setSearchScope'), 'applyFilters(shop)'), '切範圍：文字保留、用新範圍重篩');
+ok(has(fn('searchClear'), "s.search='';") && !has(fn('searchClear'), 'searchScope'), '✕ 只清文字、範圍不變');
+{ const i = src.indexOf('state[shop].search=code;'); ok(i > 0 && has(src.slice(i, i + 600), "state[shop].searchScope='prod'"), '健檢跳轉：範圍改回商品'); }
 const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
-const ro = app.match(/const __RO_WRITE_RE = (\/.*\/);/);
-ok(ro && !/growthKw/.test(ro[1]), '唯讀白名單沒有 growthKw（檢視，唯讀帳號也能用）');
-ok(!/growthKw|gkw/.test(fs.readFileSync(path.join(ROOT, 'js/firebase.js'), 'utf8')), 'firebase.js 沒有任何改動相關字');
+const roLine = app.split('\n').find(l => l.indexOf('const __RO_WRITE_RE') === 0) || '';
+ok(roLine && !/searchInput|setSearchScope|searchClear/.test(roLine), '唯讀白名單沒有搜尋相關（檢視，唯讀帳號也能用）');
+const css = fs.readFileSync(path.join(ROOT, 'css/profit.css'), 'utf8');
+ok(/\.search-input\{[^}]*width:180px;/.test(css) && !has(css, 'max-width:1360px') && !has(css, 'search-input{width:140px'), 'css：搜尋框寬度 180、沒有第一版的 ≤1360px 縮小');
+ok(!/growthKw|searchScope|sch-scope/.test(fs.readFileSync(path.join(ROOT, 'js/firebase.js'), 'utf8')), 'firebase.js 沒有任何改動相關字');
 
 console.log(`growth-keyword-filter: ${pass} 通過、${fail} 失敗`);
 if (fail) process.exit(1);

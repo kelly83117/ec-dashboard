@@ -443,7 +443,7 @@ function _readLastHalf(shopId){
 // curStart/curEnd：測試通路專用（YYYY-MM-DD 起訖日）。其餘四家永遠是 ''、沒有任何程式碼會讀。
 //   ⚠ curMonth/curHalf 對測試通路無意義但【刻意保留】：全檔數十處在讀（updateHalfBtnLabels、
 //     getPrevPeriodKey、syncHeaderKpis…），拿掉會連鎖 throw。讓它們留著當無害的殘值。
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),curStart:'',curEnd:'',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:'',growthQ:''};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),curStart:'',curEnd:'',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:'',searchScope:'prod'};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -2022,8 +2022,8 @@ function growthKwHint(adjs,tokens,inCur,labelOf){
   return lines.join('\n');
 }
 // GROWTH-KW-PURE-END
-// 這個通路有沒有在用關鍵字篩選（筆數、上月同期比較、提示都用這一支判斷）
-function _growthKwOn(s){ return !!(s&&growthKwTokens(s.growthQ).length); }
+// 搜尋框範圍＝「商品調整」而且有字（筆數、上月同期比較、提示都用這一支判斷）。範圍＝「商品」一律 false＝改版前的行為。
+function _growthKwOn(s){ return !!(s&&s.searchScope==='growth'&&growthKwTokens(s.search).length); }
 // 「其他期間的調整」每筆前面的標籤：優先顯示期間（例：2026/07 上半月），
 //   期間算不出來就退回顯示日期，日期也沒有才顯示「未記日期」。
 //   絕不顯示空白——空白會讓人以為壞掉。
@@ -4836,8 +4836,7 @@ function shopHTML(shop){return`
   <div id="sv-profit-${shop}">
     <div class="toolbar" id="tb-${shop}" style="position:relative">
       <span id="period-tag-${shop}" style="display:none"></span>
-      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
-      <span class="gkw-wrap" id="gkw-wrap-${shop}" title="只篩商品調整欄寫過的文字（全部期間），不搜商品名稱"><span class="gkw-icon" aria-hidden="true">📝</span><input type="text" class="gkw-input" id="gkw-${shop}" placeholder="商品調整含…" aria-label="商品調整含關鍵字" oninput="growthKwInput('${shop}',this,event)"><button type="button" class="gkw-clear" onclick="growthKwClear('${shop}')" title="清除商品調整關鍵字" aria-label="清除商品調整關鍵字">✕</button></span>
+      <span class="sch-wrap" id="sch-wrap-${shop}"><select class="sch-scope" id="sch-scope-${shop}" onchange="setSearchScope('${shop}',this.value)" title="搜尋範圍：商品＝編號／名稱／ID；商品調整＝商品調整欄寫過的文字（全部期間），不搜商品名稱" aria-label="搜尋範圍"><option value="prod">商品</option><option value="growth">商品調整</option></select><input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="searchInput('${shop}',this,event)"><button type="button" class="sch-clear" onclick="searchClear('${shop}')" title="清除搜尋文字（範圍不變）" aria-label="清除搜尋文字">✕</button></span>
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="batch-sel-info" id="batchsel-${shop}"></span>
       <span class="batch-sel-acts" id="batchacts-${shop}"><button class="bsel-act" onclick="openBatchTagPanel('${shop}','add')">＋ 加標籤</button><button class="bsel-act bsel-act-rm" onclick="openBatchTagPanel('${shop}','remove')">－ 移除標籤</button></span>
@@ -5101,7 +5100,7 @@ function loadIntoUI(shop,built,period,days,storeAds){
   }
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
-  _growthKwSyncUI(shop);   // 商品調整關鍵字同 search：切月份／切半月保留
+  _searchSyncUI(shop);   // 搜尋範圍同 search：切月份／切半月保留
   document.getElementById('period-tag-'+shop).textContent=period;
   const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
@@ -6982,7 +6981,7 @@ function tagFxJump(label){
   // 把「這是跳轉造成的篩選」持久化進 ec_filterstate（附加欄位；_loadFilterState 逐欄挑名，
   //   多的 key 被忽略、各欄回傳不受影響）：開頁時 _tagFxMaybeResumeBanner 據此重建橫幅，
   //   殘留篩選才有解釋與清除入口（不然隔天開頁是原半月＋看不見的篩選，只會覺得商品變少了）。
-  //   🔴 自然過期是本設計的關鍵：之後任何篩選操作都會走 _saveFilterState 用固定欄位（2026-11-26 起多了 growthQ，共五欄）
+  //   🔴 自然過期是本設計的關鍵：之後任何篩選操作都會走 _saveFilterState 用固定欄位（2026-11-26 起多了 searchScope，共五欄）
   //     【整包重寫】→ 旗標自動消失 → 使用者改過篩選就不再重建橫幅。所以這裡用
   //     「讀回-附加-寫回」，【不要動 _saveFilterState 本體】，動了自然過期就死了。
   try{
@@ -7837,7 +7836,7 @@ document.addEventListener('click',closeTfDrop);
 //     （全站單一 key、且是沒人呼叫的死碼）語意不同，兩者無關、不共用、不互相覆蓋。
 function _saveFilterState(shop){
   const s=state[shop];if(!s)return;
-  try{localStorage.setItem('ec_filterstate|'+shop,JSON.stringify({filters:s.filters||{},sorts:s.sorts||{},tagFilters:s.tagFilters||[],search:s.search||'',growthQ:s.growthQ||''}));}catch{}
+  try{localStorage.setItem('ec_filterstate|'+shop,JSON.stringify({filters:s.filters||{},sorts:s.sorts||{},tagFilters:s.tagFilters||[],search:s.search||'',searchScope:s.searchScope==='growth'?'growth':'prod'}));}catch{}
 }
 // 回傳 {filters,sorts,tagFilters,search}；讀不到 / parse 失敗 / 整包形狀不對 → 回 null。
 //   🔴 逐欄型別防呆而非整包丟掉：舊格式或半壞的資料只要有一欄還能用就該救回來。
@@ -7855,7 +7854,7 @@ function _loadFilterState(shop){
       sorts:isObj(o.sorts)?o.sorts:{},
       tagFilters:Array.isArray(o.tagFilters)?o.tagFilters:[],
       search:typeof o.search==='string'?o.search:'',
-      growthQ:typeof o.growthQ==='string'?o.growthQ:'',   // 商品調整關鍵字（2026-11-26 加；舊存檔沒有這欄＝空）
+      searchScope:o.searchScope==='growth'?'growth':'prod',   // 搜尋範圍（2026-11-26 加；舊存檔沒有這欄＝商品）
     };
   }catch{return null;}
 }
@@ -7883,11 +7882,13 @@ function applyFilters(shop,opts){
   if(!s._built||!s._built.length)return;
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
-  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  // 商品調整關鍵字：比這個品號全部期間的商品調整（規則見 GROWTH-KW-PURE）。關鍵字空白時這段整個不跑，結果跟改版前逐字相同。
+  // 搜尋範圍（2026-11-26）：「商品」＝改版前那一行，一字未動；「商品調整」＝比這個品號全部期間的商品調整（規則見 GROWTH-KW-PURE）。
   //   getNotes 在 filter 外面取一次（整份深拷貝，理由同 renderTable 的 growthNotesAll）。
-  const gkw=growthKwTokens(s.growthQ);
-  if(gkw.length){ const gAll=getNotes(shop+'_growth')||{}; list=list.filter(r=>growthKwMatch(growthKwAdjs(gAll[r.code]),gkw)); }
+  if(s.searchScope==='growth'){
+    const gkw=growthKwTokens(s.search);
+    if(gkw.length){ const gAll=getNotes(shop+'_growth')||{}; list=list.filter(r=>growthKwMatch(growthKwAdjs(gAll[r.code]),gkw)); }
+  }
+  else if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   // tagFilters 是扁平字串陣列、多個來源共用，手動標籤（第三排）一律帶 'prod|' 前綴 ——
   //   它的 label 是使用者自己取的，跟廣告分析／成長分析撞名（例如「低效廣告」）完全可能，
   //   靠前綴才分得開。這裡拆成兩組各自比對，兩組之間是 OR（勾越多列越多）。
@@ -7991,43 +7992,62 @@ function setSearch(shop,val){
   _saveFilterState(shop);
   applyFilters(shop);
 }
-// ── 商品調整關鍵字框（搜尋框右邊）──
-//   打字停 200ms 才篩；注音／倉頡組字中（isComposing）不篩，組字結束（compositionend）再篩。外框樣式（有字＝強調色）當下就變。
-//   只改畫面與 ec_filterstate（本機），不寫雲端；是檢視，不可加進 app.js __RO_WRITE_RE（唯讀帳號也要能用）。
-const _gkwTimer={};
-function _growthKwSyncUI(shop){
-  const s=state[shop], el=document.getElementById('gkw-'+shop), w=document.getElementById('gkw-wrap-'+shop);
-  if(el&&s&&el.value!==(s.growthQ||''))el.value=s.growthQ||'';
-  if(w)w.classList.toggle('on',!!String(el?el.value:(s&&s.growthQ)||'').trim());
+// ── 搜尋框的範圍下拉（2026-11-26，Gini：合併成一個搜尋框）──
+//   範圍＝「商品」：輸入直接走 setSearch（跟改版前一樣每打一個字就篩、沒有延遲），外觀、筆數也跟改版前一樣。
+//   範圍＝「商品調整」：打字停 200ms 才篩；注音／倉頡組字中（isComposing）不篩，組字結束（compositionend）再篩；有字時整個框用強調色、出現 ✕。
+//   兩種範圍共用 state[shop].search（文字）＋ state[shop].searchScope（'prod'｜'growth'），切範圍時文字保留、用新範圍重篩。
+//   只改畫面與 ec_filterstate（本機），不寫雲端；都是檢視，不可加進 app.js __RO_WRITE_RE（唯讀帳號也要能用）。
+const _SCH_PH={prod:'🔍 搜尋 編號 / 名稱 / ID…',growth:'📝 商品調整含…（全部期間）'};
+const _schTimer={};
+function _searchSyncUI(shop){
+  const s=state[shop]; if(!s)return;
+  const g=s.searchScope==='growth';
+  const sel=document.getElementById('sch-scope-'+shop), el=document.getElementById('search-'+shop), w=document.getElementById('sch-wrap-'+shop);
+  if(sel&&sel.value!==(g?'growth':'prod'))sel.value=g?'growth':'prod';
+  if(el){ const ph=_SCH_PH[g?'growth':'prod']; if(el.placeholder!==ph)el.placeholder=ph; }
+  if(w){ w.classList.toggle('kw',g); w.classList.toggle('on',g&&!!String(el?el.value:(s.search||'')).trim()); }
 }
-function growthKwInput(shop,el,ev){
-  const w=document.getElementById('gkw-wrap-'+shop);
+function searchInput(shop,el,ev){
+  const s=state[shop];
+  if(!s||s.searchScope!=='growth'){ setSearch(shop,el.value); return; }   // 範圍＝商品：跟改版前的 oninput 完全一樣
+  const w=document.getElementById('sch-wrap-'+shop);
   if(w)w.classList.toggle('on',!!String(el.value||'').trim());
   if(ev&&ev.isComposing)return;
-  clearTimeout(_gkwTimer[shop]);
-  _gkwTimer[shop]=setTimeout(()=>{
-    delete _gkwTimer[shop];
-    const s=state[shop]; if(!s)return;
-    const cur=document.getElementById('gkw-'+shop);
+  clearTimeout(_schTimer[shop]);
+  _schTimer[shop]=setTimeout(()=>{
+    delete _schTimer[shop];
+    const st=state[shop]; if(!st||st.searchScope!=='growth')return;
+    const cur=document.getElementById('search-'+shop);
     const v=cur?cur.value:el.value;
-    if(v===(s.growthQ||''))return;
-    s.growthQ=v;
-    _saveFilterState(shop);
-    applyFilters(shop);
+    if(v===(st.search||''))return;
+    setSearch(shop,v);
   },200);
 }
-// 組字結束（注音／倉頡選完字）：oncompositionend 不是 HTML 會認的 inline 屬性（寫了也不會觸發），所以掛在 document 上（輸入框是 shopHTML 字串產生的，重畫不用重掛）。
+// 組字結束（注音／倉頡選完字）：oncompositionend 不是 HTML 會認的 inline 屬性（寫了也不會觸發），所以掛在 document 上。
+//   範圍＝商品時不做事（改版前也沒有這一支；組字中的每個 input 本來就直接篩）。
 document.addEventListener('compositionend',e=>{
-  const el=e.target; if(!el||!el.classList||!el.classList.contains('gkw-input')||!el.id||el.id.indexOf('gkw-')!==0)return;
-  growthKwInput(el.id.slice(4),el);
+  const el=e.target; if(!el||!el.classList||!el.classList.contains('search-input')||!el.id||el.id.indexOf('search-')!==0)return;
+  const shop=el.id.slice(7); if(!state[shop]||state[shop].searchScope!=='growth')return;
+  searchInput(shop,el);
 });
-function growthKwClear(shop){
-  clearTimeout(_gkwTimer[shop]); delete _gkwTimer[shop];
+function setSearchScope(shop,scope){
   const s=state[shop]; if(!s)return;
-  const el=document.getElementById('gkw-'+shop); if(el)el.value='';
-  const had=!!s.growthQ;
-  s.growthQ='';
-  _growthKwSyncUI(shop);
+  clearTimeout(_schTimer[shop]); delete _schTimer[shop];
+  const el=document.getElementById('search-'+shop);
+  if(el)s.search=el.value;            // 文字保留（商品調整打到一半、還在等 200ms 的也一起帶過去）
+  s.searchScope=scope==='growth'?'growth':'prod';
+  _searchSyncUI(shop);
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ✕：只清文字、範圍不變（✕ 只在範圍＝商品調整、有字時看得到）
+function searchClear(shop){
+  clearTimeout(_schTimer[shop]); delete _schTimer[shop];
+  const s=state[shop]; if(!s)return;
+  const el=document.getElementById('search-'+shop); if(el)el.value='';
+  const had=!!s.search;
+  s.search='';
+  _searchSyncUI(shop);
   _saveFilterState(shop);
   if(had)applyFilters(shop);
   if(el)el.focus();
@@ -10405,7 +10425,7 @@ function renderTable(shop,list,opts){
   {
     const _cntEl=document.getElementById('cnt-'+shop);
     if(_growthKwOn(s)){
-      const kw=String(s.growthQ).trim(), e=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const kw=String(s.search).trim(), e=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const full=`${list.length} 筆 · 商品調整含「${kw}」`;
       _cntEl.classList.add('row-cnt-kw');
       _cntEl.title=full;
@@ -10500,8 +10520,8 @@ function renderTable(shop,list,opts){
   const growthNotesAll=getNotes(shop+'_growth');
   // 同上：一次算完全表的「其他期間 N / 洞察表 M」，逐列 O(1) 取。不跨次快取，每次 render 現建。
   const crossRead=_crossPeriodIndexFor(shop);
-  // 商品調整關鍵字：篩出來的列，關鍵字不在本期格子裡 ⇒ 格子的滑鼠提示最上面多一行「關鍵字在 {期間}「…」」。沒有關鍵字時回 undefined（buildNoteCell 輸出不變）。
-  const _gkwTok=growthKwTokens(s.growthQ);
+  // 搜尋範圍＝商品調整：篩出來的列，關鍵字不在本期格子裡 ⇒ 格子的滑鼠提示最上面多一行「關鍵字在 {期間}「…」」。沒有關鍵字時回 undefined（buildNoteCell 輸出不變）。
+  const _gkwTok=_growthKwOn(s)?growthKwTokens(s.search):[];
   const _gkwHint=code=>_gkwTok.length?growthKwHint(growthKwAdjs(growthNotesAll[code]),_gkwTok,a=>_inGrowthPeriod(a,s.curMonth,s.curHalf),_growthPeriodLabel):undefined;
   let rowIdx=0;
   list.forEach(r=>{
@@ -34231,12 +34251,12 @@ function initShopUI(shop){
     state[shop].sorts=_fs.sorts;
     state[shop].tagFilters=_fs.tagFilters;
     state[shop].search=_fs.search;
-    state[shop].growthQ=_fs.growthQ;
+    state[shop].searchScope=_fs.searchScope;
     // 搜尋框不在 #tbl-{shop} 裡（它在 toolbar #tb-{shop}），renderTable 碰不到它 → 自己回填。
     //   ⚠ programmatic 的 .value= 不會觸發 oninput，所以不會回頭呼叫 setSearch → 不會回寫。
     //   這一行逐字照抄 loadIntoUI 裡的既有範本。
     const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
-    _growthKwSyncUI(shop);   // 商品調整關鍵字框同上（也在 toolbar，自己回填＋外框樣式）
+    _searchSyncUI(shop);   // 搜尋範圍下拉同上（也在 toolbar，自己回填＋外框樣式）
     // 讓畫面跟上：applyFilters → renderTable（表格本體＋表頭排序箭頭＋欄位篩選鈕 on 狀態，
     //   三者都由 s.sorts / s.filters 現算）＋ updateTagFilterBar（pill 的選取狀態由 s.tagFilters 現算）。
     //   兩者只「產生」onclick 字串、不執行，所以不會繞回 setSort/setTagFilter 等六支 → 不會回寫。
@@ -35949,7 +35969,7 @@ Object.assign(window, {
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiFridayUpload,kpiFridayAutoFill,__kpiFridayRestore,__kpiFridayRestoreI,fridayKpiFromRecon,fridayParseWorkbook,kpiFridayOpenMissingCostPanel,kpiFridayMissCostSave,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiCoupangAutoFill,__kpiCoupangRestore,coupangKpiFromProfit,__cupKpiReturnsDiff,kpiCoupangOpenMissingCostPanel,kpiCoupangMissCostSave,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,__kpiMaterialClear,__kpiMaterialClearRestore,__kpiCommonRegressionSnap,__kpiShopeeRegressionSnap,__shopRateRegressionSnap,__unsoldRegressionSnap,openUnsoldModal,closeUnsoldModal,unsoldSetMonth,unsoldReload,unsoldExportExcel,__shopeeUnsoldSnap,openZeroSalesModal,closeZeroSalesModal,zeroSalesSetMonth,zeroSalesExportExcel,__momoZeroSnap,openCoupangZeroModal,closeCoupangZeroModal,coupangZeroSetMonth,coupangZeroExportExcel,__cupZeroSnap,cupZeroOptlogAdd,cupZeroOptlogDelete,cupZeroOptlogCellEdit,cupZeroOptlogCellSave,cupZeroOptlogCellCancel,cupZeroOptlogCellDraft,cupZeroOptlogListOpen,cupZeroOptlogListClose,__cupZeroOptlogSnap,openPchomeZeroModal,closePchomeZeroModal,pchomeZeroSetMonth,pchomeZeroExportExcel,__pchomeZeroSnap,__kpiShopeeTaxInMigrate,__kpiShopeeTaxInRestore,__kpiCommonTaxInMigrate,__kpiCommonTaxInRestore,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCupPiMasterFile,cupApplyProductsMaster,cupCancelProductsMaster,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,growthKwInput,growthKwClear,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCupPiMasterFile,cupApplyProductsMaster,cupCancelProductsMaster,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,searchInput,setSearchScope,searchClear,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
@@ -36278,8 +36298,8 @@ window.__profitOpenAt=function(o){
       try{ if(saved===null)localStorage.removeItem(k);else localStorage.setItem(k,saved); }catch{}
       state[shop].search=code;
       const se=document.getElementById('search-'+shop);if(se)se.value=code;
-      // 商品調整關鍵字只清記憶體（同上面的 search 不存檔）：留著的話，跳過來的商品可能被它篩掉、看起來像沒有這個商品。
-      if(state[shop].growthQ){ state[shop].growthQ=''; _growthKwSyncUI(shop); }
+      // 搜尋範圍改回「商品」（只改記憶體，同上面的 search 不存檔）：範圍是商品調整的話，跳過來的品號會被拿去比商品調整、看起來像沒有這個商品。
+      if(state[shop].searchScope==='growth'){ clearTimeout(_schTimer[shop]); delete _schTimer[shop]; state[shop].searchScope='prod'; _searchSyncUI(shop); }
       applyFilters(shop);
       return true;
     }

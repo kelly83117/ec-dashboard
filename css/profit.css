@@ -155,27 +155,28 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .search-input{background:#f8f9fc;border:1px solid #e4e6ef;color:#374151;border-radius:7px;padding:7px 11px;font-size:13px;font-family:'Noto Sans TC',sans-serif;outline:none;width:180px;}
 .search-input:focus{border-color:#5b5fcf;}
 .row-cnt{font-size:13px;color:#9ca3af;flex:1;}
-/* 蝦皮淨利表「商品調整含…」關鍵字框（2026-11-26，Kelly）：搜尋框右邊。顏色一律走 css/main.css:2 的 :root 變數，不碰 --bg 的值。
-   空的時候外觀同搜尋框；有字（.on）＝強調色外框＋淡底，避免跟搜尋框搞混；✕ 只在有字時出現。 */
-.gkw-wrap{position:relative;display:inline-flex;align-items:center;flex:none;}
-.gkw-icon{position:absolute;left:9px;font-size:12px;line-height:1;pointer-events:none;}
-.gkw-input{width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 8px 7px 28px;font-size:13px;font-family:'Noto Sans TC',sans-serif;outline:none;}
-.gkw-input:focus{border-color:var(--primary);}
-.gkw-wrap.on .gkw-input{padding-right:24px;border-color:var(--primary);background:var(--primary-soft);color:var(--primary-dark);font-weight:600;}
-.gkw-clear{display:none;position:absolute;right:4px;border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:12px;line-height:1;padding:3px 5px;border-radius:4px;}
-.gkw-wrap.on .gkw-clear{display:block;}
-.gkw-clear:hover{background:var(--border);color:var(--text);}
-/* 有關鍵字時的筆數「N 筆 · 商品調整含「…」」：筆數不截、後半段放不下用 … 截（完整文字在 title）。
-   min-width 2.5em：約等於改版前筆數的最小寬度（「795」），所以有關鍵字也不會比沒關鍵字更早換行（1280 實測工具列只剩約 47px）；
+/* 蝦皮淨利表搜尋框的範圍下拉（2026-11-26，Gini：合併成一個搜尋框）：.sch-wrap 是外框，裡面左邊範圍下拉、右邊原本的 .search-input。
+   🔴 外框沿用 .search-input 原本的底色／框線色／圓角（#f8f9fc／#e4e6ef／7px，寫死 hex 是為了範圍＝商品時外觀跟改版前一樣），
+      裡面的 .search-input 改成無框透明、寬度仍是 180。範圍＝商品調整的顏色一律走 css/main.css:2 的 :root 變數，不碰 --bg 的值。
+   範圍下拉寬度固定 76px（切範圍時框不會變寬變窄）；1280 寬時工具列只剩約 90px 空位，下拉不可以再加寬。 */
+.sch-wrap{position:relative;display:inline-flex;align-items:stretch;flex:none;background:#f8f9fc;border:1px solid #e4e6ef;border-radius:7px;}
+.sch-wrap:focus-within{border-color:#5b5fcf;}
+.sch-wrap .search-input{border:0;background:transparent;border-radius:0 7px 7px 0;}
+.sch-scope{width:76px;flex:none;border:0;border-right:1px solid #e4e6ef;background:transparent;color:var(--text-muted);font-size:12px;font-family:'Noto Sans TC',sans-serif;padding:0 2px 0 7px;border-radius:7px 0 0 7px;outline:none;cursor:pointer;}
+.sch-wrap.kw .sch-scope{color:var(--primary);font-weight:600;}
+.sch-wrap.on{border-color:var(--primary);background:var(--primary-soft);}
+.sch-wrap.on .sch-scope{border-right-color:var(--primary);}
+.sch-wrap.on .search-input{color:var(--primary-dark);font-weight:600;padding-right:26px;}
+.sch-clear{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:12px;line-height:1;padding:3px 5px;border-radius:4px;}
+.sch-wrap.on .sch-clear{display:block;}
+.sch-clear:hover{background:var(--border);color:var(--text);}
+/* 有關鍵字時的筆數「N 筆 · 商品調整含「…」」（搜尋範圍＝商品調整、有字時）：筆數不截、後半段放不下用 … 截（完整文字在 title）。
+   min-width 2.5em：約等於改版前筆數的最小寬度（「795」），所以有關鍵字也不會比沒關鍵字更早換行（1280 實測筆數這格只剩約 58px）；
    空間比筆數還窄時筆數會稍微超出這格（不截掉數字）。沒有關鍵字時沒有這個 class，筆數跟改版前一樣。 */
 .row-cnt-kw{display:flex;align-items:baseline;min-width:2.5em;white-space:nowrap;}
 .row-cnt-n{flex:none;}
 .row-cnt-q{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--primary);}
-/* 窄畫面（約 1280 寬）：搜尋框 180→140、關鍵字框 150→120，工具列才不會比改版前多一行（1280 實測工具列只剩約 90px 空位）。 */
-@media (max-width:1360px){
-  .toolbar .search-input{width:140px;}
-  .gkw-input{width:120px;}
-}
+
 /* 批次選取（測試標籤批次標記）的「已選 N 筆」。N=0 時整個隱藏 —— 用 class 切換而不是
    JS 寫 inline style。顏色一律走 :root 變數，不寫死色碼、不碰 --bg。
    ⚠ 位置在 .row-cnt（flex:1）之後 → 會被推到工具列右側、緊鄰「🏷 標籤 / ☰ 欄位」那組，
