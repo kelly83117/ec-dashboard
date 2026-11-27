@@ -1882,6 +1882,18 @@
     cursor: pointer;
   }
   .lsmig-modal { font-size: 13px; }
+  /* 第 2 塊：匯入區、預覽表、新網址提示 */
+  .lsmig-sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .lsmig-preview { margin-top: 10px; }
+  .lsmig-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  .lsmig-table th, .lsmig-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .lsmig-table th { color: var(--text-muted); font-weight: 600; }
+  .lsmig-table td:not(.num) { white-space: normal; }
+  .lsmig-table .num { text-align: right; white-space: nowrap; }
+  .lsmig-act--ok { color: var(--success); }
+  .lsmig-act--warn { background: var(--warn-soft); color: var(--text); font-weight: 600; }
+  .lsmig-act--bad { color: var(--danger); font-weight: 600; }
+  .lsmig-hint { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
   .login-lsmig-link {
     display: block;
     margin: 12px auto 0;

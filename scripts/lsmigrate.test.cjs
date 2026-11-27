@@ -7,7 +7,7 @@ const src = fs.readFileSync(path.join(ROOT, 'js', 'pages', 'lsmigrate.js'), 'utf
 const A = '/* ═══ LSMIG-PURE-BEGIN ═══ */', B = '/* ═══ LSMIG-PURE-END ═══ */';
 const i = src.indexOf(A), j = src.indexOf(B);
 if (i < 0 || j < 0 || src.indexOf(A, i + 1) >= 0) throw new Error('找不到或重複 LSMIG-PURE 標記');
-const T = new Function(src.slice(i, j) + '\nreturn { lsmigClassify, lsmigInspect, lsmigScan, lsmigSig, lsmigSite, lsmigTaipeiDay, lsmigTaipeiIso, lsmigFileName, lsmigBuildExport, lsmigShouldShowBanner, lsmigSummaryText, LSMIG_MOVE_DATE, LSMIG_REQUIRED_KEYS };')();
+const T = new Function(src.slice(i, j) + '\nreturn { lsmigClassify, lsmigInspect, lsmigScan, lsmigSig, lsmigSite, lsmigTaipeiDay, lsmigTaipeiIso, lsmigFileName, lsmigBuildExport, lsmigShouldShowBanner, lsmigSummaryText, lsmigParseFile, lsmigPlanImport, lsmigApplyPlan, lsmigActionText, lsmigPickerFailAction, LSMIG_MOVE_DATE, LSMIG_REQUIRED_KEYS };')();
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; };
 const J = x => JSON.stringify(x);
 
@@ -116,4 +116,104 @@ ok(!/__cloud|Store\.set|firebase/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').repl
 const mainSrc = fs.readFileSync(path.join(ROOT, 'js', 'main.js'), 'utf8');
 ok(mainSrc.indexOf("pages/lsmigrate.js?v=") > mainSrc.indexOf("pages/health.js?v=") && mainSrc.indexOf("pages/lsmigrate.js?v=") < mainSrc.indexOf("firebase.js?v="), 'main.js 依序 import（pages/* 之後、firebase 之前）');
 
+// ════ 第 2 塊：匯入 ════
+const mkFile = (req, opt, extra) => JSON.stringify(Object.assign({ schema: 'ec-local-migrate', v: 1, fromOrigin: 'https://kelly83117.github.io', exportedAt: 'x', exportedBy: 'u',
+  required: req || {}, optional: opt || {}, counts: {} }, extra || {}), null, 1);
+// ── schema 檢查 ──
+ok(T.lsmigParseFile('不是 json').why === 'json', '不是 JSON ⇒ 擋');
+ok(T.lsmigParseFile('{"a":1}').why === 'schema', '隨便一個 json ⇒ 擋');
+ok(T.lsmigParseFile(mkFile({}, {}, { schema: 'other' })).why === 'schema', 'schema 不對 ⇒ 擋');
+ok(T.lsmigParseFile(mkFile({}, {}, { v: 2 })).why === 'schema', 'v 不是 1 ⇒ 擋');
+ok(T.lsmigParseFile('[]').why === 'schema' && T.lsmigParseFile('null').why === 'schema', '陣列／null ⇒ 擋');
+ok(T.lsmigParseFile('﻿' + mkFile({ ec_d3_suppliers: '[1]' })).ok, 'BOM 開頭也讀得懂');
+// ── 白名單外忽略 ──
+const PF = T.lsmigParseFile(mkFile({ ec_d3_suppliers: sup3, 'ec.session': '{"username":"x"}', 'ec|好麻吉|2026/10|first': '[]', 'ec.d2.pricing.custom.商品母表': prMaster, ec_d3_kanban: broken, ec_d3_calc_hist: 123 },
+  { 'ec.d2.pricing.cols.商品母表': '{"v":2}', 'ec.users': '[]', ec_momo_moplus_otherfee: '4' }));
+ok(PF.ok, '合法檔');
+ok(J(PF.ignored.slice().sort()) === J(['ec.session', 'ec.users', 'ec_d3_calc_hist', 'ec|好麻吉|2026/10|first'].sort()), '白名單外與非字串值都忽略：' + J(PF.ignored));
+ok(!PF.entries.some(e => e[0] === 'ec.session' || e[0].startsWith('ec|')), 'entries 沒有 session／淨利表');
+ok(J(PF.entries.map(e => e[2])) === J(['required', 'required', 'required', 'optional', 'optional']), '分類');
+
+const planOf = (entries, cur) => { const m = {}; T.lsmigPlanImport(entries, cur).forEach(it => { m[it.key] = it; }); return m; };
+// ── 這台空的：直接寫原字串；讀不懂不寫 ──
+const P0 = planOf(PF.entries, {});
+ok(P0.ec_d3_suppliers.action === 'new' && P0.ec_d3_suppliers.write === sup3 && P0.ec_d3_suppliers.afterCount === 3, '空 ⇒ 寫入原字串');
+ok(P0['ec.d2.pricing.custom.商品母表'].write === prMaster && P0['ec.d2.pricing.custom.商品母表'].added === 2, '自訂列空 ⇒ 原字串');
+ok(P0.ec_d3_kanban.action === 'bad' && P0.ec_d3_kanban.write === null, '讀不懂不寫');
+ok(T.lsmigActionText(P0.ec_d3_kanban)[0] === '讀不懂，沒有匯入（原內容仍在檔案裡）' && T.lsmigActionText(P0.ec_d3_kanban)[1] === 'bad', '讀不懂標紅');
+ok(P0['ec.d2.pricing.cols.商品母表'].action === 'optNew' && P0['ec.d2.pricing.cols.商品母表'].write === '{"v":2}', '選填這台沒有 ⇒ 補上');
+ok(planOf([['ec_d3_suppliers', sup3, 'required']], { ec_d3_suppliers: '[]' }).ec_d3_suppliers.write === sup3, '這台是空陣列 ⇒ 寫入原字串');
+ok(planOf([['ec_d3_suppliers', '[]', 'required']], {}).ec_d3_suppliers.action === 'fileEmpty', '檔案空陣列 ⇒ 跳過');
+// ── 逐字相同 ⇒ 跳過 ──
+const Psame = planOf(PF.entries, { ec_d3_suppliers: sup3, 'ec.d2.pricing.custom.商品母表': prMaster, 'ec.d2.pricing.cols.商品母表': '{"v":9}', ec_momo_moplus_otherfee: '3' });
+ok(Psame.ec_d3_suppliers.action === 'same' && Psame.ec_d3_suppliers.write === null, '逐字相同 ⇒ 跳過');
+ok(Psame['ec.d2.pricing.cols.商品母表'].action === 'optKeep' && Psame['ec.d2.pricing.cols.商品母表'].write === null, '選填這台有 ⇒ 不蓋（即使內容不同）');
+ok(Psame.ec_momo_moplus_otherfee.write === null, '選填不蓋');
+// ── 自訂列 __id 合併：新 id 加、同內容跳過、不同內容衝突保留這台 ──
+const curPr = JSON.stringify([{ __custom: true, __id: 'c1', 品名: 'X' }, { __custom: true, __id: 'c2', 品名: '這台改過' }, { __custom: true, __id: 'c9', 品名: '這台才有' }]);
+const filePr = JSON.stringify([{ __custom: true, __id: 'c1', 品名: 'X' }, { __custom: true, __id: 'c2', 品名: 'Y' }, { __custom: true, __id: 'c3', 品名: '新的' }]);
+const Ppr = planOf([['ec.d2.pricing.custom.商品母表', filePr, 'required']], { 'ec.d2.pricing.custom.商品母表': curPr })['ec.d2.pricing.custom.商品母表'];
+ok(Ppr.action === 'merge' && Ppr.added === 1 && Ppr.dup === 1 && Ppr.conflict === 1, '自訂列：新增 1、相同 1、衝突 1');
+const prOut = JSON.parse(Ppr.write);
+ok(J(prOut.map(r => r.__id)) === J(['c1', 'c2', 'c9', 'c3']) && prOut[1].品名 === '這台改過', '衝突保留這台、這台原有在前、新的在後');
+ok(Ppr.afterCount === 4 && Ppr.curCount === 3 && Ppr.fileCount === 3, '筆數');
+const prTxt = T.lsmigActionText(Ppr);
+ok(prTxt[0] === '合併，新增 1 列、相同 1 列跳過、衝突 1 列，保留這台的' && prTxt[1] === 'warn', '衝突標黃：' + prTxt[0]);
+// ── 商開附加與去重 ──
+const curSup = JSON.stringify([{ name: '甲', phone: '0900' }, { name: '這台的' }]);
+const Psup = planOf([['ec_d3_suppliers', sup3, 'required']], { ec_d3_suppliers: curSup }).ec_d3_suppliers;
+ok(Psup.added === 2 && Psup.dup === 1 && J(JSON.parse(Psup.write).map(r => r.name)) === J(['甲', '這台的', '乙', '丙']), '商開：整筆相同算重複，其餘附加在後');
+ok(T.lsmigActionText(Psup)[0] === '合併，新增 2 筆、重複 1 筆跳過', '商開文字');
+const PsupNone = planOf([['ec_d3_suppliers', JSON.stringify([{ name: '甲', phone: '0900' }]), 'required']], { ec_d3_suppliers: curSup }).ec_d3_suppliers;
+ok(PsupNone.action === 'merge' && PsupNone.added === 0 && PsupNone.write === null, '全部重複 ⇒ 不寫');
+ok(planOf([['ec_d3_suppliers', sup3, 'required']], { ec_d3_suppliers: '{壞' }).ec_d3_suppliers.action === 'curBad', '這台讀不懂 ⇒ 不蓋');
+
+// ── 假 localStorage：寫入、讀回、失敗回滾 ──
+const mkLS = (init, opts) => { const m = new Map(Object.entries(init || {})); opts = opts || {}; let sets = 0;
+  return { m, getItem: k => (m.has(k) ? m.get(k) : null), removeItem: k => { m.delete(k); },
+    setItem: (k, v) => { sets++; if (opts.throwOn === k) throw new Error('QuotaExceededError'); m.set(k, opts.corruptOn === k ? v + 'x' : String(v)); }, sets: () => sets }; };
+const imp = (ls, entries) => { const cur = {}; entries.forEach(([k]) => { cur[k] = ls.getItem(k); }); const plan = T.lsmigPlanImport(entries, cur); return { plan, r: T.lsmigApplyPlan(plan, ls) }; };
+const LS1 = mkLS({ 'ec.session': '{"username":"me"}', 'ec.d2.pricing.cols.商品母表': '{"v":1}' });
+const r1 = imp(LS1, PF.entries);
+ok(r1.r.ok && J(r1.r.written.slice().sort()) === J(['ec.d2.pricing.custom.商品母表', 'ec_d3_suppliers', 'ec_momo_moplus_otherfee'].sort()), '寫入：' + J(r1.r.written));
+ok(LS1.getItem('ec_d3_suppliers') === sup3 && LS1.getItem('ec.d2.pricing.custom.商品母表') === prMaster, '逐字寫入原字串');
+ok(LS1.getItem('ec_d3_kanban') === null, '讀不懂的沒寫');
+ok(LS1.getItem('ec.d2.pricing.cols.商品母表') === '{"v":1}' && LS1.getItem('ec.session') === '{"username":"me"}', '選填沒蓋、session 沒動');
+// 重複匯入同一份檔：第二次全部跳過、一次都不 setItem
+const before = LS1.sets(); const r2 = imp(LS1, PF.entries);
+ok(r2.r.ok && r2.r.written.length === 0 && LS1.sets() === before, '第二次匯入同一份檔：全部跳過、沒寫');
+ok(r2.plan.every(it => it.write === null), '第二次計畫全部不寫：' + J(r2.plan.map(it => it.action)));
+// 失敗回滾：第二把讀回不一致 ⇒ 第一把改回原值（原本沒有＝移除）
+const ents = [['ec_d3_competitors', comp2, 'required'], ['ec_d3_suppliers', sup3, 'required'], ['ec_d3_launch', '[{"a":1}]', 'required']];
+const LS2 = mkLS({ ec_d3_competitors: '[]' }, { corruptOn: 'ec_d3_suppliers' });
+const r3 = imp(LS2, ents);
+ok(!r3.r.ok && r3.r.failedKey === 'ec_d3_suppliers', '讀回不一致 ⇒ 停止');
+ok(LS2.getItem('ec_d3_competitors') === '[]' && LS2.getItem('ec_d3_suppliers') === null && LS2.getItem('ec_d3_launch') === null, '已寫的改回原值、後面的不寫');
+ok(J(r3.r.rolledBack.slice().sort()) === J(['ec_d3_competitors', 'ec_d3_suppliers']) && r3.r.rollbackFailed.length === 0, '回滾明細');
+const LS3 = mkLS({}, { throwOn: 'ec_d3_launch' });
+const r4 = imp(LS3, ents);
+ok(!r4.r.ok && r4.r.failedKey === 'ec_d3_launch' && /Quota/.test(r4.r.error) && LS3.m.size === 0, 'setItem 丟錯 ⇒ 全部回滾');
+// B 檔情境：跟 A 部分重疊
+const fileB = T.lsmigParseFile(mkFile({ ec_d3_suppliers: JSON.stringify([{ name: '甲', phone: '0900' }, { name: '丁' }]),
+  'ec.d2.pricing.custom.商品母表': JSON.stringify([{ __custom: true, __id: 'c1', 品名: 'X 改' }]), ec_d3_kanban: broken }));
+const r5 = imp(LS1, fileB.entries), b = {}; r5.plan.forEach(it => { b[it.key] = it; });
+ok(r5.r.ok && b.ec_d3_suppliers.added === 1 && b.ec_d3_suppliers.dup === 1 && b['ec.d2.pricing.custom.商品母表'].conflict === 1 && b.ec_d3_kanban.action === 'bad', 'B：新增 1、跳過 1、衝突 1、讀不懂沒寫');
+ok(JSON.parse(LS1.getItem('ec.d2.pricing.custom.商品母表'))[0].品名 === 'X', 'B：衝突保留這台');
+// 原始碼守則（第 2 塊）
+['lsMigrateImportPick', 'lsMigrateImportGo', 'lsMigrateImportCancel', 'lsMigrateImportManualGo', 'lsMigrateImportManualCancel']
+  .forEach(h => ok(!RE.test('App.' + h + '()'), h + ' 不會被唯讀擋板擋'));
+ok(!/appendChild\(inp\)/.test(src), '選檔 input 不放進頁面（唯讀擋板會擋頁面上的 input[type=file]）');
+
+// ── 存檔視窗被取消 ⇒ 改問下載 ──
+ok(T.lsmigPickerFailAction({ name: 'AbortError' }) === 'ask', '按取消（AbortError）⇒ 改問要不要下載');
+ok(T.lsmigPickerFailAction({ name: 'NotAllowedError' }) === 'ask' && T.lsmigPickerFailAction({ name: 'SecurityError' }) === 'ask', '瀏覽器不讓開 ⇒ 也改問');
+ok(T.lsmigPickerFailAction({ name: 'TypeError' }) === 'fail' && T.lsmigPickerFailAction(null) === 'fail', '其他錯誤 ⇒ 停止');
+ok(src.includes('沒有存到備份。要改成下載備份到「下載」資料夾後繼續匯入嗎？') && src.includes('>下載備份並繼續</button>') && src.includes('>取消匯入</button>'), '問句與兩個按鈕文字');
+{ const f = src.slice(src.indexOf('  lsMigrateImportDownloadGo() {'), src.indexOf('  lsMigrateImportDownloadCancel()'));
+  ok(f.indexOf('_lsmigDownload(') > 0 && f.indexOf('_lsmigCommit(') > f.indexOf('_lsmigDownload('), '下載備份並繼續：先下載、才寫入');
+  ok(f.indexOf('catch (e)') > 0 && f.indexOf('return;', f.indexOf('catch (e)')) < f.indexOf('_lsmigCommit('), '下載丟錯 ⇒ 不寫入'); }
+{ const g = src.slice(src.indexOf('async function _lsmigSaveBackup('), src.indexOf('function _lsmigCommit('));
+  ok(g.includes("if (lsmigPickerFailAction(e) === 'ask') return 'ask';") && !g.includes("'AbortError') return '沒有備份"), '_lsmigSaveBackup：取消回 ask，不再直接取消匯入'); }
+['lsMigrateImportDownloadGo', 'lsMigrateImportDownloadCancel'].forEach(h => ok(!RE.test('App.' + h + '()'), h + ' 不會被唯讀擋板擋'));
+ok(src.includes('存檔視窗標題寫『警告：這個網站可以看見你編輯的內容』是 Chrome 的正常提示，按『存檔』即可。'), '匯入說明有 Chrome 存檔警告的說明');
 console.log('✓ lsmigrate.test.cjs 全部通過（' + n + ' 項）');

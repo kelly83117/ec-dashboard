@@ -15,6 +15,9 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 - `js/pages/lsmigrate.js` — 本機資料搬家（換網址用）：只讀 localStorage 的必搬／選填白名單、首頁黃色橫幅（只在舊網址 `kelly83117.github.io`、localhost 用 `?lsmig=old`）、
   登入頁小連結、側欄「📦 資料搬家」入口（登出上面一列）、匯出 JSON（schema `ec-local-migrate`，值存原始字串）。不讀寫雲端、不改 firebase.js；本機旗標 `ec_lsmig_exported`／`ec_lsmig_laterDay`。
   handler 刻意不進 `__RO_WRITE_RE`（唯讀也要能匯出）。搬家日期常數 `LSMIG_MOVE_DATE`。node 測試 `scripts/lsmigrate.test.cjs`。
+  第 2 塊匯入（同一個視窗下半部）：schema／v 不對擋下、白名單外忽略；先算計畫（`lsmigPlanImport`）預覽，按「匯入」先存「_匯入前備份」（存檔視窗被取消 ⇒ 改問「下載備份並繼續／取消匯入」），
+  再 `lsmigApplyPlan`（只 setItem、逐把讀回、失敗回滾）。合併不刪東西：自訂列依 `__id`（衝突保留這台）、商開整筆相同＝重複、選填不蓋、讀不懂不寫。
+  🔴 選檔的 input 不可以放進頁面（唯讀擋板一律擋頁面上的 input[type=file]）。新網址提示 `lsMigrateHintHtml`（offices.js 商開分頁／訂價表上方）。
 - `js/profit.js` — 淨利表功能（蝦皮多店 / 上傳 / 匯出 / 雲端 / 對帳）
 - `js/firebase.js` — Firestore 雲端同步層（唯一含第三方 import）
 - `js/main.js` — ES Module 進入點，依序載入 app → pages/* → profit → firebase

@@ -872,6 +872,9 @@ Object.assign(App, {
       }
     }
 
+    // 本機資料搬家（lsmigrate.js）：新網址、這個商開分頁沒有資料時，上方一行小字提示去匯入
+    if (activeTab && deptId === 'd3' && typeof this.lsMigrateHintHtml === 'function') tabContent = this.lsMigrateHintHtml(activeTab.dynamic) + tabContent;
+
     const cellQ = (v) => {
       if (v == null) return '<span style="color:var(--text-muted)">—</span>';
       const cls = v >= 90 ? 'trend-up' : v < 60 ? 'trend-down' : '';
@@ -920,7 +923,7 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitReady ? (window.__profitTabHtml || '') : '<div class="pf-loading" style="padding:48px 20px;text-align:center;color:#9ca3af;font-size:14px">淨利表載入中…（首次進入約需幾秒下載淨利表模組）</div>') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
-      ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'pricing' ? (typeof this.lsMigrateHintHtml === 'function' ? this.lsMigrateHintHtml('pricing') : '') + this.renderD2PricingTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
