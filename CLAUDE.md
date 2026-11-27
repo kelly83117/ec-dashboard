@@ -11,7 +11,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 - `js/version.js` — 版本檢查 + 清快取（head 早載，classic script）
 - `js/app.js` — 主程式核心：Store、工具、設定、`App` 核心（boot/路由/render/登入）
 - `js/pages/*.js` — 各頁面方法（dashboard / marketing / employees / daily /
-  offices / users / modal / sheetsync / issues / inventory / health），以 `Object.assign(App, …)` 合併回 App
+  offices / users / modal / sheetsync / issues / inventory / health / lsmigrate），以 `Object.assign(App, …)` 合併回 App
+- `js/pages/lsmigrate.js` — 本機資料搬家（換網址用）：只讀 localStorage 的必搬／選填白名單、首頁黃色橫幅（只在舊網址 `kelly83117.github.io`、localhost 用 `?lsmig=old`）、
+  登入頁小連結、側欄「📦 資料搬家」入口（登出上面一列）、匯出 JSON（schema `ec-local-migrate`，值存原始字串）。不讀寫雲端、不改 firebase.js；本機旗標 `ec_lsmig_exported`／`ec_lsmig_laterDay`。
+  handler 刻意不進 `__RO_WRITE_RE`（唯讀也要能匯出）。搬家日期常數 `LSMIG_MOVE_DATE`。node 測試 `scripts/lsmigrate.test.cjs`。
 - `js/profit.js` — 淨利表功能（蝦皮多店 / 上傳 / 匯出 / 雲端 / 對帳）
 - `js/firebase.js` — Firestore 雲端同步層（唯一含第三方 import）
 - `js/main.js` — ES Module 進入點，依序載入 app → pages/* → profit → firebase
@@ -687,8 +690,8 @@ ESM 有個致命陷阱必須牢記：
 
 ### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
 
-版號散在 **18 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
-18 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
+版號散在 **19 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
+19 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
 版號，改由合併端統一 bump。** 但 bump 若晚於部署就出事，見下方空窗實測。
 
 ⚠️ **空窗風險（實測，不是理論）**：feature 合併進 `main` 後、bump 前，`main` 是
@@ -707,22 +710,22 @@ git push                          # merge + bump 同一次 push
 ```
 → merge 與 bump 在**同一次 push** 送上去，Pages 部署到的必定是「新 code + 新版號」，
 **零空窗**，不管部署 40 秒還 5 分鐘都安全。`bump-version.js`（repo 根目錄）自動偵測
-index.html 現版號 → 換全部 18 處（index.html 5＋js/main.js 13）→ **自動 grep 驗證**
+index.html 現版號 → 換全部 19 處（index.html 5＋js/main.js 14）→ **自動 grep 驗證**
 （次數對＝5/13、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
 版號**比 `main` 現值大**即可（不要憑記憶，`--check` 或搜 `app-version` 看現值）。
 
 **B. 純文件 / 腳本 PR（不動 `js/`、`css/`）→ 用 GitHub 按鈕合併即可，不需 bump。**
 沒動 runtime 就沒有快取失效問題，也就沒有空窗；這支 PR 本身就是 B 類。
 
-**18 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
-app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 13 個 import `?v=` ×13。
+**19 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
+app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 14 個 import `?v=` ×14。
 
 ⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
 沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
 HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
 使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
 `?v=` 後才跟 JS 一樣改版即刷新。這也是版號存在的唯一理由——每次部署每個資源
-都要換 URL 炸 disk cache；`bump-version.js` 保證 18 處同步、不漏。
+都要換 URL 炸 disk cache；`bump-version.js` 保證 19 處同步、不漏。
 
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能

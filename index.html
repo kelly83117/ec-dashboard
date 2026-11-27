@@ -63,6 +63,8 @@
         如忘記帳號或密碼，請聯絡系統管理員。
         <div id="js-status" style="margin-top:8px;color:var(--danger);font-size:11px"></div>
       </div>
+      <button type="button" class="login-lsmig-link" onclick="window.App && App.lsMigrateLoginExport && App.lsMigrateLoginExport()">匯出這台電腦的本機資料</button>
+      <div id="login-lsmig-msg"></div>
     </div>
   </div>
 </div>
@@ -129,6 +131,7 @@
           onmouseover="this.style.background='var(--sidebar-2)'"
           onmouseout="this.style.background='transparent'">🔑</button>
       </div>
+      <button type="button" class="sidebar-lsmig-btn" title="匯出本機資料（換網址搬家用）" onclick="App.lsMigrateOpenModal()">📦 資料搬家</button>
       <button class="logout-btn" onclick="App.logout()">登出</button>
     </aside>
     <main class="main" id="main-content"></main>

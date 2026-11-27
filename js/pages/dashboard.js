@@ -785,6 +785,7 @@ Object.assign(App, {
         <h2 style="font-size:22px;margin:0">儀表板首頁 <span class="live-dot">即時資料</span></h2>
         <p style="margin:2px 0 0;font-size:13px">歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}</p>
       </div>
+      ${this.lsMigrateBannerHtml ? this.lsMigrateBannerHtml() : ''}
       ${summaryPills}
       <div class="stat-grid summary-grid">${summaryCards}</div>
       <div id="revenue-entry-panel" class="dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>

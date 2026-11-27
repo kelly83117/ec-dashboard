@@ -1846,6 +1846,67 @@
     cursor: pointer;
   }
   .ls-warn-go:disabled, .ls-warn-later:disabled { opacity: .6; cursor: not-allowed; }
+  /* 本機資料搬家（js/pages/lsmigrate.js）：首頁頂端黃色提示、登入頁小連結、側欄帳號區 📦 入口。只用 :root 變數，不碰 --bg。 */
+  .lsmig-banner {
+    background: var(--warn-soft);
+    color: var(--text);
+    border: 1px solid var(--warn);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin: 0 0 12px;
+    font-size: 13px;
+  }
+  .lsmig-banner--done { background: var(--surface); }
+  .lsmig-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .lsmig-text { color: var(--text-muted); line-height: 1.6; margin-top: 4px; }
+  .lsmig-list { margin: 6px 0 0; padding-left: 20px; line-height: 1.6; }
+  .lsmig-bad { color: var(--danger); font-weight: 600; }
+  .lsmig-warn { color: var(--danger); font-weight: 600; margin-top: 6px; }
+  .lsmig-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .lsmig-go {
+    background: var(--warn);
+    color: var(--surface);
+    border: 0;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lsmig-later {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .lsmig-modal { font-size: 13px; }
+  .login-lsmig-link {
+    display: block;
+    margin: 12px auto 0;
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .login-lsmig-link:hover { color: var(--primary); }
+  #login-lsmig-msg .lsmig-banner { margin: 10px 0 0; text-align: left; }
+  #login-lsmig-msg > .lsmig-text { text-align: center; }
+  /* 側欄「📦 資料搬家」：獨立一列放在登出上面（不塞進帳號列，手機抽屜也不會擠到姓名） */
+  .sidebar-lsmig-btn {
+    margin: 0 16px 8px;
+    background: transparent;
+    color: var(--sidebar-text);
+    border: 1px solid var(--sidebar-2);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .sidebar-lsmig-btn:hover { background: var(--sidebar-2); }
   /* 淨利表雲端檔（app/profit）快滿提醒（js/app.js __profitCapShow）：沿用 .ls-warn 卡片，只給管理員。
      本機空間卡片同時出現時往上疊，不互相蓋住。 */
   body:has(#ls-warn) .profit-cap-warn { bottom: 230px; }
