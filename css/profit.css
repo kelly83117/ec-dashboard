@@ -2342,6 +2342,88 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .cup-pc-btn:disabled{opacity:.5;cursor:not-allowed;}
 .cup-pc-btn-pri{border-color:var(--primary);color:var(--primary);font-weight:700;}
 @media (max-width:560px){.cup-pc-inputs{grid-template-columns:1fr;}.cup-pc-card-r{text-align:left;}}
+/* 酷澎整頁各規格視窗（2026-11-27，合併商品頁外層列「規格 N」）。前綴 cup-pga-；顏色走 :root 變數，不碰 --bg。 */
+:root{--cup-pga-backdrop:rgba(15,23,42,.5);--cup-pga-z:4000;--cup-pga-w:min(900px,96vw);--cup-pga-in-w:96px;}
+.cup-pg-spec-btn{flex-shrink:0;margin-right:6px;padding:1px 7px;border:1px solid var(--primary);border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:11px;font-weight:700;line-height:18px;white-space:nowrap;cursor:pointer;font-family:inherit;}
+.cup-pg-spec-btn:hover{background:var(--primary);color:var(--surface);}
+.cup-pga-overlay{position:fixed;inset:0;z-index:var(--cup-pga-z);background:var(--cup-pga-backdrop);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto;box-sizing:border-box;}
+.cup-pga-modal{width:var(--cup-pga-w);max-height:88vh;display:flex;flex-direction:column;}
+.cup-pga-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);}
+.cup-pga-head-l{min-width:0;}
+.cup-pga-title{font-size:16px;font-weight:800;line-height:1.35;color:var(--text);overflow-wrap:anywhere;}
+.cup-pga-sub{margin-top:2px;font-size:12px;color:var(--text-muted);overflow-wrap:anywhere;}
+.cup-pga-x{flex-shrink:0;width:32px;height:32px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-muted);font-size:18px;line-height:1;cursor:pointer;}
+.cup-pga-tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);overflow-x:auto;}
+.cup-pga-tab{padding:8px 14px;border:none;border-bottom:2px solid transparent;background:none;color:var(--text-muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;font-family:inherit;}
+.cup-pga-tab.on{color:var(--primary);border-bottom-color:var(--primary);}
+.cup-pga-head,.cup-pga-tabs{flex-shrink:0;}   /* 視窗是 flex 欄＋max-height：不鎖住會在矮螢幕被壓扁（分頁籤只剩一半） */
+.cup-pga-body{padding:16px 20px;overflow:auto;flex:1 1 auto;min-height:0;}
+.cup-pga-pane.off{display:none;}
+.cup-pga-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.cup-pga-kpi{padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);min-width:0;}
+.cup-pga-kpi-l{font-size:11px;color:var(--text-muted);}
+.cup-pga-kpi-v{margin-top:2px;font-size:18px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.cup-pga-h{margin:14px 0 6px;font-size:13px;font-weight:700;color:var(--text);}
+.cup-pga-note{margin-top:10px;font-size:12px;line-height:1.7;color:var(--text-muted);}
+.cup-pga-warn{color:var(--warn);}
+.cup-pga-tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.cup-pga-tbl{width:100%;border-collapse:collapse;font-size:13px;}
+.cup-pga-tbl th{padding:8px;border-bottom:1px solid var(--border);background:var(--primary-soft);color:var(--text-muted);font-size:12px;font-weight:700;text-align:right;white-space:nowrap;}
+.cup-pga-tbl td{padding:8px;border-bottom:1px solid var(--border);text-align:right;vertical-align:middle;font-variant-numeric:tabular-nums;}
+.cup-pga-tbl .tl{text-align:left;}
+.cup-pga-list{min-width:520px;}
+.cup-pga-pc{min-width:720px;margin-top:12px;}
+.cup-pga-li{cursor:pointer;}
+.cup-pga-li:hover td{background:var(--primary-soft);}
+.cup-pga-spec{font-weight:700;color:var(--text);overflow-wrap:anywhere;}
+.cup-pga-rep{font-size:11px;font-weight:700;color:var(--primary);}
+.cup-pga-code{color:var(--text-muted);white-space:nowrap;}
+.cup-pga-ck{width:28px;text-align:center !important;}
+.cup-pga-in{width:var(--cup-pga-in-w);height:32px;box-sizing:border-box;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit;text-align:right;font-variant-numeric:tabular-nums;}
+.cup-pga-in:focus{outline:none;border-color:var(--primary);}
+.cup-pga-in-chg{border:2px solid var(--warn);background:var(--warn-soft);font-weight:700;}
+.cup-pga-in-s{width:72px;}
+.cup-pga-orig{min-height:14px;font-size:11px;color:var(--warn);}
+.cup-pga-share{color:var(--text-muted);}
+.cup-pga-rate{white-space:nowrap;}
+.cup-pga-r0{color:var(--text-muted);}
+.cup-pga-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.cup-pga-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);min-width:0;}
+.cup-pga-card-t{font-size:12px;color:var(--text-muted);}
+.cup-pga-card-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:4px;}
+.cup-pga-card-sub{margin-top:4px;font-size:11px;color:var(--text-muted);line-height:1.5;}
+.cup-pga-w0{font-size:16px;font-weight:700;color:var(--text-muted);font-variant-numeric:tabular-nums;}
+.cup-pga-arrow{color:var(--text-muted);}
+.cup-pga-w1{font-size:24px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+.cup-pga-bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;}
+.cup-pga-sel{height:36px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit;}
+.cup-pga-neg{color:var(--danger);}
+.cup-pga-pos{color:var(--success);}
+.cup-pga-miss{color:var(--danger);font-weight:700;}
+.cup-pga-mute{color:var(--text-muted);font-weight:400;font-size:11px;}
+/* 第 2 塊：優化紀錄分頁說明＋儲存確認框（App.openModal 的 body；版型照 MOMO _momoPCOpenConfirm） */
+.cup-pga-optnote{margin:0 0 10px;}
+.cup-pga-cf{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 220px);overflow:auto;}
+.cup-pga-cf-sub{font-size:12px;color:var(--text-muted);}
+.cup-pga-cf-h{font-size:13px;font-weight:700;color:var(--text);}
+.cup-pga-cf-list{display:flex;flex-direction:column;gap:8px;}
+.cup-pga-cf-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;align-items:baseline;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);font-size:13px;}
+.cup-pga-cf-k{font-weight:700;color:var(--primary);white-space:nowrap;}
+.cup-pga-cf-v{color:var(--text);overflow-wrap:anywhere;}
+.cup-pga-cf-v s{color:var(--text-muted);}
+.cup-pga-cf-t{grid-column:2;font-size:12px;color:var(--warn);}
+.cup-pga-cf-in{width:100%;height:42px;box-sizing:border-box;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:14px;font-family:inherit;}
+.cup-pga-cf-in:focus{outline:none;border-color:var(--primary);}
+.cup-pga-cf-hint{font-size:12px;line-height:1.6;color:var(--text-muted);}
+.cup-pga-cf-btns{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
+.cup-pga-cf-ok{width:auto;padding:10px 20px;}
+@media (max-width:560px){
+  .cup-pga-overlay{padding:8px;}
+  .cup-pga-head,.cup-pga-body{padding-left:12px;padding-right:12px;}
+  .cup-pga-tabs{padding:0 12px;}
+  .cup-pga-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .cup-pga-cards{grid-template-columns:1fr;}
+}
 /* 酷澎總表動銷率卡（2026-11-19）：大字後的小字分數、比上月的顏色、卡片下方的來源行。顏色走 :root 變數。 */
 .cup-st-frac{font-size:12px;font-weight:400;color:var(--text-muted);}
 .cup-st-up{color:var(--success);}

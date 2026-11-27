@@ -33000,7 +33000,9 @@ function renderCoupangTableBody(shop){
           return `<td class="tl cup-pg-stk-code" title="${_momoEsc(tip)}">${_momoEsc(rep)}<div class="mm-sub-line">等 ${g.members.length} 個</div></td>`; }
         if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v));
           const flag=r.missN>0?`<div class="cup-pg-flag" title="淨利、淨利率只算有成本的規格（同上方大數字卡）">含 ${r.missN} 個缺成本</div>`:'';
-          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="pch-pg-arrow">${g.open?'▾':'▸'}</span><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${cupIdSubHtml(shop, g.pageId, g.members[0]&&g.members[0].code, ' · '+g.members.length+' 個規格')}${flag}</td>`; }
+          // 2026-11-27：箭頭旁「規格 N」小鈕 → 整頁各規格視窗（stopPropagation：點鈕不展開；點列其他地方照舊 cupTogglePage）
+          const specBtn=`<button type="button" class="cup-pg-spec-btn" title="開這個商品頁的各規格（分析／定價試算）" onclick="event.stopPropagation();cupOpenPageAnalysis('${shop}','${_momoEsc(String(g.pageId))}')">規格 ${g.members.length}</button>`;
+          return `<td class="tl cup-pg-stk-name"><div class="mm-name-wrap"><span class="pch-pg-arrow">${g.open?'▾':'▸'}</span>${specBtn}<span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${cupIdSubHtml(shop, g.pageId, g.members[0]&&g.members[0].code, ' · '+g.members.length+' 個規格')}${flag}</td>`; }
         if(c.k==='note') return `<td class="tl" id="${_cupPageDomId(shop,g.pageId)}" onclick="event.stopPropagation()">${cupPageNoteCellHtml(shop,g.pageId,g.members)}</td>`;
         if(c.fmt==='netCell' && r.costStatus==='ok' && v!=null){
           const nTip=`商品頁合計（${g.members.length} 個規格${r.missN>0?'，其中 '+r.missN+' 個缺成本不計':''}）：淨利 ${momoMoney(v)} ＝ 營收 ${momoMoney(r.cRev||0)} − 營業稅 ${momoMoney(r.tax||0)}（營收×5/105）− 成本 ${momoMoney(r.cost||0)} − 平台費用 ${momoMoney(r.cFee||0)}`;
@@ -33387,6 +33389,274 @@ function cupAnaCostSave(shop, code){
   cupRenderProfitBody(shop);   // 重算毛利/淨利
   const r=(_cupMergedRows[shop]||[]).find(x=>x.code===code); if(r) cupRenderAnalysis(shop, r);   // 重繪彈窗（缺成本區消失、數字更新）
 }
+
+// ── 整頁各規格視窗（2026-11-27，Inna；第 1 塊：只有畫面與試算，不存任何東西）──
+//   入口：合併商品頁外層列品名欄的「規格 N」小鈕（點列其他地方照舊 cupTogglePage）。外殼沿用 cup-analysis-overlay（關窗共用 cupCloseAnalysis）。
+//   分頁：分析（整頁合計＝外層列同一個 cupPageAgg＋各規格一覽，點一列 → 單規格視窗 cupOpenAnalysis）｜定價與成本（逐規格試算＋儲存）｜優化紀錄（代表規格的紀錄區塊）。
+//   試算（輸入、勾選、批次、還原）只改 _cupPga（記憶體），handler 不進 __RO_WRITE_RE（唯讀帳號也能開、能試算）。
+//   第 2 塊（2026-11-27）「儲存變更」cupPgaSave → 確認框 → cupPgaSaveConfirm 才寫（這兩支在 __RO_WRITE_RE）：
+//     成本＝每個改過的原廠編號走 momoSetCostByOrigin（cupAnaCostSave 同一條；skipOptlog）→ 共用成本表；售價不存；
+//     優化紀錄＝1 筆（type 調價、帶 page＝酷澎編號），掛代表規格 → ec_momo_optlog|{店}（cupZeroOptlogAdd 同一條）。都只寫本機＋待同步，酷澎「☁ 同步雲端」才上雲。
+//   每列預設值＝cupPCInit（單規格視窗同一套：本月實際單位成本／成交均價／賣家券；沒銷量用成本表與主檔售價）；每列試算一律 cupPCCalc。
+//   成本以原廠編號為 key（cur.cost[code]），同一個原廠編號出現在多列就一起連動（酷澎同一份報表一個原廠編號只有一列，實際上不會重複；照 MOMO 做法保留）。
+let _cupPga=null, _cupPgaTab='analysis';
+// ─── harness 抽取標記：CUP-PGA-PURE-BEGIN
+// 規格名：酷澎報表的品名最後是「(選項值)」（例「…, 綠色, 大款 (大款 綠色)」）⇒ 每個成員都有、而且彼此不全相同時就用括號裡的字；
+//   否則拿掉所有成員品名的共同開頭（切在逗號、空白、括號之後），剩下的就是規格；拿完是空的（或只有一個成員）就用整個品名。
+function cupPgaSpecLabels(names){
+  const N=(names||[]).map(s=>String(s==null?'':s));
+  if(N.length<2) return N.map(s=>s||'—');
+  const tail=N.map(s=>{ const m=s.match(/[(（]([^()（）]+)[)）]\s*$/); return m?m[1].trim():''; });
+  if(tail.every(Boolean) && new Set(tail).size>1) return tail;
+  let p=N[0]; N.forEach(s=>{ let i=0; while(i<p.length&&i<s.length&&p[i]===s[i]) i++; p=p.slice(0,i); });
+  let cut=-1; for(let i=p.length-1;i>=0;i--){ if(/[,，、\s(（\[【]/.test(p[i])){ cut=i+1; break; } }
+  const k=cut>0?cut:0;
+  return N.map(s=>{ const t=s.slice(k).replace(/^[\s,，、]+/,'').trim(); return t||s||'—'; });
+}
+// 整頁淨利率（依本月銷量加權）：Σ(每件淨利×件數) ÷ Σ(每件扣券後營收×件數)，只算本月有銷量、算得出淨利率的列。
+//   沒改任何格時 ＝ 外層列 cupPageAgg 的 netRate（每件×件數＝報表該列的淨利與營收）。rows＝[{q, calc}]（calc＝cupPCCalc 的結果）。
+function cupPgaWeighted(rows){
+  let net=0, rev=0, n=0;
+  (rows||[]).forEach(x=>{ const q=Number(x&&x.q)||0, c=x&&x.calc; if(!(q>0)||!c||c.rate==null) return; net+=c.net*q; rev+=c.n*q; n++; });
+  return { rate:(n&&rev>0)?net/rev:null, n };
+}
+// 勾選批次調價（照 momoPCBulkApply：% 四捨五入到整數元、四捨五入後 ≤0 就不動；統一改為 $ 要 >0）。回新價，不能套用回 null。
+function cupPgaBulkPrice(cur, mode, val){
+  if(mode==='pct'){ if(!(cur>0)) return null; const np=Math.round(cur*(1+val/100)); return np>0?np:null; }
+  return val>0?val:null;
+}
+// 數字寫進紀錄／確認框：四捨五入到分，去掉多餘的 0（139、69.5、68.25）。null ⇒ '—'。
+function cupPgaNum(x){ if(x==null||!isFinite(x)) return '—'; return String(Math.round(x*100)/100); }
+function _cupPgaSame(a,b){ return (a==null&&b==null)||(a!=null&&b!=null&&Math.abs(a-b)<0.005+1e-9); }
+// 第 2 塊：儲存計畫（純函式）。rows＝[{code,label}]（畫面順序）；orig/cur＝{cost:{code:數},price:{code:數}}；tableCost＝共用成本表 {code:數}（讀不到給 {}）。
+//   成本：畫面上改過的原廠編號；「舊」用成本表現值（沒有才用畫面原值）；新值跟成本表一樣 ⇒ 不用寫（拿掉）。同一個原廠編號只列一次（成本連動）。
+//   售價：改過的規格（只寫進紀錄，不存）。specs＝有改到的規格數（同原廠多列時，成本那幾列都算）。
+function cupPgaSavePlan(rows, orig, cur, tableCost){
+  const R=rows||[], T=tableCost||{}, costs=[], prices=[], seen=new Set(), specSet=new Set();
+  R.forEach(x=>{ const c=x.code;
+    if(!seen.has(c)){ seen.add(c);
+      if(!_cupPgaSame(cur.cost[c],orig.cost[c])){
+        const t=(T[c]!=null&&isFinite(+T[c]))?+T[c]:null, from=(t!=null)?t:orig.cost[c], to=cur.cost[c];
+        if(!(t!=null&&_cupPgaSame(to,t))) costs.push({ code:c, label:x.label, from, to });
+      } }
+    if(!_cupPgaSame(cur.price[c],orig.price[c])) prices.push({ code:c, label:x.label, from:orig.price[c], to:cur.price[c] });
+  });
+  const costCodes=new Set(costs.map(o=>o.code));
+  R.forEach(x=>{ if(costCodes.has(x.code)) specSet.add(x.code+'|'+x.label); });
+  prices.forEach(o=>specSet.add(o.code+'|'+o.label));
+  return { costs, prices, specs:specSet.size, total:costs.length+prices.length };
+}
+// 優化紀錄內容：「整頁調整（{n} 個規格）：售價 大款 綠色 139→159、大款 黑色 139→125；成本 大款 黑色 69→70｜原因：雙12降價」（沒改的那一類不寫）。
+function cupPgaNote(plan, reason){
+  const P=plan||{costs:[],prices:[]}, part=[];
+  if(P.prices.length) part.push('售價 '+P.prices.map(o=>o.label+' '+cupPgaNum(o.from)+'→'+cupPgaNum(o.to)).join('、'));
+  if(P.costs.length) part.push('成本 '+P.costs.map(o=>o.label+' '+cupPgaNum(o.from)+'→'+cupPgaNum(o.to)).join('、'));
+  return '整頁調整（'+(P.specs||0)+' 個規格）：'+part.join('；')+'｜原因：'+String(reason==null?'':reason).trim();
+}
+// ─── harness 抽取標記：CUP-PGA-PURE-END
+function cupOpenPageAnalysis(shop, pageId){
+  const members=_cupPageMembers(shop, pageId);
+  if(!members.length){ if(typeof showToast==='function') showToast('找不到這個商品頁的規格','error'); return; }
+  cupCloseAnalysis();   // 同一個外殼：先收掉已開的單規格視窗（圖表一併 destroy）
+  const ov=document.createElement('div'); ov.id='cup-analysis-overlay'; ov.className='cup-pga-overlay'; document.body.appendChild(ov);
+  ov.onclick=e=>{ if(e.target===ov) cupCloseAnalysis(); };
+  const agg=cupPageAgg(pageId, members);
+  const labels=cupPgaSpecLabels(members.map(r=>r.name));
+  const totalQ=members.reduce((s,r)=>s+(Number(r.qty)||0),0);
+  let best=null; members.forEach(r=>{ const q=Number(r.qty)||0; if(q>0&&(!best||q>(Number(best.qty)||0))) best=r; });   // 代表規格＝本月銷量最多（同量取前面的）
+  const rows=members.map((r,i)=>{ const pc=cupPCInit(shop, r);
+    return { code:String(r.code), label:labels[i], r, q:pc.q, share:totalQ>0?(pc.q/totalQ):0, feeRate:pc.feeRate, fixed:pc.fixed, coupon:pc.orig.coupon, costStatus:r.costStatus,
+      orig:{ cost:pc.orig.cost, price:pc.orig.price }, rep:(best===r) }; });
+  rows.sort((a,b)=>(b.q-a.q)||(a.code<b.code?-1:(a.code>b.code?1:0)));
+  const orig={ cost:{}, price:{} };
+  rows.forEach(x=>{ if(!(x.code in orig.cost)) orig.cost[x.code]=x.orig.cost; orig.price[x.code]=x.orig.price; });
+  const repCode=best?String(best.code):(rows[0]?rows[0].code:'');   // 整頁優化紀錄掛這個原廠編號（本月銷量最多；都沒銷量就第一列）
+  _cupPga={ shop, pageId:String(pageId), agg, rows, orig, cur:{ cost:Object.assign({},orig.cost), price:Object.assign({},orig.price) }, sel:new Set(), repCode };
+  cupRenderPageAnalysis();
+}
+function _cupPgaCalcRow(S, x, v){ return cupPCCalc({ cost:v.cost[x.code], price:v.price[x.code], coupon:x.coupon }, x.feeRate, x.fixed); }
+function _cupPgaChanged(S){
+  const cost=Object.keys(S.orig.cost).filter(k=>!_cupPCSame(S.cur.cost[k],S.orig.cost[k]));
+  const price=Object.keys(S.orig.price).filter(k=>!_cupPCSame(S.cur.price[k],S.orig.price[k]));
+  return { cost, price, total:cost.length+price.length };
+}
+function cupRenderPageAnalysis(){
+  const S=_cupPga, ov=document.getElementById('cup-analysis-overlay'); if(!S||!ov) return;
+  const esc=_momoEsc, money=momoMoney, A=S.agg, pct=v=>(v==null?'—':(v*100).toFixed(1)+'%');
+  const shop=S.shop, sh=esc(shop);
+  const tabBtn=(t,label)=>`<button type="button" role="tab" id="cup-pga-tab-${t}" class="cup-pga-tab${_cupPgaTab===t?' on':''}" onclick="cupPgaTab('${t}')">${label}</button>`;
+  // 分析：整頁合計（＝外層列 cupPageAgg）＋各規格一覽
+  const costed=A.costStatus==='ok';
+  const card=(l,v,cls)=>`<div class="cup-pga-kpi"><div class="cup-pga-kpi-l">${l}</div><div class="cup-pga-kpi-v${cls?' '+cls:''}">${v}</div></div>`;
+  const rateCls=v=>v==null?'':(v<0?'cup-pga-neg':(v*100>=25?'cup-pga-pos':''));
+  const kpis=card('本月銷量',(Number(A.qty)||0).toLocaleString())+card('營收',money(A.rev))
+    +card('淨利',costed?money(A.net):'缺成本',costed?'':'cup-pga-miss')+card('淨利率',costed?pct(A.netRate):'—',rateCls(A.netRate))
+    +card('成本',costed?money(A.cost):'缺成本',costed?'':'cup-pga-miss')+card('平台費用',money(A.fee));
+  const listRows=S.rows.map(x=>{ const r=x.r, bc=(r.costStatus==='barcode');
+    const rt=r.costStatus==='ok'?`<span class="${rateCls(r.netRate)}">${pct(r.netRate)}</span>`:(bc?'<span class="cup-pga-mute">—</span>':'<span class="cup-pga-miss">缺成本</span>');
+    return `<tr class="cup-pga-li" onclick="cupPgaOpenSpec('${sh}','${esc(x.code)}')" title="開這個規格的單規格視窗">
+      <td class="tl"><div class="cup-pga-spec" title="${esc(x.r.name||'')}">${esc(x.label)}</div>${x.rep?'<div class="cup-pga-rep">代表規格</div>':''}</td>
+      <td class="tl cup-pga-code">${esc(x.code)}</td><td>${(Number(r.qty)||0).toLocaleString()}</td><td>${money(r.rev)}</td><td>${rt}</td></tr>`; }).join('');
+  const analysisPane=`<div class="cup-pga-kpis">${kpis}</div>
+    ${A.missN>0?`<div class="cup-pga-note cup-pga-warn">含 ${A.missN} 個缺成本的規格：淨利、淨利率只算有成本的規格（跟外層列、上方大數字卡同一個算法）。</div>`:''}
+    <div class="cup-pga-h">各規格（點一列看單一規格）</div>
+    <div class="cup-pga-tscroll"><table class="cup-pga-tbl cup-pga-list"><thead><tr><th class="tl">規格</th><th class="tl">原廠編號</th><th>銷量</th><th>營收</th><th>淨利率</th></tr></thead><tbody>${listRows}</tbody></table></div>`;
+  // 定價與成本：逐規格試算（版型照 MO+ momoRenderPricingPane；資料與公式用酷澎自己的）
+  const pricingPane=`<div class="cup-pga-cards">
+      <div class="cup-pga-card"><div class="cup-pga-card-t">整頁淨利率（依本月銷量加權）</div><div class="cup-pga-card-row" id="cup-pga-wrate"></div><div class="cup-pga-card-sub" id="cup-pga-wsub"></div></div>
+      <div class="cup-pga-card"><div class="cup-pga-card-t">勾選的規格售價 <span id="cup-pga-selcnt" class="cup-pga-mute"></span></div>
+        <div class="cup-pga-bulk"><select id="cup-pga-bulkmode" class="cup-pga-sel" aria-label="調整方式"><option value="pct">調整 %</option><option value="abs">統一改為 $</option></select>
+          <input id="cup-pga-bulkval" class="cup-pga-in cup-pga-in-s" type="number" step="any" inputmode="decimal" aria-label="調整值" value="-10">
+          <button type="button" class="cup-pc-btn cup-pc-btn-pri" onclick="cupPgaBulkApply()">套用</button></div></div></div>
+    <div class="cup-pga-tscroll"><table class="cup-pga-tbl cup-pga-pc"><thead><tr>
+      <th class="cup-pga-ck"><input type="checkbox" id="cup-pga-selall" aria-label="全選" onchange="cupPgaSelAll(this.checked)"></th>
+      <th class="tl">規格</th><th class="tl">原廠編號</th><th>成本／件</th><th>售價（含稅）／件</th><th>銷量佔比</th><th>淨利率 現在 → 試算</th></tr></thead>
+      <tbody>${S.rows.map((x,i)=>`<tr id="cup-pga-r-${i}">
+        <td class="cup-pga-ck"><input type="checkbox" id="cup-pga-sel-${i}" aria-label="選取此規格"${S.sel.has(x.code)?' checked':''} onchange="cupPgaSel(${i},this.checked)"></td>
+        <td class="tl"><div class="cup-pga-spec" title="${esc(x.r.name||'')}">${esc(x.label)}</div>${x.rep?'<div class="cup-pga-rep">代表規格</div>':''}</td>
+        <td class="tl cup-pga-code">${esc(x.code)}</td>
+        <td><input id="cup-pga-cost-${i}" class="cup-pga-in" type="number" step="any" inputmode="decimal" aria-label="成本" placeholder="${x.costStatus==='ok'?'':'缺成本'}" value="${esc(_cupPCVal(S.cur.cost[x.code]))}" oninput="cupPgaInput('cost',${i},this.value)"><div class="cup-pga-orig" id="cup-pga-cost-n-${i}"></div></td>
+        <td><input id="cup-pga-price-${i}" class="cup-pga-in" type="number" step="any" inputmode="decimal" aria-label="售價" value="${esc(_cupPCVal(S.cur.price[x.code]))}" oninput="cupPgaInput('price',${i},this.value)"><div class="cup-pga-orig" id="cup-pga-price-n-${i}"></div></td>
+        <td class="cup-pga-share">${(x.share*100).toFixed(1)}%${x.q>0?'':'<div class="cup-pga-mute">本月沒銷量</div>'}</td>
+        <td id="cup-pga-rate-${i}" class="cup-pga-rate"></td></tr>`).join('')}</tbody></table></div>
+    <div class="cup-pga-note">成本跟著原廠編號存進共用成本表（MO+ 三家也會一起變）；售價只試算，實際要到 Wing 改。</div>
+    <div class="cup-pc-bar"><span class="cup-pc-bar-l" id="cup-pga-bar-l"></span>
+      <span class="cup-pc-bar-r"><button type="button" id="cup-pga-reset" class="cup-pc-btn" onclick="cupPgaReset()">全部還原</button><button type="button" id="cup-pga-save" class="cup-pc-btn cup-pc-btn-pri" onclick="cupPgaSave()">儲存變更</button></span></div>`;
+  const repRow=S.rows.find(x=>x.code===S.repCode);
+  const optPane=`<div class="cup-pga-note cup-pga-optnote">整頁調整會記在代表規格 <b>${esc(S.repCode)}</b>${repRow?'（'+esc(repRow.label)+'）':''}；其他規格的紀錄請點分析分頁的規格查看。</div>
+    <div class="mm-ana-sec" id="momo-optlog-sec"></div>`;
+  ov.innerHTML=`<div class="ana-modal cup-pga-modal" onclick="event.stopPropagation()">
+    <div class="cup-pga-head"><div class="cup-pga-head-l"><div class="cup-pga-title">${esc(A.name||S.pageId)}</div>
+      <div class="cup-pga-sub">酷澎編號 ${esc(S.pageId)} · ${S.rows.length} 個規格 · ${esc(cupShopDisplay(shop))} · ${esc(_cupSelMonth[shop]||'')}</div></div>
+      <button type="button" class="cup-pga-x" aria-label="關閉" onclick="cupCloseAnalysis()">✕</button></div>
+    <div role="tablist" class="cup-pga-tabs">${tabBtn('analysis','分析')}${tabBtn('pricing','定價與成本')}${tabBtn('optlog','優化紀錄')}</div>
+    <div class="cup-pga-body">
+      <div id="cup-pga-pane-analysis" class="cup-pga-pane${_cupPgaTab==='analysis'?'':' off'}">${analysisPane}</div>
+      <div id="cup-pga-pane-pricing" class="cup-pga-pane${_cupPgaTab==='pricing'?'':' off'}">${pricingPane}</div>
+      <div id="cup-pga-pane-optlog" class="cup-pga-pane${_cupPgaTab==='optlog'?'':' off'}">${optPane}</div>
+    </div></div>`;
+  if(S.repCode){ try{ momoRenderOptlogSection(shop, S.repCode); }catch(e){ console.warn('[酷澎整頁] 優化紀錄區塊畫不出來',e); } }   // 代表規格的優化紀錄（單規格視窗同一個區塊）
+  cupPgaRefresh();
+}
+function cupPgaTab(t){ _cupPgaTab=t;
+  ['analysis','pricing','optlog'].forEach(k=>{ const p=document.getElementById('cup-pga-pane-'+k); if(p) p.classList.toggle('off',k!==t);
+    const b=document.getElementById('cup-pga-tab-'+k); if(b){ b.classList.toggle('on',k===t); b.setAttribute('aria-selected',k===t?'true':'false'); } });
+}
+// 只更新結果（淨利率、加權卡、黃底、計數）；輸入框只在「不是使用者正在打的那格」時才改值。
+function cupPgaRefresh(){
+  const S=_cupPga; if(!S) return; const pct=_cupPCPct;
+  const ch=_cupPgaChanged(S), chCost=new Set(ch.cost), chPrice=new Set(ch.price), ae=document.activeElement;
+  const calc0=S.rows.map(x=>_cupPgaCalcRow(S,x,S.orig)), calc1=S.rows.map(x=>_cupPgaCalcRow(S,x,S.cur));
+  S.rows.forEach((x,i)=>{
+    [['cost',chCost],['price',chPrice]].forEach(([k,set])=>{ const el=document.getElementById('cup-pga-'+k+'-'+i), nt=document.getElementById('cup-pga-'+k+'-n-'+i), on=set.has(x.code);
+      if(el){ el.classList.toggle('cup-pga-in-chg',on); if(el!==ae) el.value=_cupPCVal(S.cur[k][x.code]); }
+      if(nt) nt.textContent=on?('原 '+(S.orig[k][x.code]==null?'—':_cupPCMoney(S.orig[k][x.code]))):''; });
+    const td=document.getElementById('cup-pga-rate-'+i); if(!td) return;
+    const a=calc0[i]?calc0[i].rate:null, b=calc1[i]?calc1[i].rate:null, moved=(chCost.has(x.code)||chPrice.has(x.code));
+    const why=b!=null?'':(!calc1[i]?'填售價才算':(calc1[i].cost==null?'填成本才算':'扣券後營收要大於 0'));
+    td.innerHTML=`<span class="cup-pga-r0">${pct(a)}</span> → <b class="${b==null?'cup-pga-mute':(b<0?'cup-pga-neg':'')}">${pct(b)}</b>`
+      +((moved&&a!=null&&b!=null&&Math.abs(b-a)>1e-9)?` <span class="${b>a?'cup-pc-up':'cup-pc-down'}">${b>a?'▲':'▼'}${Math.abs((b-a)*100).toFixed(1)}pp</span>`:'')
+      +(why?`<div class="cup-pga-mute">${why}</div>`:''); });
+  const w0=cupPgaWeighted(S.rows.map((x,i)=>({q:x.q,calc:calc0[i]}))), w1=cupPgaWeighted(S.rows.map((x,i)=>({q:x.q,calc:calc1[i]})));
+  const wr=document.getElementById('cup-pga-wrate');
+  if(wr){ const d=(w0.rate!=null&&w1.rate!=null)?(w1.rate-w0.rate):0;
+    wr.innerHTML=`<span class="cup-pga-w0">${pct(w0.rate)}</span><span class="cup-pga-arrow">→</span><span class="cup-pga-w1${w1.rate!=null&&w1.rate<0?' cup-pga-neg':''}">${pct(w1.rate)}</span>`
+      +(Math.abs(d)>1e-9?`<span class="cup-pc-delta ${d>0?'cup-pc-up':'cup-pc-down'}">${d>0?'▲':'▼'} ${Math.abs(d*100).toFixed(1)}pp</span>`:''); }
+  const ws=document.getElementById('cup-pga-wsub'); if(ws) ws.textContent=`現在 → 試算；本月有銷量且算得出淨利率的 ${w1.n} 個規格，依件數加權（沒改時＝外層列淨利率）`;
+  const sc=document.getElementById('cup-pga-selcnt'); if(sc) sc.textContent=S.sel.size?('已勾 '+S.sel.size+' 個'):'（先在下表勾選）';
+  const sa=document.getElementById('cup-pga-selall'); if(sa) sa.checked=S.rows.length>0&&S.sel.size===S.rows.length;
+  const bl=document.getElementById('cup-pga-bar-l'); if(bl) bl.textContent=ch.total?(ch.total+' 格未儲存（只是試算）'):'沒有修改';
+  const rb=document.getElementById('cup-pga-reset'); if(rb) rb.disabled=!ch.total;
+}
+function cupPgaInput(kind, i, val){
+  const S=_cupPga; if(!S) return; const x=S.rows[i]; if(!x) return;
+  const v=_momoPCNum(val), o=S.orig[kind][x.code];
+  S.cur[kind][x.code]=_cupPCSame(v,o)?o:v;   // 打回畫面上的原值＝沒改；成本以原廠編號為 key → 同原廠的列一起連動（refresh 會更新其他列的輸入框）
+  cupPgaRefresh();
+}
+function cupPgaSel(i,on){ const S=_cupPga; if(!S||!S.rows[i]) return; const c=S.rows[i].code; if(on) S.sel.add(c); else S.sel.delete(c); cupPgaRefresh(); }
+function cupPgaSelAll(on){ const S=_cupPga; if(!S) return; S.sel=on?new Set(S.rows.map(x=>x.code)):new Set();
+  S.rows.forEach((x,i)=>{ const c=document.getElementById('cup-pga-sel-'+i); if(c) c.checked=on; }); cupPgaRefresh(); }
+function cupPgaBulkApply(){
+  const S=_cupPga; if(!S) return;
+  const mode=(document.getElementById('cup-pga-bulkmode')||{}).value||'pct', val=_momoPCNum((document.getElementById('cup-pga-bulkval')||{}).value);
+  if(val==null){ if(typeof showToast==='function') showToast('請先填調整值','error'); return; }
+  if(!S.sel.size){ if(typeof showToast==='function') showToast('請先勾選要調整的規格','info'); return; }
+  let n=0; S.rows.forEach(x=>{ if(!S.sel.has(x.code)) return; const np=cupPgaBulkPrice(S.cur.price[x.code], mode, val); if(np==null) return; S.cur.price[x.code]=np; n++; });
+  if(!n && typeof showToast==='function') showToast('勾選的規格沒有可以調整的售價','info');
+  cupPgaRefresh();
+}
+function cupPgaReset(){ const S=_cupPga; if(!S) return; S.cur={ cost:Object.assign({},S.orig.cost), price:Object.assign({},S.orig.price) }; cupPgaRefresh(); }
+// ── 第 2 塊：儲存（確認框版型照 MOMO _momoPCOpenConfirm；樣式在 css cup-pga-cf-*）──
+function _cupPgaReadOnly(){ try{ return !!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()); }catch(e){ return false; } }
+function _cupPgaPlanNow(){ const S=_cupPga; if(!S) return null; return cupPgaSavePlan(S.rows, S.orig, S.cur, momoLoadCostByOrigin()||{}); }
+// 送出前檢查：成本、售價都要 > 0（空白也不行）。回錯誤字串，沒問題回 ''。
+function _cupPgaPlanBad(P){
+  for(const o of P.costs){ if(!(o.to>0)) return '「'+o.label+'」（'+o.code+'）的成本要大於 0'; }
+  for(const o of P.prices){ if(!(o.to>0)) return '「'+o.label+'」的售價要大於 0（要改回原價請按「全部還原」）'; }
+  return '';
+}
+function cupPgaSave(){
+  const S=_cupPga; if(!S) return;
+  if(_cupPgaReadOnly()){ if(typeof showToast==='function') showToast('唯讀帳號不能儲存','error'); return; }
+  const P=_cupPgaPlanNow();
+  if(!P||!P.total){ if(typeof showToast==='function') showToast('沒有要儲存的變更（成本跟成本表一樣、售價沒改）','info'); return; }
+  const bad=_cupPgaPlanBad(P); if(bad){ alert(bad); return; }
+  const esc=_momoEsc, m=x=>'$'+cupPgaNum(x);
+  const item=(kind,o,tail)=>`<div class="cup-pga-cf-item"><span class="cup-pga-cf-k">${kind}</span><span class="cup-pga-cf-v"><b>${esc(o.label)}</b>${kind==='成本'?' <span class="cup-pga-code">'+esc(o.code)+'</span>':''} <s>${m(o.from)}</s> → <b>${m(o.to)}</b></span><span class="cup-pga-cf-t">${tail}</span></div>`;
+  const items=P.costs.map(o=>item('成本',o,'存共用成本表，MO+ 三家也會一起變')).join('')+P.prices.map(o=>item('售價',o,'只寫優化紀錄，不存售價')).join('');
+  const rep=S.rows.find(x=>x.code===S.repCode);
+  App.openModal({ title:'確認儲存 '+P.total+' 項變更', width:'720px', hideFooter:true,
+    bodyHtml:`<div class="cup-pga-cf">
+      <div class="cup-pga-cf-sub">酷澎編號 ${esc(S.pageId)} · ${esc(cupShopDisplay(S.shop))} · ${esc(_cupSelMonth[S.shop]||'')}</div>
+      <div class="cup-pga-cf-h">會改到的資料</div>
+      <div class="cup-pga-cf-list">${items}</div>
+      <label for="cup-pga-cf-reason" class="cup-pga-cf-h">異動原因（必填）</label>
+      <input id="cup-pga-cf-reason" class="cup-pga-cf-in" type="text" placeholder="例：雙12 降價；供應商漲價">
+      <div class="cup-pga-cf-hint">會自動新增 1 筆優化紀錄（類型「調價」），掛在代表規格 ${esc(S.repCode)}${rep?'（'+esc(rep.label)+'）':''}，工作日誌算 1 次。成本異動也會記在成本表的異動紀錄裡。</div>
+      <div class="cup-pga-cf-hint">儲存後會標成待同步，按酷澎的「☁ 同步雲端」才上雲。</div>
+      <div class="cup-pga-cf-btns"><button type="button" class="btn-ghost" onclick="App.closeModal()">返回修改</button>
+        <button type="button" class="btn-primary cup-pga-cf-ok" onclick="cupPgaSaveConfirm()">確認儲存</button></div></div>` });
+}
+function cupPgaSaveConfirm(){
+  const S=_cupPga; if(!S) return;
+  if(_cupPgaReadOnly()){ if(typeof showToast==='function') showToast('唯讀帳號不能儲存','error'); return; }
+  const reason=String((document.getElementById('cup-pga-cf-reason')||{}).value||'').trim();
+  if(!reason){ alert('請填異動原因'); try{ document.getElementById('cup-pga-cf-reason').focus(); }catch(e){} return; }
+  const P=_cupPgaPlanNow(); if(!P||!P.total){ App.closeModal(); if(typeof showToast==='function') showToast('沒有要儲存的變更','info'); return; }
+  const bad=_cupPgaPlanBad(P); if(bad){ alert(bad); return; }
+  const shop=S.shop, pid=S.pageId, sku=S.repCode;
+  if(!sku){ alert('找不到代表規格，沒有儲存'); return; }
+  // ① 成本：每個原廠編號一次（cupAnaCostSave 同一條；skipOptlog＝不要每個原廠各記一筆「補成本」，整頁只記下面那 1 筆）
+  const by=(typeof momoCurrentUserName==='function'?momoCurrentUserName():'')||'';
+  let costFailed=0;
+  P.costs.forEach(o=>{ let r=null;
+    try{ r=momoSetCostByOrigin(o.code, o.to, { manual:true, shop, by, note:'酷澎整頁調整：'+reason, src:'酷澎', skipOptlog:true }); }catch(e){ console.warn('[酷澎整頁] 成本存檔失敗',o.code,e); }
+    if(!r||!r.ok) costFailed++; });
+  // ② 優化紀錄：1 筆，掛代表規格（cupZeroOptlogAdd 同一條：momoLoadOptlog＋momoSaveOptlog，帶 page＝酷澎編號）
+  let optOk=false;
+  try{
+    const map=momoLoadOptlog(shop); map[sku]=Array.isArray(map[sku])?map[sku]:[];
+    const np=momoNowParts(), user=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+    map[sku].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:np.date, time:np.time, shop, sku, by:user, type:'調價', note:cupPgaNote(P, reason), page:pid });
+    momoSaveOptlog(shop, map); optOk=true;
+  }catch(e){ console.warn('[酷澎整頁] 優化紀錄存檔失敗',e); }
+  try{ momoUpdateDailyProgress({silent:true}); }catch(e){ console.warn('[酷澎整頁] 工作日誌重算失敗',e); }
+  try{ cupRefreshSyncBtn(shop); }catch(e){}
+  App.closeModal();
+  // ③ 用新成本重算：酷澎表格（上方大數字、外層列）→ 整頁視窗重開（黃底清掉、預設值＝新成本；停在原分頁）
+  try{ cupRenderProfitBody(shop); }catch(e){ console.warn('[酷澎整頁] 表格重算失敗',e); }
+  cupOpenPageAnalysis(shop, pid);
+  const msg=(costFailed||!optOk)?('已儲存，但'+(costFailed?' '+costFailed+' 個成本':'')+(costFailed&&!optOk?'、':'')+(!optOk?'優化紀錄':'')+'沒有寫成功（看 Console）'):'已儲存（記得按酷澎的「☁ 同步雲端」才會上雲）';
+  if(typeof showToast==='function') showToast(msg, (costFailed||!optOk)?'error':'success');
+}
+function cupPgaOpenSpec(shop, code){ cupCloseAnalysis(); cupOpenAnalysis(shop, code); }
+// Console 只讀：目前整頁視窗的試算狀態（驗收用；不以 __cloud 開頭、不寫任何東西）
+window.__cupPgaState=function(){ const S=_cupPga; if(!S) return null;
+  const c1=S.rows.map(x=>_cupPgaCalcRow(S,x,S.cur)), c0=S.rows.map(x=>_cupPgaCalcRow(S,x,S.orig));
+  return { shop:S.shop, pageId:S.pageId, n:S.rows.length, aggNetRate:S.agg.netRate, weightedNow:cupPgaWeighted(S.rows.map((x,i)=>({q:x.q,calc:c0[i]}))).rate,
+    weightedTry:cupPgaWeighted(S.rows.map((x,i)=>({q:x.q,calc:c1[i]}))).rate, changed:_cupPgaChanged(S), sel:[...S.sel],
+    rows:S.rows.map((x,i)=>({ code:x.code, label:x.label, q:x.q, share:x.share, rep:x.rep, cost:S.cur.cost[x.code], price:S.cur.price[x.code], rateNow:c0[i]&&c0[i].rate, rateTry:c1[i]&&c1[i].rate, rowNetRate:x.r.netRate })) }; };
 
 /* ═══════════════ 酷澎重建 PR-1：純解析層（不接 UI／雲端，比照 MOMO 解析器風格）═══════════════
    規格已定稿（勿重設計）：營收＝選項價格×數量；費用照官方規則(5.5%+2%+免運7%+$2/訂單)；期別依訂購日期月粒度；
@@ -35997,7 +36267,8 @@ Object.assign(window, {
   renderCoupangTableBody,cupSetSub,cupSelectMonth,cupOpenMissingCostPanel,cupMissCostSave,cupExportExcel,cupRenderShop,
   toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
-  cupSetSort,cupOnSearch,cupSetPageMode,cupTogglePage,cupPageNoteSync,onCupPageNoteChange,cupOpenAnalysis,cupCloseAnalysis,cupAnaTab,cupAnaCostSave,cupPCInput,cupPCReset,cupPCToOptlog,
+  cupSetSort,cupOnSearch,cupSetPageMode,cupTogglePage,cupPageNoteSync,onCupPageNoteChange,cupOpenAnalysis,cupCloseAnalysis,
+  cupOpenPageAnalysis,cupPgaTab,cupPgaInput,cupPgaSel,cupPgaSelAll,cupPgaBulkApply,cupPgaReset,cupPgaSave,cupPgaSaveConfirm,cupPgaOpenSpec,cupAnaTab,cupAnaCostSave,cupPCInput,cupPCReset,cupPCToOptlog,
   setShopViewMode,
   momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoOpenColPicker,momoColToggle,momoColDragStart,momoColDragOver,momoColDragEnter,momoColDragLeave,momoColDrop,momoColDragEnd,momoColResetOrder,momoColShowAll,
